@@ -39,6 +39,32 @@ zotero-headless/
 └── README.md
 ```
 
+## 配置
+
+### 1. 复制环境变量模板
+
+```bash
+cp .env.example .env
+```
+
+### 2. 编辑 .env 文件，填入你的 Zotero API Key
+
+```bash
+# 从 https://www.zotero.org/settings/keys 获取 API Key
+ZOTERO_API_KEY=你的_api_key
+
+# 你的 Zotero 用户 ID（通常是数字）
+ZOTERO_USER_ID=你的_user_id
+```
+
+**⚠️ 重要：.env 文件已经被 .gitignore 保护，不会被提交到 git！**
+
+### 3. 安装依赖
+
+```bash
+pnpm install
+```
+
 ## 开始开发
 
 1. **首先阅读设计文档** - 了解项目的架构和技术决策
