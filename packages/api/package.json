@@ -17,6 +17,7 @@
     "lint": "echo 'No lint configured'"
   },
   "dependencies": {
+    "@zotero-headless/core": "workspace:*",
     "@zotero-headless/types": "workspace:*"
   },
   "devDependencies": {

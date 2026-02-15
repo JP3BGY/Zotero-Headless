@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@zotero-headless/api": "workspace:*",
+    "@zotero-headless/core": "workspace:*",
     "@zotero-headless/database": "workspace:*",
     "@zotero-headless/types": "workspace:*"
   },

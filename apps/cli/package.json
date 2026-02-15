@@ -13,9 +13,11 @@
   },
   "dependencies": {
     "@zotero-headless/api": "workspace:*",
+    "@zotero-headless/core": "workspace:*",
     "@zotero-headless/database": "workspace:*",
     "@zotero-headless/sync-engine": "workspace:*",
-    "@zotero-headless/types": "workspace:*"
+    "@zotero-headless/types": "workspace:*",
+    "drizzle-orm": "^0.29.0"
   },
   "devDependencies": {
     "typescript": "^5.3.0"

@@ -17,12 +17,14 @@
     "lint": "echo 'No lint configured'"
   },
   "dependencies": {
+    "@zotero-headless/core": "workspace:*",
     "@zotero-headless/types": "workspace:*",
     "better-sqlite3": "^9.4.0",
     "drizzle-orm": "^0.29.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
+    "drizzle-kit": "^0.20.0",
     "typescript": "^5.3.0"
   }
 }

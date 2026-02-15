@@ -1,12 +1,5 @@
 // Sync Engine
-// See Zotero-Headless-Complete-Design.md for full design
+// See Zotero-Headless-Complete-Design.md Section 5
 
-export class SyncManager {
-  constructor() {
-    throw new Error('Not implemented yet. See design document.');
-  }
-  
-  async sync(options?: { libraryId?: number; fullSync?: boolean }) {
-    throw new Error('Not implemented yet. See design document.');
-  }
-}
+export { SyncManager, syncManager } from './manager.js';
+export type { SyncOptions, SyncResult } from './manager.js';
