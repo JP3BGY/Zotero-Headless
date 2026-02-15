@@ -60,16 +60,16 @@ describe('ConflictResolver', () => {
     });
     
     it('should handle multiple fields', () => {
-      const base = { title: 'Original', author: 'John', year: '2023' };
-      const local = { title: 'Local', author: 'John', year: '2024' };
-      const remote = { title: 'Remote', author: 'Jane', year: '2024' };
+      const base = { title: 'Original', author: 'Original Author', year: '2023' };
+      const local = { title: 'Local', author: 'Local Author', year: '2024' };
+      const remote = { title: 'Remote', author: 'Remote Author', year: '2024' };
       
       const result = resolver.resolveItemConflict(base, local, remote);
       
       expect(result.type).toBe('conflict');
-      // title: both changed -> conflict
-      // author: local changed, remote changed -> conflict
-      // year: both changed same -> resolved
+      // title: both changed differently -> conflict
+      // author: both changed differently -> conflict  
+      // year: both changed to same value -> resolved
       expect(result.conflicts.length).toBe(2);
     });
     
