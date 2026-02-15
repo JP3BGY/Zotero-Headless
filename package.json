@@ -1,0 +1,20 @@
+{
+  "name": "zotero-headless",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Zotero Web API 同步客户端 - 无需桌面客户端即可实现文献库同步",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.2.0",
+    "turbo": "^2.0.0",
+    "typescript": "^5.3.0"
+  },
+  "packageManager": "pnpm@8.12.0"
+}
