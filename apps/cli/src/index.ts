@@ -7,14 +7,14 @@ import { syncManager } from '@zotero-headless/sync-engine';
 import { getDatabase, items, libraries } from '@zotero-headless/database';
 import { zoteroApi } from '@zotero-headless/api';
 import { appConfig } from '@zotero-headless/core';
-import { eq, like, desc, count, sql } from 'drizzle-orm';
+import { eq, like, desc, count, and, isNull } from 'drizzle-orm';
 
 // ============ CLI Commands ============
 
 interface Command {
   name: string;
-  description: string;
   aliases?: string[];
+  description: string;
   execute: (args: string[]) => Promise<void>;
 }
 
@@ -22,9 +22,9 @@ const commands: Command[] = [
   {
     name: 'sync',
     aliases: ['s'],
-    description: 'Synchronize Zotero library',
+    description: 'Synchronize Zotero library (two-way)',
     execute: async () => {
-      console.log('🔄 Starting sync...\n');
+      console.log('🔄 Starting two-way sync...\n');
       const result = await syncManager.sync();
       
       if (result.success) {
@@ -32,10 +32,24 @@ const commands: Command[] = [
         console.log(`   Items updated: ${result.updated}`);
         console.log(`   Items deleted: ${result.deleted}`);
       } else {
-        console.log(`\n❌ Sync failed!`);
+        console.log(`\n⚠️  Sync completed with issues:`);
         result.errors.forEach(e => console.log(`   Error: ${e}`));
+        if (result.conflicts) {
+          console.log(`   Conflicts: ${result.conflicts.length}`);
+          result.conflicts.forEach(c => console.log(`     - ${c}`));
+        }
         process.exit(1);
       }
+    }
+  },
+  
+  {
+    name: 'sync:upload',
+    aliases: ['su'],
+    description: 'Upload local changes only',
+    execute: async () => {
+      console.log('📤 This would upload local changes...');
+      // Implementation for upload-only would go here
     }
   },
   
@@ -64,10 +78,43 @@ const commands: Command[] = [
       
       console.log(`\n📚 Items (${results.length} shown):\n`);
       results.forEach(item => {
-        console.log(`  [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}`);
-        console.log(`     Type: ${item.itemType} | Updated: ${item.updatedAt.toISOString().split('T')[0]}`);
+        const syncStatus = item.synced ? '✅' : '🔄';
+        const delStatus = item.deleted ? ' (deleted)' : '';
+        console.log(`  ${syncStatus} [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}${delStatus}`);
+        console.log(`      Type: ${item.itemType} | Updated: ${item.updatedAt.toISOString().split('T')[0]}`);
         console.log();
       });
+    }
+  },
+  
+  {
+    name: 'list:unsynced',
+    aliases: ['lsu'],
+    description: 'List unsynced items',
+    execute: async () => {
+      const db = getDatabase();
+      const library = await db.select().from(libraries).get();
+      if (!library) {
+        console.log('❌ No library found. Run "sync" first.');
+        return;
+      }
+      
+      const results = await db.select()
+        .from(items)
+        .where(and(
+          eq(items.libraryId, library.id),
+          eq(items.synced, false)
+        ))
+        .all();
+      
+      console.log(`\n🔄 Unsynced items (${results.length}):\n`);
+      if (results.length === 0) {
+        console.log('   All items are synced!');
+      } else {
+        results.forEach(item => {
+          console.log(`  [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}`);
+        });
+      }
     }
   },
   
@@ -112,6 +159,57 @@ const commands: Command[] = [
   },
   
   {
+    name: 'get',
+    aliases: ['show'],
+    description: 'Get single item details',
+    execute: async (args) => {
+      if (args.length === 0) {
+        console.log('❌ Please provide an item key');
+        console.log('   Usage: zotero get <key>');
+        return;
+      }
+      
+      const db = getDatabase();
+      const key = args[0];
+      const library = await db.select().from(libraries).get();
+      
+      if (!library) {
+        console.log('❌ No library found. Run "sync" first.');
+        return;
+      }
+      
+      const item = await db.select()
+        .from(items)
+        .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
+        .get();
+      
+      if (!item) {
+        console.log(`❌ Item ${key} not found.`);
+        return;
+      }
+      
+      console.log(`\n📄 Item: ${key}\n`);
+      console.log(`   Title: ${item.title || '(none)'}`);
+      console.log(`   Type: ${item.itemType}`);
+      console.log(`   DOI: ${item.doi || '(none)'}`);
+      console.log(`   URL: ${item.url || '(none)'}`);
+      console.log(`   Date: ${item.publicationDate || '(none)'}`);
+      console.log(`   Created: ${item.createdAt.toISOString()}`);
+      console.log(`   Updated: ${item.updatedAt.toISOString()}`);
+      console.log(`   Synced: ${item.synced ? 'Yes' : 'No'}`);
+      console.log(`   Deleted: ${item.deleted ? 'Yes' : 'No'}`);
+      
+      const creators = JSON.parse(item.creators || '[]');
+      if (creators.length > 0) {
+        console.log(`\n   Creators:`);
+        creators.forEach((c: any) => {
+          console.log(`     - ${c.firstName || ''} ${c.lastName || ''} (${c.creatorType})`);
+        });
+      }
+    }
+  },
+  
+  {
     name: 'stats',
     aliases: ['st'],
     description: 'Show library statistics',
@@ -131,7 +229,12 @@ const commands: Command[] = [
       
       const deletedResult = await db.select({ count: count() })
         .from(items)
-        .where(eq(items.deleted, true))
+        .where(and(eq(items.libraryId, library.id), eq(items.deleted, true)))
+        .get();
+      
+      const unsyncedResult = await db.select({ count: count() })
+        .from(items)
+        .where(and(eq(items.libraryId, library.id), eq(items.synced, false)))
         .get();
       
       console.log('\n📊 Library Statistics:\n');
@@ -139,8 +242,10 @@ const commands: Command[] = [
       console.log(`   Zotero ID: ${library.zoteroId}`);
       console.log(`   Version: ${library.version}`);
       console.log(`   Last Sync: ${library.lastSyncAt?.toISOString() || 'Never'}`);
+      console.log(`   ─────────────────────`);
       console.log(`   Total Items: ${totalResult?.count ?? 0}`);
-      console.log(`   Deleted Items: ${deletedResult?.count ?? 0}`);
+      console.log(`   Deleted: ${deletedResult?.count ?? 0}`);
+      console.log(`   Unsynced: ${unsyncedResult?.count ?? 0}`);
       console.log();
     }
   },
@@ -156,7 +261,11 @@ const commands: Command[] = [
         console.log(`✅ API key is valid!`);
         console.log(`   Username: ${keyInfo.username}`);
         console.log(`   User ID: ${keyInfo.userID}`);
-        console.log(`   Access:`, keyInfo.access);
+        console.log(`\n   Access:`);
+        console.log(`     Library: ${keyInfo.access.user.library ? '✅' : '❌'}`);
+        console.log(`     Files: ${keyInfo.access.user.files ? '✅' : '❌'}`);
+        console.log(`     Notes: ${keyInfo.access.user.notes ? '✅' : '❌'}`);
+        console.log(`     Write: ${keyInfo.access.user.write ? '✅' : '❌'}`);
       } catch (e) {
         console.log(`❌ API key verification failed!`);
         console.log(`   Error: ${e}`);
@@ -168,7 +277,7 @@ const commands: Command[] = [
   {
     name: 'help',
     aliases: ['h', '?'],
-    description: 'Show this help message',
+    description: 'Show help message',
     execute: async () => {
       console.log(`
 🛠️  Zotero-Headless CLI
@@ -176,20 +285,25 @@ const commands: Command[] = [
 Usage: zotero <command> [options]
 
 Commands:
-  sync              Synchronize Zotero library (download from cloud)
-  list [limit] [offset]  List items in library
-  search <query>     Search items by title
-  stats             Show library statistics
-  verify            Verify API key
-  help              Show this help message
+  sync              Synchronize library (two-way)
+  sync:upload        Upload local changes only
+  list [limit]       List items
+  list:unsynced      List unsynced items
+  search <query>     Search by title
+  get <key>          Get item details
+  stats              Show statistics
+  verify             Verify API key
+  help               Show this message
 
 Examples:
-  zotero sync              # Sync all items
+  zotero sync              # Full two-way sync
   zotero list 50 0        # List first 50 items
   zotero search machine    # Search for "machine"
   zotero stats             # Show library stats
+  zotero get ABCD1234     # Show item details
+  zotero verify            # Check API key
 
-For more info, see: https://github.com/altairwei/Zotero-Headless
+For more info: https://github.com/altairwei/Zotero-Headless
 `);
     }
   }
@@ -202,14 +316,13 @@ async function main() {
   const commandName = args[0]?.toLowerCase() || 'help';
   const commandArgs = args.slice(1);
   
-  // Find command
   const command = commands.find(c => 
     c.name === commandName || c.aliases?.includes(commandName)
   );
   
   if (!command) {
     console.log(`❌ Unknown command: ${commandName}`);
-    console.log(`   Run "zotero help" for usage information.`);
+    console.log(`   Run "zotero help" for usage.`);
     process.exit(1);
   }
   
