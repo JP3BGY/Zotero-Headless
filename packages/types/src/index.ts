@@ -119,6 +119,7 @@ export interface SyncResult {
   updated: number;
   deleted: number;
   errors: string[];
+  conflicts?: string[];
 }
 
 // ============ Filter Types ============
