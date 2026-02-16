@@ -1119,10 +1119,10 @@ import { Repository } from '../database';  // 内部依赖
 - [x] `get <key>` 命令 - 查看详情
 - [x] `stats` 命令 - 统计信息 (新增)
 - [x] `verify` 命令 - API key 验证 (新增)
-- [ ] `add` 命令 - 添加文献 (待实现)
-- [ ] `update` 命令 - 更新文献 (待实现)
-- [ ] `delete` 命令 - 删除文献 (待实现)
-- [ ] `export` 命令 - 导出功能 (部分实现)
+- [x] `add` 命令 - 添加文献 (新增)
+- [x] `update` 命令 - 更新文献 (新增)
+- [x] `delete` 命令 - 删除文献 (新增)
+- [x] `export` 命令 - 导出功能
 
 **改进**:
 - [x] 多路径 `.env` 配置加载 (~/.config/zotero-headless/.env)

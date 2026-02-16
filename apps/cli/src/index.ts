@@ -283,6 +283,224 @@ const commands: Command[] = [
   },
   
   {
+    name: 'add',
+    aliases: ['a'],
+    description: 'Add a new item to library',
+    execute: async (args) => {
+      console.log('📝 Adding new item to library...\n');
+      
+      // Parse arguments: zotero add <type> <title> [authors...]
+      const itemType = args[0] || 'journalArticle';
+      const title = args[1];
+      
+      if (!title) {
+        console.log('❌ Usage: zotero add <type> <title> [authors...]');
+        console.log('   Example: zotero add journalArticle "My Article" "John Doe"');
+        console.log('\n   Supported types:');
+        console.log('   journalArticle, book, bookSection, conferencePaper, thesis, report, webpage, document');
+        process.exit(1);
+      }
+      
+      try {
+        // Get library info
+        const library = await getDatabase().select().from(libraries).get();
+        if (!library) {
+          console.log('❌ No library found. Run "sync" first.');
+          process.exit(1);
+        }
+        
+        // Create item data
+        const itemData = {
+          itemType,
+          title,
+          creators: args.slice(2).map((author, index) => {
+            const parts = author.split(' ');
+            const lastName = parts.pop() || '';
+            const firstName = parts.join(' ') || '';
+            return { firstName, lastName, creatorType: index === 0 ? 'author' : 'author' };
+          })
+        };
+        
+        // Call Zotero API to create item
+        console.log(`   Creating ${itemType}: "${title}"`);
+        const result = await zoteroApi.createItems(String(library.zoteroId), [itemData]);
+        
+        if (result.successful && result.successful['0']) {
+          const newKey = result.successful['0'];
+          console.log(`✅ Item created successfully!`);
+          console.log(`   Key: ${newKey}`);
+          
+          // Update local version to trigger re-sync
+          await getDatabase().update(libraries)
+            .set({ version: library.version - 1 })
+            .where(eq(libraries.id, library.id))
+            .run();
+          
+          console.log(`\n💡 Run "zotero sync" to download the new item.`);
+        } else if (result.failed) {
+          console.log(`❌ Failed to create item:`);
+          Object.values(result.failed).forEach((err: any) => {
+            console.log(`   ${err.code}: ${err.message}`);
+          });
+          process.exit(1);
+        }
+      } catch (error) {
+        console.log(`❌ Failed to add item: ${error}`);
+        process.exit(1);
+      }
+    }
+  },
+  
+  {
+    name: 'update',
+    aliases: ['u'],
+    description: 'Update an existing item',
+    execute: async (args) => {
+      console.log('📝 Updating item...\n');
+      
+      const key = args[0];
+      const field = args[1];
+      const value = args.slice(2).join(' ');
+      
+      if (!key || !field || !value) {
+        console.log('❌ Usage: zotero update <key> <field> <value>');
+        console.log('   Example: zotero update ABCD123 title "New Title"');
+        console.log('\n   Available fields:');
+        console.log('   title, date, abstract, url, doi');
+        process.exit(1);
+      }
+      
+      try {
+        const db = getDatabase();
+        const library = await db.select().from(libraries).get();
+        
+        if (!library) {
+          console.log('❌ No library found. Run "sync" first.');
+          process.exit(1);
+        }
+        
+        // Get current item
+        const item = await db.select()
+          .from(items)
+          .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
+          .get();
+        
+        if (!item) {
+          console.log(`❌ Item ${key} not found.`);
+          process.exit(1);
+        }
+        
+        // Parse the raw JSON and update the field
+        const rawData = JSON.parse(item.rawJson || '{}');
+        const data = rawData.data || rawData;
+        
+        // Map CLI field names to Zotero API field names
+        const fieldMap: Record<string, string> = {
+          'title': 'title',
+          'date': 'date',
+          'abstract': 'abstractNote',
+          'url': 'url',
+          'doi': 'DOI'
+        };
+        
+        const apiField = fieldMap[field.toLowerCase()] || field;
+        data[apiField] = value;
+        
+        // Update via API
+        console.log(`   Updating ${key}: ${field} = "${value}"`);
+        await zoteroApi.updateItem(String(library.zoteroId), key, data, item.version);
+        
+        console.log(`✅ Item updated successfully!`);
+        
+        // Mark as unsynced
+        await db.update(items)
+          .set({ synced: false })
+          .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
+          .run();
+        
+        console.log(`\n💡 Run "zotero sync" to upload changes.`);
+      } catch (error) {
+        console.log(`❌ Failed to update item: ${error}`);
+        process.exit(1);
+      }
+    }
+  },
+  
+  {
+    name: 'delete',
+    aliases: ['d', 'del'],
+    description: 'Delete (trash) an item',
+    execute: async (args) => {
+      console.log('🗑️  Deleting item...\n');
+      
+      const key = args[0];
+      const permanent = args.includes('--permanent') || args.includes('-p');
+      
+      if (!key) {
+        console.log('❌ Usage: zotero delete <key> [--permanent]');
+        console.log('   Example: zotero delete ABCD123');
+        console.log('   Example: zotero delete ABCD123 --permanent (permanent delete)');
+        process.exit(1);
+      }
+      
+      try {
+        const db = getDatabase();
+        const library = await db.select().from(libraries).get();
+        
+        if (!library) {
+          console.log('❌ No library found. Run "sync" first.');
+          process.exit(1);
+        }
+        
+        // Get current item
+        const item = await db.select()
+          .from(items)
+          .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
+          .get();
+        
+        if (!item) {
+          console.log(`❌ Item ${key} not found.`);
+          process.exit(1);
+        }
+        
+        if (permanent) {
+          // Permanent delete via API
+          console.log(`   Permanently deleting ${key}...`);
+          await zoteroApi.deleteItem(String(library.zoteroId), key, item.version);
+          console.log(`✅ Item permanently deleted!`);
+          
+          // Remove from local DB
+          await db.delete(items)
+            .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
+            .run();
+        } else {
+          // Soft delete (move to trash)
+          console.log(`   Moving ${key} to trash...`);
+          
+          // Get current data and set deleted flag
+          const rawData = JSON.parse(item.rawJson || '{}');
+          const data = rawData.data || rawData;
+          data.deleted = true;
+          
+          await zoteroApi.updateItem(String(library.zoteroId), key, data, item.version);
+          console.log(`✅ Item moved to trash!`);
+          
+          // Update local DB
+          await db.update(items)
+            .set({ deleted: true, synced: false, updatedAt: new Date() })
+            .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
+            .run();
+        }
+        
+        console.log(`\n💡 Run "zotero sync" to sync deletion.`);
+      } catch (error) {
+        console.log(`❌ Failed to delete item: ${error}`);
+        process.exit(1);
+      }
+    }
+  },
+  
+  {
     name: 'export',
     aliases: ['e'],
     description: 'Export items to various formats',
@@ -344,7 +562,10 @@ Commands:
   get <key>          Get item details
   stats              Show statistics
   verify             Verify API key
-  export [format]    Export items (bibtex, ris, csv, json)
+  add <type> <title> [authors...]  Add new item
+  update <key> <field> <value>      Update item
+  delete <key> [--permanent]         Delete (trash) item
+  export [format] [file] Export items (bibtex, ris, csv, json)
   help               Show this message
 
 Examples:
@@ -354,6 +575,10 @@ Examples:
   zotero stats             # Show library stats
   zotero get ABCD1234     # Show item details
   zotero verify            # Check API key
+  zotero add journalArticle "My Article" "John Doe"  # Add new article
+  zotero update ABCD1234 title "New Title"  # Update item title
+  zotero delete ABCD1234   # Move item to trash
+  zotero delete ABCD1234 --permanent  # Permanently delete
   zotero export bibtex     # Export as BibTeX
   zotero export ris refs.ris # Export RIS to file
 
