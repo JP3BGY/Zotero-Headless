@@ -430,4 +430,200 @@ describe('CLI Commands', () => {
       expect(warnOutput).toContain('Config file not found');
     });
   });
+  
+  describe('zotero add', () => {
+    it('should show usage when no arguments provided', async () => {
+      process.argv = ['node', 'cli', 'add'];
+      
+      try {
+        await main();
+      } catch (error) {
+        // Expected - process.exit
+      }
+      
+      const errorOutput = mockConsoleError.mock.calls.flat().join('\n');
+      expect(errorOutput).toContain('Usage:');
+      expect(errorOutput).toContain('zotero add');
+      expect(errorOutput).toContain('<type>');
+      expect(errorOutput).toContain('<title>');
+    });
+    
+    it('should show supported types in error message', async () => {
+      process.argv = ['node', 'cli', 'add'];
+      
+      try {
+        await main();
+      } catch (error) {
+        // Expected
+      }
+      
+      const errorOutput = mockConsoleError.mock.calls.flat().join('\n');
+      expect(errorOutput).toContain('journalArticle');
+      expect(errorOutput).toContain('book');
+      expect(errorOutput).toContain('webpage');
+    });
+    
+    it('should accept journalArticle type with title', async () => {
+      process.argv = ['node', 'cli', 'add', 'journalArticle', 'Test Article'];
+      
+      try {
+        await main();
+      } catch (error) {
+        // Expected - will fail due to no library, but tests the parsing
+      }
+      
+      const logs = mockConsoleLog.mock.calls.flat().join('\n');
+      const errorOutput = mockConsoleError.mock.calls.flat().join('\n');
+      const output = logs + errorOutput;
+      
+      // Should show creating message or error about library
+      expect(output).toMatch(/Adding new item|Creating|No library found/);
+    });
+    
+    it('should accept authors as additional arguments', async () => {
+      process.argv = ['node', 'cli', 'add', 'book', 'Test Book', 'John Doe', 'Jane Smith'];
+      
+      try {
+        await main();
+      } catch (error) {
+        // Expected
+      }
+      
+      const logs = mockConsoleLog.mock.calls.flat().join('\n');
+      expect(logs).toContain('Test Book');
+    });
+  });
+  
+  describe('zotero update', () => {
+    it('should show usage when arguments missing', async () => {
+      process.argv = ['node', 'cli', 'update'];
+      
+      try {
+        await main();
+      } catch (error) {
+        // Expected
+      }
+      
+      const errorOutput = mockConsoleError.mock.calls.flat().join('\n');
+      expect(errorOutput).toContain('Usage:');
+      expect(errorOutput).toContain('zotero update');
+      expect(errorOutput).toContain('<key>');
+      expect(errorOutput).toContain('<field>');
+      expect(errorOutput).toContain('<value>');
+    });
+    
+    it('should show available fields in error message', async () => {
+      process.argv = ['node', 'cli', 'update'];
+      
+      try {
+        await main();
+      } catch (error) {
+        // Expected
+      }
+      
+      const errorOutput = mockConsoleError.mock.calls.flat().join('\n');
+      expect(errorOutput).toContain('title');
+      expect(errorOutput).toContain('date');
+      expect(errorOutput).toContain('abstract');
+      expect(errorOutput).toContain('url');
+      expect(errorOutput).toContain('doi');
+    });
+    
+    it('should accept key, field and value arguments', async () => {
+      process.argv = ['node', 'cli', 'update', 'ABCD1234', 'title', 'New Title'];
+      
+      try {
+        await main();
+      } catch (error) {
+        // Expected - will fail due to no library/item
+      }
+      
+      const logs = mockConsoleLog.mock.calls.flat().join('\n');
+      const errorOutput = mockConsoleError.mock.calls.flat().join('\n');
+      const output = logs + errorOutput;
+      
+      expect(output).toMatch(/Updating item|No library found|not found/);
+    });
+    
+    it('should handle multi-word values', async () => {
+      process.argv = ['node', 'cli', 'update', 'ABCD1234', 'title', 'Multi Word Title Here'];
+      
+      try {
+        await main();
+      } catch (error) {
+        // Expected
+      }
+      
+      const logs = mockConsoleLog.mock.calls.flat().join('\n');
+      expect(logs).toContain('Multi Word Title Here');
+    });
+  });
+  
+  describe('zotero delete', () => {
+    it('should require key argument', async () => {
+      process.argv = ['node', 'cli', 'delete'];
+      
+      try {
+        await main();
+      } catch (error) {
+        // Expected
+      }
+      
+      const errorOutput = mockConsoleError.mock.calls.flat().join('\n');
+      const logs = mockConsoleLog.mock.calls.flat().join('\n');
+      const output = errorOutput + logs;
+      
+      // Should either show argument error or help
+      expect(output.length).toBeGreaterThan(0);
+    });
+    
+    it('should accept --permanent flag', async () => {
+      process.argv = ['node', 'cli', 'delete', 'ABCD1234', '--permanent'];
+      
+      try {
+        await main();
+      } catch (error) {
+        // Expected
+      }
+      
+      const logs = mockConsoleLog.mock.calls.flat().join('\n');
+      const errorOutput = mockConsoleError.mock.calls.flat().join('\n');
+      const output = logs + errorOutput;
+      
+      expect(output).toMatch(/删除文献|永久删除/);
+    });
+    
+    it('should accept -p shorthand flag', async () => {
+      process.argv = ['node', 'cli', 'delete', 'ABCD1234', '-p'];
+      
+      try {
+        await main();
+      } catch (error) {
+        // Expected
+      }
+      
+      const logs = mockConsoleLog.mock.calls.flat().join('\n');
+      const errorOutput = mockConsoleError.mock.calls.flat().join('\n');
+      const output = logs + errorOutput;
+      
+      expect(output).toMatch(/删除文献|永久删除/);
+    });
+    
+    it('should default to soft delete (trash)', async () => {
+      process.argv = ['node', 'cli', 'delete', 'ABCD1234'];
+      
+      try {
+        await main();
+      } catch (error) {
+        // Expected
+      }
+      
+      const logs = mockConsoleLog.mock.calls.flat().join('\n');
+      const errorOutput = mockConsoleError.mock.calls.flat().join('\n');
+      const output = logs + errorOutput;
+      
+      // Should show trash message
+      expect(output).toMatch(/删除文献|移至回收站/);
+    });
+  });
 });

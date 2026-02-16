@@ -9,6 +9,9 @@ import { configureList, performList } from './commands/list.js';
 import { configureSearch, performSearch } from './commands/search.js';
 import { configureStats, performStats } from './commands/stats.js';
 import { configureGet, performGet } from './commands/get.js';
+import { configureAdd, performAdd } from './commands/add.js';
+import { configureUpdate, performUpdate } from './commands/update.js';
+import { configureDelete, performDelete } from './commands/delete.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -55,6 +58,9 @@ export async function main() {
   configureSearch(program);
   configureStats(program);
   configureGet(program);
+  configureAdd(program);
+  configureUpdate(program);
+  configureDelete(program);
   
   // Help command
   program.command('help')
@@ -66,7 +72,7 @@ export async function main() {
   // Default command with error handling
   program.on('command:*', (operands) => {
     console.error(`错误：未知命令 '${operands[0]}'`);
-    console.error('可用命令：sync, list, search, stats, get, help');
+    console.error('可用命令：sync, list, search, stats, get, add, update, delete, help');
     process.exit(1);
   });
   
@@ -84,3 +90,6 @@ export { configureList, performList };
 export { configureSearch, performSearch };
 export { configureStats, performStats };
 export { configureGet, performGet };
+export { configureAdd, performAdd };
+export { configureUpdate, performUpdate };
+export { configureDelete, performDelete };
