@@ -149,6 +149,25 @@ zotero search machine learning
 zotero stats
 ```
 
+### 5. 添加文献
+
+```bash
+zotero add journalArticle "论文标题" "作者名"
+```
+
+### 6. 更新文献
+
+```bash
+zotero update ABCD1234 title "新标题"
+```
+
+### 7. 删除文献
+
+```bash
+zotero delete ABCD1234        # 移至回收站
+zotero delete ABCD1234 --permanent  # 永久删除
+```
+
 ---
 
 ## 配置说明
@@ -199,6 +218,7 @@ CLI参数 > 环境变量 > 配置文件 > 默认值
 | 命令 | 别名 | 说明 |
 |------|------|------|
 | `zotero sync` | `zotero s` | 双向同步 |
+| `zotero sync --full` | `zotero s -f` | 完整同步（忽略版本号） |
 | `zotero sync:upload` | `zotero su` | 仅上传本地修改 |
 | `zotero sync:download` | `zotero sd` | 仅下载远程修改 |
 
@@ -207,6 +227,34 @@ CLI参数 > 环境变量 > 配置文件 > 默认值
 | 命令 | 别名 | 说明 |
 |------|------|------|
 | `zotero list` | `zotero ls` | 列出文献 |
+| `zotero list:unsynced` | | 列出未同步文献 |
+| `zotero get <key>` | | 查看单条文献 |
+| `zotero stats` | `zotero st` | 库统计信息 |
+
+### 搜索命令
+
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `zotero search <query>` | | 按标题搜索 |
+
+### 管理命令
+
+| 命令 | 说明 |
+|------|------|
+| `zotero add <类型> <标题> [作者...]` | 添加新文献 |
+| `zotero update <key> <字段> <值>` | 更新文献 |
+| `zotero delete <key>` | 删除文献（移至回收站） |
+| `zotero delete <key> --permanent` | 永久删除 |
+
+### 导出命令
+
+| 命令 | 说明 |
+|------|------|
+| `zotero export` | 导出为 BibTeX |
+| `zotero export bibtex [文件]` | 导出为 BibTeX |
+| `zotero export ris [文件]` | 导出为 RIS |
+| `zotero export csv [文件]` | 导出为 CSV |
+| `zotero export json [文件]` | 导出为 JSON |
 | `zotero list:unsynced` | `zotero lsu` | 列出未同步文献 |
 | `zotero get <key>` | `zotero show <key>` | 查看单条文献 |
 | `zotero stats` | `zotero st` | 库统计信息 |
@@ -237,6 +285,26 @@ zotero sync --dry-run
 
 # 完整同步（忽略版本差异）
 zotero sync --full
+zotero sync -f
+```
+
+### 添加/更新/删除示例
+
+```bash
+# 添加文献
+zotero add journalArticle "深度学习综述" "张三" "李四"
+zotero add book "书籍标题" "作者名" --year 2024
+
+# 更新文献
+zotero update ABCD1234 title "新标题"
+zotero update ABCD1234 abstract "新的摘要"
+
+# 删除文献
+zotero delete ABCD1234
+zotero delete ABCD1234 --permanent
+
+# 导出
+zotero export bibtex refs.bib
 ```
 
 ---
