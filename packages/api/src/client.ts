@@ -117,6 +117,8 @@ export class ZoteroAPIClient {
       }
     }
     
+    console.log(`[API] ${method} ${url.toString()}`);
+    
     const headers: Record<string, string> = {
       'Zotero-API-Key': this.apiKey,
       'Zotero-API-Version': '3',
@@ -132,6 +134,8 @@ export class ZoteroAPIClient {
       headers,
       body: options.body ? JSON.stringify(options.body) : undefined,
     });
+    
+    console.log(`[API] Response: ${response.status}`);
     
     if (!response.ok) {
       const error = await response.text();
@@ -158,7 +162,10 @@ export class ZoteroAPIClient {
   
   /** Get library version */
   async getLibraryVersion(libraryId: string | number): Promise<number> {
-    const response = await this.request<unknown>('GET', `/users/${libraryId}`);
+    // Use /items endpoint to get the Last-Modified-Version header
+    const response = await this.request<unknown>('GET', `/users/${libraryId}/items`, { 
+      params: { limit: 1 } 
+    });
     return response.version;
   }
   

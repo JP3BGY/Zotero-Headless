@@ -2,10 +2,10 @@
   "name": "zotero-headless",
   "version": "1.0.0",
   "description": "Zotero Web API 同步客户端 - 无需桌面客户端即可实现文献库同步",
-  "type": "module",
+  "type": "commonjs",
   "main": "dist/index.js",
   "bin": {
-    "zotero": "./dist/index.js"
+    "zotero": "./index.js"
   },
   "scripts": {
     "build": "node build.mjs",

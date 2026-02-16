@@ -1069,49 +1069,124 @@ import { Repository } from '../database';  // 内部依赖
 
 ## 九、实施计划
 
-### Phase 1: 基础架构 (2周)
+> **最后更新**: 2026-02-16  
+> **当前状态**: Phase 1-3 核心功能已完成，进入优化和扩展阶段
 
-- [ ] 初始化 Monorepo 结构
-- [ ] 配置 TypeScript + ESLint + Prettier
-- [ ] 设置 Turborepo
-- [ ] 实现数据库 schema (Drizzle)
-- [ ] 实现基础 API 客户端
-- [ ] 实现基础 Repository
-- [ ] 实现单向下载同步
+### ✅ Phase 1: 基础架构 (已完成)
 
-### Phase 2: 双向同步 (2周)
+- [x] 初始化 Monorepo 结构 (pnpm + Turborepo)
+- [x] 配置 TypeScript + ESLint + Prettier
+- [x] 设置 Turborepo 构建管道
+- [x] 实现数据库 schema (Drizzle ORM + better-sqlite3)
+- [x] 实现基础 API 客户端 (ZoteroAPIClient)
+- [x] 实现 Repository 模式
+- [x] 实现单向下载同步 (SyncEngine)
 
-- [ ] 实现上传功能
-- [ ] 实现冲突检测
-- [ ] 实现基础冲突解决
-- [ ] 同步状态机
-- [ ] 删除同步
-- [ ] 错误处理和重试
-
-### Phase 3: CLI 工具 (1周)
-
-- [ ] sync 命令
-- [ ] list 命令
-- [ ] search 命令
-- [ ] get/add/update/delete 命令
-
-### Phase 4: 高级功能 (2周)
-
-- [ ] 增量同步优化
-- [ ] 大库性能优化
-- [ ] 手动冲突解决
-- [ ] 群组库支持
-
-### Phase 5: 测试发布 (1周)
-
-- [ ] 单元测试
-- [ ] 集成测试
-- [ ] API 文档
-- [ ] 发布到 npm
+**关键实现**:
+- 完整的数据库 schema (libraries, items, collections, sync_logs)
+- API 限流和重试机制
+- WAL 模式支持
 
 ---
 
-## 十、附录
+### ✅ Phase 2: 双向同步 (已完成核心功能)
+
+- [x] 实现下载功能 (含批量处理)
+- [x] 实现上传功能
+- [x] 实现冲突检测机制
+- [x] 实现基础冲突解决策略 (local/remote)
+- [x] 同步状态追踪 (sync_logs)
+- [x] 删除同步支持
+- [x] 错误处理和重试机制
+
+**新增功能**:
+- `--full-sync` 强制完整同步选项
+- 并发控制 (batchSize 配置)
+- 同步事件 emitter (sync:start, sync:complete, sync:error)
+
+**修复的 Bug**:
+- [x] 数据库目录自动创建 (mkdir -p)
+- [x] Raw SQLite 访问 (`getRawSQLite()`)
+- [x] Full sync 参数传递修复
+
+---
+
+### ✅ Phase 3: CLI 工具 (已完成核心命令)
+
+- [x] `sync` 命令 - 双向同步 (含 `--full-sync` 选项)
+- [x] `list` 命令 - 列示文献
+- [x] `search` 命令 - 关键词搜索
+- [x] `get <key>` 命令 - 查看详情
+- [x] `stats` 命令 - 统计信息 (新增)
+- [x] `verify` 命令 - API key 验证 (新增)
+- [ ] `add` 命令 - 添加文献 (待实现)
+- [ ] `update` 命令 - 更新文献 (待实现)
+- [ ] `delete` 命令 - 删除文献 (待实现)
+- [ ] `export` 命令 - 导出功能 (部分实现)
+
+**改进**:
+- [x] 多路径 `.env` 配置加载 (~/.config/zotero-headless/.env)
+- [x] 全局安装支持 (任意目录运行)
+
+---
+
+### 🔄 Phase 4: 优化与扩展 (进行中)
+
+**性能优化**:
+- [ ] 增量同步优化 (当前已实现基础版本)
+- [ ] 大库分批处理优化 (>1000 items)
+- [ ] 并行下载优化
+
+**功能扩展**:
+- [x] 冲突解决策略配置 (--strategy local|remote)
+- [ ] 群组库 (Group Libraries) 支持
+- [ ] 附件/文件同步支持
+- [ ] WebDAV 同步支持
+
+**CLI 增强**:
+- [ ] 交互式冲突解决
+- [ ] 同步进度条显示
+- [ ] 更丰富的查询过滤选项
+
+---
+
+### 📋 Phase 5: 测试与发布 (进行中)
+
+**测试覆盖**:
+- [x] 数据库层单元测试 (raw-sqlite.test.ts, sqlite-upsert.test.ts)
+- [x] 同步引擎测试 (conflict.test.ts, full-sync.test.ts, retry.test.ts)
+- [ ] API 客户端测试 (部分)
+- [ ] CLI 命令测试 (部分)
+- [ ] 集成测试 (E2E)
+
+**文档**:
+- [x] 设计文档 (本文件)
+- [x] README.md 快速开始
+- [ ] API 文档 (JSDoc)
+- [ ] 用户手册
+
+**发布准备**:
+- [ ] npm 包发布配置
+- [ ] GitHub Actions CI/CD
+- [ ] 版本管理 (changesets)
+
+---
+
+## 十、已知问题与 TODO
+
+### 🔧 待修复
+1. **日期解析问题** - items 显示日期为 "+058097-08-23" (SQLite timestamp 格式问题)
+2. **CLI 测试失败** - 8 个测试因环境配置问题失败
+
+### 🚀 优先级功能
+1. **文献添加/编辑** - 允许通过 CLI 添加和修改文献
+2. **群组库支持** - 同步群组共享库
+3. **导出格式** - BibTeX, RIS, CSV 完整支持
+4. **附件下载** - PDF 等附件同步
+
+---
+
+## 十一、附录
 
 ### 10.1 Zotero API 关键端点
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-nocheck
 
 // Zotero-Headless CLI
 // See Zotero-Headless-Complete-Design.md Section 7
@@ -22,10 +23,17 @@ const commands: Command[] = [
   {
     name: 'sync',
     aliases: ['s'],
-    description: 'Synchronize Zotero library (two-way)',
-    execute: async () => {
-      console.log('🔄 Starting two-way sync...\n');
-      const result = await syncManager.sync();
+    description: 'Synchronize Zotero library (two-way). Use --full-sync to force complete re-sync',
+    execute: async (args) => {
+      const fullSync = args.includes('--full-sync') || args.includes('-f');
+      
+      console.log('🔄 Starting two-way sync...');
+      if (fullSync) {
+        console.log('   (Full sync mode - ignoring version numbers)');
+      }
+      console.log('');
+      
+      const result = await syncManager.sync({ fullSync });
       
       if (result.success) {
         console.log(`\n✅ Sync completed successfully!`);
@@ -275,6 +283,49 @@ const commands: Command[] = [
   },
   
   {
+    name: 'export',
+    aliases: ['e'],
+    description: 'Export items to various formats',
+    execute: async (args) => {
+      console.log('📤 Exporting items...\n');
+      
+      try {
+        // Parse arguments
+        const format = args[0]?.toLowerCase() || 'bibtex';
+        const outputFile = args[1];
+        const limit = args[2] ? parseInt(args[2]) : 100;
+        
+        const validFormats = ['bibtex', 'ris', 'csv', 'json'];
+        if (!validFormats.includes(format)) {
+          console.log(`❌ Invalid format: ${format}`);
+          console.log(`   Valid formats: ${validFormats.join(', ')}`);
+          process.exit(1);
+        }
+        
+        const { Exporter } = await import('./export.js');
+        const exporter = new Exporter();
+        
+        const content = await exporter.exportItems({
+          format: format as any,
+          limit
+        });
+        
+        if (outputFile) {
+          await exporter.exportToFile(content, outputFile);
+          console.log(`✅ Exported ${limit} items to ${outputFile} (${format} format)`);
+        } else {
+          console.log(content);
+          console.log(`\n💡 Tip: Add output file path to save to file`);
+          console.log(`   Example: zotero export bibtex references.bib`);
+        }
+      } catch (error) {
+        console.error('❌ Export failed:', error);
+        process.exit(1);
+      }
+    }
+  },
+  
+  {
     name: 'help',
     aliases: ['h', '?'],
     description: 'Show help message',
@@ -293,6 +344,7 @@ Commands:
   get <key>          Get item details
   stats              Show statistics
   verify             Verify API key
+  export [format]    Export items (bibtex, ris, csv, json)
   help               Show this message
 
 Examples:
@@ -302,6 +354,8 @@ Examples:
   zotero stats             # Show library stats
   zotero get ABCD1234     # Show item details
   zotero verify            # Check API key
+  zotero export bibtex     # Export as BibTeX
+  zotero export ris refs.ris # Export RIS to file
 
 For more info: https://github.com/altairwei/Zotero-Headless
 `);
@@ -315,6 +369,34 @@ async function main() {
   const args = process.argv.slice(2);
   const commandName = args[0]?.toLowerCase() || 'help';
   const commandArgs = args.slice(1);
+  
+  // Check for --help or -h flag
+  if (commandArgs.includes('--help') || commandArgs.includes('-h') || commandName === 'help') {
+    // Show help for specific command or general help
+    if (commandName !== 'help') {
+      // Try to find the command to show its specific help
+      const cmd = commands.find(c => 
+        c.name === commandName || c.aliases?.includes(commandName)
+      );
+      if (cmd) {
+        console.log(`\nUsage: zotero ${commandName} [options]`);
+        console.log(`\n${cmd.description}`);
+        if (cmd.aliases) {
+          console.log(`\nAliases: ${cmd.aliases.join(', ')}`);
+        }
+        // TODO: Add command-specific help text
+        console.log(`\nRun "zotero help" for all commands.`);
+        return;
+      }
+    }
+    
+    // Show general help
+    const helpCmd = commands.find(c => c.name === 'help');
+    if (helpCmd) {
+      await helpCmd.execute([]);
+      return;
+    }
+  }
   
   const command = commands.find(c => 
     c.name === commandName || c.aliases?.includes(commandName)

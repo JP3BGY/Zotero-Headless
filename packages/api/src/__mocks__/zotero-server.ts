@@ -80,7 +80,7 @@ export function createHandlers(userId: string = '12345') {
     }),
 
     // Get items
-    http.get('/users/:userId/items', async ({ request }) => {
+    http.get('/users/:userId/items', async ({ params, request }) => {
       const url = new URL(request.url);
       const apiKey = url.searchParams.get('key');
       
@@ -114,7 +114,7 @@ export function createHandlers(userId: string = '12345') {
     }),
 
     // Create item
-    http.post('/users/:userId/items', async ({ request }) => {
+    http.post('/users/:userId/items', async ({ params, request }) => {
       const body = await request.json() as any[];
       const newItems = body.map((item, index) => ({
         key: `NEWITEM${Date.now()}${index}`,

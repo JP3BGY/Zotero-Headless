@@ -21,12 +21,9 @@ const buildOptions = {
   platform: 'node',
   target: 'node18',
   outfile: 'dist/index.js',
-  format: 'esm',
+  format: 'cjs',  // 改为 CommonJS 格式以兼容所有依赖
   sourcemap: true,
-  external: [],
-  banner: {
-    js: '#!/usr/bin/env node',
-  },
+  external: ['better-sqlite3'],  // 只保留原生模块
 };
 
 if (isWatch) {
@@ -35,8 +32,6 @@ if (isWatch) {
   console.log('Watching for changes...');
 } else {
   await esbuild.build(buildOptions);
-  
-  // Make executable
   fs.chmodSync('dist/index.js', '755');
   
   console.log('✅ Build complete!');
