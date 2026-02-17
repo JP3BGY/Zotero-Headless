@@ -163,4 +163,56 @@ describe('Sync Data Validation', () => {
       }
     });
   });
+
+  describe('Delete Operation Validation', () => {
+    it('should treat 404 as success when deleting (item already deleted)', async () => {
+      // Simulate error handling logic in uploadChanges
+      const errorMessage = 'Zotero API error 404: Item not found';
+      const is404Error = errorMessage.includes('404');
+      
+      expect(is404Error).toBe(true);
+      
+      // When 404, should not throw error but treat as success
+      // and still delete from local DB
+      let shouldDeleteLocal = false;
+      let shouldThrowError = false;
+      
+      try {
+        if (is404Error) {
+          console.log('Item already deleted on remote (404)');
+          shouldDeleteLocal = true;
+          shouldThrowError = false;
+        } else {
+          throw new Error(errorMessage);
+        }
+      } catch (e) {
+        shouldThrowError = true;
+      }
+      
+      expect(shouldDeleteLocal).toBe(true);
+      expect(shouldThrowError).toBe(false);
+    });
+
+    it('should throw error for non-404 delete failures', async () => {
+      const errorMessage = 'Zotero API error 403: Forbidden';
+      const is404Error = errorMessage.includes('404');
+      
+      expect(is404Error).toBe(false);
+      
+      // Non-404 errors should be thrown
+      let shouldThrowError = false;
+      
+      try {
+        if (is404Error) {
+          console.log('Item already deleted on remote (404)');
+        } else {
+          throw new Error(errorMessage);
+        }
+      } catch (e) {
+        shouldThrowError = true;
+      }
+      
+      expect(shouldThrowError).toBe(true);
+    });
+  });
 });

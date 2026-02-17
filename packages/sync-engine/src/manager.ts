@@ -285,8 +285,17 @@ export class SyncManager extends EventEmitter {
 
         if (item.deleted) {
           // Delete from remote
-          await this.apiClient.deleteItem(zoteroId, item.key, item.version);
-          console.log(`   🗑️  Deleted ${item.key} from remote`);
+          try {
+            await this.apiClient.deleteItem(zoteroId, item.key, item.version);
+            console.log(`   🗑️  Deleted ${item.key} from remote`);
+          } catch (e: any) {
+            if (e.message?.includes('404')) {
+              // Item already deleted on remote, treat as success
+              console.log(`   🗑️  Item ${item.key} already deleted on remote (404)`);
+            } else {
+              throw e; // Re-throw other errors
+            }
+          }
           // Also delete from local DB after successful remote deletion
           await this.db.delete(items)
             .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
