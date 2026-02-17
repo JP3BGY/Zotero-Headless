@@ -80,25 +80,29 @@ pnpm run build
 
 ### 步骤 3：配置环境变量
 
-创建 `.env` 文件：
+创建配置文件：
 
 ```bash
-# 复制示例配置
-cp .env.example .env
+# 创建配置目录
+mkdir -p ~/.config/zotero-headless
 
-# 编辑配置
-nano .env
-```
-
-填入你的凭证：
-
-```env
+# 创建 .env 文件
+cat > ~/.config/zotero-headless/.env << 'EOF'
 # Zotero API Key (从步骤1获取)
 ZOTERO_API_KEY=your-api-key-here
 
 # Zotero 用户ID (数字格式)
 ZOTERO_USER_ID=1234567
+
+# 可选：自定义数据库路径
+# DATABASE_PATH=/custom/path/to/zotero.sqlite
+EOF
+
+# 设置权限（保护 API Key）
+chmod 600 ~/.config/zotero-headless/.env
 ```
+
+填入你的凭证后保存。
 
 ### 快速验证
 
@@ -172,42 +176,48 @@ zotero delete ABCD1234 --permanent  # 永久删除
 
 ## 配置说明
 
-### 配置文件优先级
+### 配置文件加载优先级
+
+Zotero-Headless 会按以下优先级加载 `.env` 文件（后面的覆盖前面的）：
 
 ```
-CLI参数 > 环境变量 > 配置文件 > 默认值
+1. ZOTERO_ENV_PATH 环境变量指定的路径
+2. 当前工作目录下的 .env
+3. 可执行文件所在目录的 .env
+4. ~/.config/zotero-headless/.env  （推荐）
+5. ~/.zotero-headless.env
 ```
 
-### 配置文件位置
+**最佳实践**：将配置放在 `~/.config/zotero-headless/.env`，这样无论在哪里运行命令都能正确加载。
 
-1. **用户主目录**：~/.zotero-headless.json
-2. **项目目录**：./.zotero-headless.json
-3. **环境变量**：ZOTERO_API_KEY, ZOTERO_USER_ID
+### 配置示例
 
-### 配置选项
+创建 `~/.config/zotero-headless/.env`：
 
-```json
-{
-  "apiKey": "your-api-key",
-  "userId": "1234567",
-  "sync": {
-    "batchSize": 50,
-    "maxRetries": 3,
-    "conflictStrategy": "local"
-  },
-  "database": {
-    "path": "./.zotero-headless.db"
-  }
-}
+```env
+# Zotero API Key (从 https://www.zotero.org/settings/keys 获取)
+ZOTERO_API_KEY=your-api-key-here
+
+# Zotero 用户ID (数字格式)
+ZOTERO_USER_ID=1234567
+
+# 可选：数据库路径
+# 默认：~/.config/zotero-headless/data/zotero.sqlite
+# DATABASE_PATH=/custom/path/to/zotero.sqlite
+
+# 可选：日志级别 (debug, info, warn, error)
+LOG_LEVEL=info
 ```
 
-### 冲突解决策略
+### 数据库路径配置
 
-| 策略 | 说明 |
-|------|------|
-| `local` | 优先使用本地版本（默认） |
-| `remote` | 优先使用远程版本 |
-| `manual` | 手动解决冲突 |
+| 配置方式 | 示例 | 效果 |
+|---------|------|------|
+| **默认**（推荐） | 不设置 `DATABASE_PATH` | `~/.config/zotero-headless/data/zotero.sqlite` |
+| **绝对路径** | `DATABASE_PATH=/data/zotero.db` | 直接使用该路径 |
+| **相对路径** | `DATABASE_PATH=./data/db.sqlite` | 相对于当前工作目录 |
+
+> 💡 **提示**：使用默认路径，数据库会自动存放在配置目录下，便于管理和备份。
 
 ---
 
@@ -239,12 +249,12 @@ CLI参数 > 环境变量 > 配置文件 > 默认值
 
 ### 管理命令
 
-| 命令 | 说明 |
-|------|------|
-| `zotero add <类型> <标题> [作者...]` | 添加新文献 |
-| `zotero update <key> <字段> <值>` | 更新文献 |
-| `zotero delete <key>` | 删除文献（移至回收站） |
-| `zotero delete <key> --permanent` | 永久删除 |
+| 命令 | 说明 | 同步需求 |
+|------|------|----------|
+| `zotero add <类型> <标题> [作者...]` | 添加新文献（直接同步） | 自动同步 |
+| `zotero update <key> <字段> <值>` | 更新文献（仅本地） | 需运行 `sync` |
+| `zotero delete <key>` | 删除文献（仅本地标记） | 需运行 `sync` |
+| `zotero delete <key> --permanent` | 永久删除（仅本地标记） | 需运行 `sync` |
 
 ### 导出命令
 
@@ -291,21 +301,23 @@ zotero sync -f
 ### 添加/更新/删除示例
 
 ```bash
-# 添加文献
+# 添加文献（直接同步到远程）
 zotero add journalArticle "深度学习综述" "张三" "李四"
-zotero add book "书籍标题" "作者名" --year 2024
+zotero add book "书籍标题" "作者名"
 
-# 更新文献
+# 更新文献（仅本地修改，需运行 sync 上传）
 zotero update ABCD1234 title "新标题"
 zotero update ABCD1234 abstract "新的摘要"
 
-# 删除文献
-zotero delete ABCD1234
-zotero delete ABCD1234 --permanent
+# 删除文献（仅本地标记，需运行 sync 上传）
+zotero delete ABCD1234              # 标记为移至回收站
+zotero delete ABCD1234 --permanent  # 标记为永久删除
 
-# 导出
-zotero export bibtex refs.bib
+# 同步到远程
+zotero sync
 ```
+
+> ⚠️ **重要**：`update` 和 `delete` 命令只修改本地数据库，需要运行 `zotero sync` 才能将更改同步到远程。这样可以避免直接操作远程导致的版本冲突。
 
 ---
 
@@ -313,23 +325,18 @@ zotero export bibtex refs.bib
 
 ### 常见错误
 
-#### 1. "Invalid API key"
+#### 1. "Configuration error: zotero.apiKey: Invalid input"
 
-**原因**：API Key 错误或已失效
-
-**解决**：
-1. 访问 https://www.zotero.org/settings/keys
-2. 验证密钥是否有效
-3. 检查 `.env` 文件中的密钥是否正确
-
-#### 2. "Rate limit exceeded"
-
-**原因**：请求过于频繁（Zotero 限制 35次/分钟）
+**原因**：未找到 Zotero API Key
 
 **解决**：
-- 系统会自动重试，等待后重试
+1. 创建 `~/.config/zotero-headless/.env` 文件
+2. 添加 `ZOTERO_API_KEY=your-api-key`
+3. 确保文件包含 `ZOTERO_USER_ID=your-user-id`
 
-#### 3. "No library found"
+> 检查配置是否正确加载：`zotero verify`
+
+#### 2. "No library found"
 
 **原因**：尚未执行过同步
 
@@ -338,13 +345,50 @@ zotero export bibtex refs.bib
 zotero sync
 ```
 
-#### 4. "SQLite database locked"
+#### 3. "Conflict detected"
+
+**原因**：本地和远程同时修改了同一项目
+
+**解决**：
+```bash
+# 查看未同步项目
+zotero list:unsynced
+
+# 强制使用本地版本
+zotero sync --full-sync
+
+# 或手动修复版本号后同步
+```
+
+#### 4. "Rate limit exceeded"
+
+**原因**：请求过于频繁（Zotero 限制 35次/分钟）
+
+**解决**：
+- 系统会自动重试，等待后重试
+
+#### 5. "SQLite database locked"
 
 **原因**：另一个进程正在使用数据库
 
 **解决**：
 - 关闭其他使用该数据库的程序
 - 检查是否有残留进程
+
+#### 6. 配置未生效
+
+**原因**：环境变量或配置文件未正确加载
+
+**解决**：
+```bash
+# 检查当前配置路径
+zotero verify
+
+# 确认 .env 文件位置
+cat ~/.config/zotero-headless/.env
+
+# 如果在不同目录运行，确保 ~/.config/zotero-headless/.env 存在
+```
 
 ### 调试模式
 
@@ -476,4 +520,4 @@ MIT License - See [LICENSE](LICENSE)
 
 ---
 
-*最后更新：2026-02-15*
+*最后更新：2026-02-17*

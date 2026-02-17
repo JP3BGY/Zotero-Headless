@@ -5,6 +5,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { findAllEnvFiles, hasZoteroConfig } from '../config.js';
+
+// Mock os module for testing
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('os')>();
+  return {
+    ...actual,
+    homedir: vi.fn(() => actual.homedir()),
+  };
+});
 
 describe('User Configuration', () => {
   const testDir = path.join(os.tmpdir(), 'zotero-headless-test-' + Date.now());
@@ -216,6 +226,198 @@ describe('Setup Wizard', () => {
       
       expect(defaults.syncBatchSize).toBe(50);
       expect(defaults.conflictStrategy).toBe('local');
+    });
+  });
+});
+
+describe('Multi-level .env Configuration Loading', () => {
+  /**
+   * Regression Test: Issue #1
+   * When running zotero from a directory with an unrelated .env file (e.g., ~/.openclaw/.env),
+   * the configuration should still be loaded from ~/.config/zotero-headless/.env.
+   * 
+   * This ensures that zotero works correctly regardless of the current working directory.
+   */
+  const testBaseDir = path.join(os.tmpdir(), 'zotero-env-test-' + Date.now());
+  const mockHomeDir = path.join(testBaseDir, 'home');
+  const mockCwdDir = path.join(testBaseDir, 'cwd');
+  
+  beforeEach(() => {
+    // Create test directories
+    fs.mkdirSync(mockHomeDir, { recursive: true });
+    fs.mkdirSync(mockCwdDir, { recursive: true });
+    fs.mkdirSync(path.join(mockHomeDir, '.config', 'zotero-headless'), { recursive: true });
+    
+    // Save original env and cwd
+    (global as any).originalEnv = { ...process.env };
+    (global as any).originalCwd = process.cwd();
+  });
+  
+  afterEach(() => {
+    // Restore original env
+    Object.keys(process.env).forEach(key => delete process.env[key]);
+    Object.assign(process.env, (global as any).originalEnv);
+    
+    // Cleanup test directory
+    if (fs.existsSync(testBaseDir)) {
+      fs.rmSync(testBaseDir, { recursive: true, force: true });
+    }
+  });
+  
+  describe('hasZoteroConfig', () => {
+    it('should detect Zotero configuration in .env file', () => {
+      const envWithZotero = path.join(testBaseDir, 'with-zotero.env');
+      const envWithoutZotero = path.join(testBaseDir, 'without-zotero.env');
+      
+      fs.writeFileSync(envWithZotero, 'ZOTERO_API_KEY=test123\nZOTERO_USER_ID=12345\n');
+      fs.writeFileSync(envWithoutZotero, '# Some other config\nOTHER_KEY=value\n');
+      
+      expect(hasZoteroConfig(envWithZotero)).toBe(true);
+      expect(hasZoteroConfig(envWithoutZotero)).toBe(false);
+      expect(hasZoteroConfig('/nonexistent/file.env')).toBe(false);
+    });
+    
+    it('should return false for files with only one of the required keys', () => {
+      const envPartial1 = path.join(testBaseDir, 'partial1.env');
+      const envPartial2 = path.join(testBaseDir, 'partial2.env');
+      
+      fs.writeFileSync(envPartial1, 'ZOTERO_API_KEY=test123\n');
+      fs.writeFileSync(envPartial2, 'ZOTERO_USER_ID=12345\n');
+      
+      expect(hasZoteroConfig(envPartial1)).toBe(false);
+      expect(hasZoteroConfig(envPartial2)).toBe(false);
+    });
+  });
+  
+  describe('Configuration Priority and Merging', () => {
+    it('should find all .env files in correct priority order', () => {
+      // Create .env files at different locations
+      const cwdEnv = path.join(mockCwdDir, '.env');
+      const homeConfigEnv = path.join(mockHomeDir, '.config', 'zotero-headless', '.env');
+      const homeEnv = path.join(mockHomeDir, '.zotero-headless.env');
+      
+      fs.writeFileSync(cwdEnv, '# CWD env\n');
+      fs.writeFileSync(homeConfigEnv, 'ZOTERO_API_KEY=home123\nZOTERO_USER_ID=99999\n');
+      fs.writeFileSync(homeEnv, '# Home env\n');
+      
+      // Mock process.cwd() and os.homedir()
+      const originalCwd = process.cwd;
+      vi.mocked(os.homedir).mockReturnValue(mockHomeDir);
+      
+      try {
+        process.cwd = () => mockCwdDir;
+        
+        const envFiles = findAllEnvFiles();
+        
+        // Should find all three files in priority order
+        expect(envFiles.length).toBe(3);
+        expect(envFiles[0]).toBe(cwdEnv);
+        expect(envFiles[1]).toBe(homeConfigEnv);
+        expect(envFiles[2]).toBe(homeEnv);
+      } finally {
+        process.cwd = originalCwd;
+        vi.mocked(os.homedir).mockRestore();
+      }
+    });
+    
+    it('should skip files that do not exist', () => {
+      vi.mocked(os.homedir).mockReturnValue(mockHomeDir);
+      const originalCwd = process.cwd;
+      
+      try {
+        process.cwd = () => mockCwdDir;
+        
+        // Only create home config, skip others
+        const homeConfigEnv = path.join(mockHomeDir, '.config', 'zotero-headless', '.env');
+        fs.writeFileSync(homeConfigEnv, 'ZOTERO_API_KEY=home123\nZOTERO_USER_ID=99999\n');
+        
+        const envFiles = findAllEnvFiles();
+        
+        // Should only find the one existing file
+        expect(envFiles.length).toBe(1);
+        expect(envFiles[0]).toBe(homeConfigEnv);
+      } finally {
+        process.cwd = originalCwd;
+        vi.mocked(os.homedir).mockRestore();
+      }
+    });
+  });
+  
+  describe('Regression: CWD .env without Zotero config', () => {
+    it('should load Zotero config from ~/.config/zotero-headless/.env when CWD .env lacks it', () => {
+      /**
+       * This test reproduces the issue where:
+       * 1. User is in ~/.openclaw directory (has .env for OpenClaw)
+       * 2. User runs `zotero add ...`
+       * 3. The command should still find Zotero config in ~/.config/zotero-headless/.env
+       * 
+       * Previously, this would fail because the first .env found (in CWD) was loaded
+       * and no further .env files were checked.
+       */
+      const originalCwd = process.cwd;
+      
+      try {
+        process.cwd = () => mockCwdDir;
+        vi.mocked(os.homedir).mockReturnValue(mockHomeDir);
+        
+        // Simulate CWD .env (like ~/.openclaw/.env) - no Zotero config
+        const cwdEnv = path.join(mockCwdDir, '.env');
+        fs.writeFileSync(cwdEnv, '# OpenClaw configuration\nOPENAI_API_KEY=test\n');
+        
+        // Simulate Zotero config in home directory
+        const homeConfigEnv = path.join(mockHomeDir, '.config', 'zotero-headless', '.env');
+        fs.writeFileSync(homeConfigEnv, 'ZOTERO_API_KEY=test_api_key_12345\nZOTERO_USER_ID=19667572\n');
+        
+        // Verify CWD .env doesn't have Zotero config
+        expect(hasZoteroConfig(cwdEnv)).toBe(false);
+        
+        // Verify home config has Zotero config
+        expect(hasZoteroConfig(homeConfigEnv)).toBe(true);
+        
+        // Both files should be found in priority order
+        const envFiles = findAllEnvFiles();
+        expect(envFiles.length).toBe(2);
+        expect(envFiles[0]).toBe(cwdEnv);
+        expect(envFiles[1]).toBe(homeConfigEnv);
+        
+        // At least one file should have Zotero config
+        const hasZoteroInAnyFile = envFiles.some(hasZoteroConfig);
+        expect(hasZoteroInAnyFile).toBe(true);
+        
+      } finally {
+        process.cwd = originalCwd;
+        vi.mocked(os.homedir).mockRestore();
+      }
+    });
+    
+    it('should respect ZOTERO_ENV_PATH environment variable', () => {
+      const customEnvPath = path.join(testBaseDir, 'custom', 'zotero.env');
+      fs.mkdirSync(path.dirname(customEnvPath), { recursive: true });
+      fs.writeFileSync(customEnvPath, 'ZOTERO_API_KEY=custom123\nZOTERO_USER_ID=54321\n');
+      
+      const originalCwd = process.cwd;
+      const originalEnvPath = process.env.ZOTERO_ENV_PATH;
+      
+      try {
+        process.cwd = () => mockCwdDir;
+        vi.mocked(os.homedir).mockReturnValue(mockHomeDir);
+        process.env.ZOTERO_ENV_PATH = customEnvPath;
+        
+        const envFiles = findAllEnvFiles();
+        
+        // Custom path should be first (highest priority)
+        expect(envFiles.length).toBeGreaterThan(0);
+        expect(envFiles[0]).toBe(customEnvPath);
+        
+      } finally {
+        process.cwd = originalCwd;
+        vi.mocked(os.homedir).mockRestore();
+        if (originalEnvPath !== undefined) {
+          process.env.ZOTERO_ENV_PATH = originalEnvPath;
+        } else {
+          delete process.env.ZOTERO_ENV_PATH;
+        }
+      }
     });
   });
 });

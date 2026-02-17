@@ -19,7 +19,7 @@ export const libraries = sqliteTable('libraries', {
   
   // 同步状态
   version: integer('version').notNull().default(0),
-  lastSyncAt: integer('last_sync_at', { mode: 'timestamp' }),
+  lastSyncAt: integer('last_sync_at', {  }),
   
   // 原始数据
   rawJson: textCol('raw_json'),
@@ -37,8 +37,8 @@ export const items = sqliteTable('items', {
   version: integer('version').notNull().default(0),
   synced: integer('synced', { mode: 'boolean' }).notNull().default(false),
   deleted: integer('deleted', { mode: 'boolean' }).notNull().default(false),
-  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  createdAt: integer('created_at', {  }).notNull(),
+  updatedAt: integer('updated_at', {  }).notNull(),
   
   // 核心字段（Agent 最常用）
   itemType: textCol('item_type').notNull(),
@@ -85,8 +85,8 @@ export const collections = sqliteTable('collections', {
   parentKey: textCol('parent_key'),
   version: integer('version').notNull().default(0),
   
-  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  createdAt: integer('created_at', {  }).notNull(),
+  updatedAt: integer('updated_at', {  }).notNull(),
   deleted: integer('deleted', { mode: 'boolean' }).notNull().default(false),
   
   rawJson: textCol('raw_json').notNull(),
@@ -102,7 +102,7 @@ export const itemTags = sqliteTable('item_tags', {
   libraryId: integer('library_id').notNull(),
   tag: textCol('tag').notNull(),
   tagType: integer('tag_type').default(0),
-  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  createdAt: integer('created_at', {  }).notNull(),
 }, (table) => ({
   pk: primaryKey({ columns: [table.itemKey, table.tag] }),
   tagIdx: index('tags_library_tag_idx').on(table.libraryId, table.tag),
@@ -121,8 +121,8 @@ export const attachments = sqliteTable('attachments', {
   url: textCol('url'),
   
   version: integer('version').notNull().default(0),
-  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  createdAt: integer('created_at', {  }).notNull(),
+  updatedAt: integer('updated_at', {  }).notNull(),
   deleted: integer('deleted', { mode: 'boolean' }).notNull().default(false),
   size: integer('size'),
   md5: textCol('md5'),
@@ -139,8 +139,8 @@ export const syncLogs = sqliteTable('sync_logs', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   libraryId: integer('library_id').notNull(),
   
-  startedAt: integer('started_at', { mode: 'timestamp' }).notNull(),
-  completedAt: integer('completed_at', { mode: 'timestamp' }),
+  startedAt: integer('started_at', {  }).notNull(),
+  completedAt: integer('completed_at', {  }),
   status: textCol('status').notNull(),
   
   remoteVersion: integer('remote_version'),

@@ -4,11 +4,111 @@
 // Zotero-Headless CLI
 // See Zotero-Headless-Complete-Design.md Section 7
 
-import { syncManager } from '@zotero-headless/sync-engine';
-import { getDatabase, items, libraries } from '@zotero-headless/database';
-import { zoteroApi } from '@zotero-headless/api';
 import { appConfig } from '@zotero-headless/core';
 import { eq, like, desc, count, and, isNull } from 'drizzle-orm';
+
+// Lazy-loaded modules (to avoid initialization on help commands)
+let syncManager: any;
+let getDatabase: any;
+let items: any;
+let libraries: any;
+let zoteroApi: any;
+
+async function initModules() {
+  if (!syncManager) {
+    const syncMod = await import('@zotero-headless/sync-engine');
+    syncManager = syncMod.syncManager;
+  }
+  if (!getDatabase) {
+    const dbMod = await import('@zotero-headless/database');
+    getDatabase = dbMod.getDatabase;
+    items = dbMod.items;
+    libraries = dbMod.libraries;
+  }
+  if (!zoteroApi) {
+    const apiMod = await import('@zotero-headless/api');
+    zoteroApi = apiMod.zoteroApi;
+  }
+}
+
+/**
+ * 格式化日期显示
+ * 数据库统一使用秒级 Unix 时间戳
+ */
+function formatDate(dateValue: any): string {
+  if (!dateValue) return 'Unknown';
+  
+  try {
+    let timestamp: number;
+    
+    // 如果是 Date 对象（Drizzle 转换后的）
+    if (dateValue instanceof Date) {
+      // Drizzle 的 mode: 'timestamp' 会返回 Date 对象
+      // 但如果时间戳有问题，Date 对象可能无效
+      if (isNaN(dateValue.getTime())) {
+        return 'Invalid date';
+      }
+      return dateValue.toISOString().split('T')[0];
+    }
+    
+    // 如果是数字（应该是秒级时间戳）
+    if (typeof dateValue === 'number') {
+      timestamp = dateValue * 1000;  // 秒 -> 毫秒
+    } else {
+      // 尝试解析字符串
+      const date = new Date(dateValue);
+      if (!isNaN(date.getTime())) {
+        return date.toISOString().split('T')[0];
+      }
+      return 'Invalid date';
+    }
+    
+    const date = new Date(timestamp);
+    if (isNaN(date.getTime())) {
+      return 'Invalid date';
+    }
+    return date.toISOString().split('T')[0];
+  } catch {
+    return 'Invalid date';
+  }
+}
+
+/**
+ * 格式化完整日期时间
+ * 数据库统一使用秒级 Unix 时间戳
+ */
+function formatDateTime(dateValue: any): string {
+  if (!dateValue) return 'Unknown';
+  
+  try {
+    let timestamp: number;
+    
+    if (dateValue instanceof Date) {
+      if (isNaN(dateValue.getTime())) {
+        return 'Invalid date';
+      }
+      return dateValue.toISOString();
+    }
+    
+    if (typeof dateValue === 'number') {
+      timestamp = dateValue * 1000;  // 秒 -> 毫秒
+    } else {
+      const date = new Date(dateValue);
+      if (!isNaN(date.getTime())) {
+        return date.toISOString();
+      }
+      return 'Invalid date';
+    }
+    
+    const date = new Date(timestamp);
+    if (isNaN(date.getTime())) {
+      return 'Invalid date';
+    }
+    return date.toISOString();
+  } catch {
+    return 'Invalid date';
+  }
+}
 
 // ============ CLI Commands ============
 
@@ -25,6 +125,7 @@ const commands: Command[] = [
     aliases: ['s'],
     description: 'Synchronize Zotero library (two-way). Use --full-sync to force complete re-sync',
     execute: async (args) => {
+      await initModules();
       const fullSync = args.includes('--full-sync') || args.includes('-f');
       
       console.log('🔄 Starting two-way sync...');
@@ -66,6 +167,7 @@ const commands: Command[] = [
     aliases: ['ls'],
     description: 'List items in library',
     execute: async (args) => {
+      await initModules();
       const db = getDatabase();
       const limit = parseInt(args[0]) || 20;
       const offset = parseInt(args[1]) || 0;
@@ -89,7 +191,7 @@ const commands: Command[] = [
         const syncStatus = item.synced ? '✅' : '🔄';
         const delStatus = item.deleted ? ' (deleted)' : '';
         console.log(`  ${syncStatus} [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}${delStatus}`);
-        console.log(`      Type: ${item.itemType} | Updated: ${item.updatedAt.toISOString().split('T')[0]}`);
+        console.log(`      Type: ${item.itemType} | Updated: ${formatDate(item.updatedAt)}`);
         console.log();
       });
     }
@@ -100,6 +202,7 @@ const commands: Command[] = [
     aliases: ['lsu'],
     description: 'List unsynced items',
     execute: async () => {
+      await initModules();
       const db = getDatabase();
       const library = await db.select().from(libraries).get();
       if (!library) {
@@ -131,6 +234,7 @@ const commands: Command[] = [
     aliases: ['find'],
     description: 'Search items by title',
     execute: async (args) => {
+      await initModules();
       if (args.length === 0) {
         console.log('❌ Please provide a search query');
         console.log('   Usage: zotero search <query>');
@@ -171,6 +275,7 @@ const commands: Command[] = [
     aliases: ['show'],
     description: 'Get single item details',
     execute: async (args) => {
+      await initModules();
       if (args.length === 0) {
         console.log('❌ Please provide an item key');
         console.log('   Usage: zotero get <key>');
@@ -202,8 +307,8 @@ const commands: Command[] = [
       console.log(`   DOI: ${item.doi || '(none)'}`);
       console.log(`   URL: ${item.url || '(none)'}`);
       console.log(`   Date: ${item.publicationDate || '(none)'}`);
-      console.log(`   Created: ${item.createdAt.toISOString()}`);
-      console.log(`   Updated: ${item.updatedAt.toISOString()}`);
+      console.log(`   Created: ${formatDateTime(item.createdAt)}`);
+      console.log(`   Updated: ${formatDateTime(item.updatedAt)}`);
       console.log(`   Synced: ${item.synced ? 'Yes' : 'No'}`);
       console.log(`   Deleted: ${item.deleted ? 'Yes' : 'No'}`);
       
@@ -222,6 +327,7 @@ const commands: Command[] = [
     aliases: ['st'],
     description: 'Show library statistics',
     execute: async () => {
+      await initModules();
       const db = getDatabase();
       
       const library = await db.select().from(libraries).get();
@@ -249,7 +355,7 @@ const commands: Command[] = [
       console.log(`   Library: ${library.name || 'My Library'}`);
       console.log(`   Zotero ID: ${library.zoteroId}`);
       console.log(`   Version: ${library.version}`);
-      console.log(`   Last Sync: ${library.lastSyncAt?.toISOString() || 'Never'}`);
+      console.log(`   Last Sync: ${formatDateTime(library.lastSyncAt) || 'Never'}`);
       console.log(`   ─────────────────────`);
       console.log(`   Total Items: ${totalResult?.count ?? 0}`);
       console.log(`   Deleted: ${deletedResult?.count ?? 0}`);
@@ -263,6 +369,7 @@ const commands: Command[] = [
     aliases: ['v'],
     description: 'Verify API key',
     execute: async () => {
+      await initModules();
       console.log('🔑 Verifying API key...\n');
       try {
         const keyInfo = await zoteroApi.verifyKey();
@@ -287,6 +394,7 @@ const commands: Command[] = [
     aliases: ['a'],
     description: 'Add a new item to library',
     execute: async (args) => {
+      await initModules();
       console.log('📝 Adding new item to library...\n');
       
       // Parse arguments: zotero add <type> <title> [authors...]
@@ -354,9 +462,10 @@ const commands: Command[] = [
   {
     name: 'update',
     aliases: ['u'],
-    description: 'Update an existing item',
+    description: 'Update an existing item (local only, run sync to upload)',
     execute: async (args) => {
-      console.log('📝 Updating item...\n');
+      await initModules();
+      console.log('📝 Updating item locally...\n');
       
       const key = args[0];
       const field = args[1];
@@ -404,21 +513,30 @@ const commands: Command[] = [
         };
         
         const apiField = fieldMap[field.toLowerCase()] || field;
+        const oldValue = data[apiField];
         data[apiField] = value;
         
-        // Update via API
+        // Update local database only (do not call API)
         console.log(`   Updating ${key}: ${field} = "${value}"`);
-        await zoteroApi.updateItem(String(library.zoteroId), key, data, item.version);
         
-        console.log(`✅ Item updated successfully!`);
+        // Re-serialize the updated data
+        const updatedRawJson = JSON.stringify({ ...rawData, data });
         
-        // Mark as unsynced
+        // Update local item: mark as unsynced and update rawJson
         await db.update(items)
-          .set({ synced: false })
+          .set({ 
+            synced: false,
+            updatedAt: Math.floor(Date.now() / 1000),  // 使用秒级时间戳
+            rawJson: updatedRawJson,
+            // Also update the title field if that's what changed
+            ...(apiField === 'title' ? { title: value } : {})
+          })
           .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
           .run();
         
-        console.log(`\n💡 Run "zotero sync" to upload changes.`);
+        console.log(`✅ Item updated locally!`);
+        console.log(`   Changed: ${field} "${oldValue}" → "${value}"`);
+        console.log(`\n💡 Run "zotero sync" to upload changes to remote.`);
       } catch (error) {
         console.log(`❌ Failed to update item: ${error}`);
         process.exit(1);
@@ -429,9 +547,10 @@ const commands: Command[] = [
   {
     name: 'delete',
     aliases: ['d', 'del'],
-    description: 'Delete (trash) an item',
+    description: 'Delete (trash) an item (local only, run sync to upload)',
     execute: async (args) => {
-      console.log('🗑️  Deleting item...\n');
+      await initModules();
+      console.log('🗑️  Deleting item locally...\n');
       
       const key = args[0];
       const permanent = args.includes('--permanent') || args.includes('-p');
@@ -464,17 +583,17 @@ const commands: Command[] = [
         }
         
         if (permanent) {
-          // Permanent delete via API
-          console.log(`   Permanently deleting ${key}...`);
-          await zoteroApi.deleteItem(String(library.zoteroId), key, item.version);
-          console.log(`✅ Item permanently deleted!`);
+          // Permanent delete: remove from local DB immediately
+          // Sync will detect it's gone and delete from remote
+          console.log(`   Marking ${key} for permanent deletion...`);
           
-          // Remove from local DB
           await db.delete(items)
             .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
             .run();
+          
+          console.log(`✅ Item marked for permanent deletion!`);
         } else {
-          // Soft delete (move to trash)
+          // Soft delete (move to trash): mark as deleted locally
           console.log(`   Moving ${key} to trash...`);
           
           // Get current data and set deleted flag
@@ -482,17 +601,21 @@ const commands: Command[] = [
           const data = rawData.data || rawData;
           data.deleted = true;
           
-          await zoteroApi.updateItem(String(library.zoteroId), key, data, item.version);
-          console.log(`✅ Item moved to trash!`);
-          
-          // Update local DB
+          // Update local item: mark as deleted and unsynced
           await db.update(items)
-            .set({ deleted: true, synced: false, updatedAt: new Date() })
+            .set({ 
+              deleted: true, 
+              synced: false, 
+              updatedAt: Math.floor(Date.now() / 1000),  // 使用秒级时间戳
+              rawJson: JSON.stringify({ ...rawData, data })
+            })
             .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
             .run();
+          
+          console.log(`✅ Item moved to trash locally!`);
         }
         
-        console.log(`\n💡 Run "zotero sync" to sync deletion.`);
+        console.log(`\n💡 Run "zotero sync" to sync deletion to remote.`);
       } catch (error) {
         console.log(`❌ Failed to delete item: ${error}`);
         process.exit(1);
@@ -505,6 +628,7 @@ const commands: Command[] = [
     aliases: ['e'],
     description: 'Export items to various formats',
     execute: async (args) => {
+      await initModules();
       console.log('📤 Exporting items...\n');
       
       try {
