@@ -39,6 +39,7 @@
 | 本地缓存 | ✅ | SQLite 数据库存储 |
 | CLI 命令 | ✅ | 列表、搜索、统计等 |
 | 增量同步 | ✅ | 只同步自上次以来的变化 |
+| **文献添加** | ✅ | 通过 DOI/arXiv/ISBN/PMID 自动获取元数据 |
 
 ---
 
@@ -251,10 +252,39 @@ LOG_LEVEL=info
 
 | 命令 | 说明 | 同步需求 |
 |------|------|----------|
-| `zotero add <类型> <标题> [作者...]` | 添加新文献（直接同步） | 自动同步 |
+| `zotero add-by-id <identifier>` | 通过 DOI/arXiv/ISBN/PMID 添加文献 | 自动同步 |
+| `zotero add <类型> <标题> [作者...]` | 手动添加新文献 | 自动同步 |
 | `zotero update <key> <字段> <值>` | 更新文献（仅本地） | 需运行 `sync` |
 | `zotero delete <key>` | 删除文献（仅本地标记） | 需运行 `sync` |
 | `zotero delete <key> --permanent` | 永久删除（仅本地标记） | 需运行 `sync` |
+
+### add-by-id 命令
+
+通过学术标识符自动获取元数据：
+
+```bash
+# DOI
+zotero add-by-id "10.1038/nature23477"
+zotero add-by-id "https://doi.org/10.1038/nature23477"
+
+# arXiv
+zotero add-by-id "1706.03762"
+
+# ISBN
+zotero add-by-id "978-0-13-110362-7"
+
+# PMID
+zotero add-by-id "27626369"
+
+# 批量添加
+zotero add-by-id "10.1038/nature23477, 1706.03762"
+```
+
+**支持的标识符**：
+- DOI: `10.1038/nature123` 或 `https://doi.org/...`
+- arXiv: `1706.03762` 或 `https://arxiv.org/abs/...`
+- ISBN: `978-0-13-110362-7`
+- PMID: `27626369`
 
 ### 导出命令
 

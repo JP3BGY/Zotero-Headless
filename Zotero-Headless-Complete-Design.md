@@ -1113,16 +1113,26 @@ import { Repository } from '../database';  // 内部依赖
 
 ### ✅ Phase 3: CLI 工具 (已完成核心命令)
 
+**核心命令**:
 - [x] `sync` 命令 - 双向同步 (含 `--full-sync` 选项)
 - [x] `list` 命令 - 列示文献
 - [x] `search` 命令 - 关键词搜索
 - [x] `get <key>` 命令 - 查看详情
-- [x] `stats` 命令 - 统计信息 (新增)
-- [x] `verify` 命令 - API key 验证 (新增)
-- [x] `add` 命令 - 添加文献 (新增)
-- [x] `update` 命令 - 更新文献 (新增)
-- [x] `delete` 命令 - 删除文献 (新增)
-- [x] `export` 命令 - 导出功能
+- [x] `stats` 命令 - 统计信息
+- [x] `verify` 命令 - API key 验证
+- [x] `add` 命令 - 手动添加文献
+- [x] `add-by-id` 命令 - **通过 DOI/arXiv/ISBN/PMID 自动获取元数据添加文献** ⭐
+- [x] `update` 命令 - 更新文献
+- [x] `delete` 命令 - 删除文献
+- [x] `export` 命令 - 导出功能 (BibTeX, RIS, CSV, JSON)
+
+**add-by-id 功能详情**:
+- [x] DOI 解析与 CrossRef/DataCite 查询
+- [x] arXiv 解析与 API 查询
+- [x] ISBN 解析与 Open Library 查询
+- [x] PMID 解析与 PubMed 查询
+- [x] 批量添加支持（逗号分隔多个标识符）
+- [x] 自动同步到云端
 
 **改进**:
 - [x] 多路径 `.env` 配置加载 (~/.config/zotero-headless/.env)
@@ -1155,6 +1165,8 @@ import { Repository } from '../database';  // 内部依赖
 **测试覆盖**:
 - [x] 数据库层单元测试 (raw-sqlite.test.ts, sqlite-upsert.test.ts)
 - [x] 同步引擎测试 (conflict.test.ts, full-sync.test.ts, retry.test.ts)
+- [x] API 字段验证测试 (validation.test.ts)
+- [x] Converter 合规性测试 (converter-compliance.test.ts)
 - [ ] API 客户端测试 (部分)
 - [ ] CLI 命令测试 (部分)
 - [ ] 集成测试 (E2E)
@@ -1162,8 +1174,9 @@ import { Repository } from '../database';  // 内部依赖
 **文档**:
 - [x] 设计文档 (本文件)
 - [x] README.md 快速开始
+- [x] 用户指南 (USER_GUIDE.md)
+- [x] API 字段限制文档 (ZOTERO_API_FIELDS.md)
 - [ ] API 文档 (JSDoc)
-- [ ] 用户手册
 
 **发布准备**:
 - [ ] npm 包发布配置
@@ -1174,12 +1187,17 @@ import { Repository } from '../database';  // 内部依赖
 
 ## 十、已知问题与 TODO
 
+### ✅ 已修复
+1. ~~**日期解析问题**~~ - 已修复：items 显示日期为 "+058097-08-23" (SQLite timestamp 格式问题)
+2. ~~**同步字段错误**~~ - 已修复：Zotero API 拒绝 `publicationDate`、`abstract`、`journal` 等字段，已添加字段转换和过滤
+3. ~~**删除 404 错误**~~ - 已修复：云端已删除条目导致 sync 报错 404，现在视为成功
+4. ~~**creators 格式错误**~~ - 已修复：creators 从字符串解析为数组
+
 ### 🔧 待修复
-1. **日期解析问题** - items 显示日期为 "+058097-08-23" (SQLite timestamp 格式问题)
-2. **CLI 测试失败** - 8 个测试因环境配置问题失败
+1. **CLI 测试失败** - 8 个测试因环境配置问题失败
 
 ### 🚀 优先级功能
-1. **文献添加/编辑** - 允许通过 CLI 添加和修改文献
+1. ~~**文献添加/编辑**~~ - ✅ 已完成：通过 DOI/arXiv/ISBN/PMID 自动获取元数据
 2. **群组库支持** - 同步群组共享库
 3. **导出格式** - BibTeX, RIS, CSV 完整支持
 4. **附件下载** - PDF 等附件同步
