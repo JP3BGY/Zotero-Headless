@@ -267,7 +267,20 @@ export class SyncManager extends EventEmitter {
           // Create new item
           const result = await this.apiClient.createItems(zoteroId, [data]);
           if (result.successful['0']) {
-            console.log(`   ✅ Created new item ${result.successful['0']}`);
+            const newKey = result.successful['0'];
+            console.log(`   ✅ Created new item ${newKey}`);
+            
+            // 如果 key 改变了，先更新本地数据库中的 key
+            if (newKey !== item.key) {
+              await this.db.update(items)
+                .set({ key: newKey })
+                .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
+                .run();
+              console.log(`   📝 Updated local key: ${item.key} -> ${newKey}`);
+            }
+            
+            // 使用新的 key 标记为已同步
+            await this.markAsSynced(newKey, libraryId);
           }
           updated++;
         } else {
@@ -275,10 +288,8 @@ export class SyncManager extends EventEmitter {
           await this.apiClient.updateItem(zoteroId, item.key, data, item.version);
           console.log(`   ✅ Updated ${item.key}`);
           updated++;
-        }
-
-        // Mark remaining non-deleted items as synced
-        if (!item.deleted) {
+          
+          // Mark as synced
           await this.markAsSynced(item.key, libraryId);
         }
       } catch (e: any) {
