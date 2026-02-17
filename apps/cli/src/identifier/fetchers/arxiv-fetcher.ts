@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { Identifier, MetadataResult } from '../../types';
+import { Identifier, MetadataResult } from '../types';
 import { BaseFetcher } from './base-fetcher';
 import { DataConverter } from '../converter';
 
@@ -46,38 +46,51 @@ export class ArXivFetcher extends BaseFetcher {
 
     const text = await response.text();
     
-    // 解析 XML 响应
-    const parser = new DOMParser();
-    const xml = parser.parseFromString(text, 'text/xml');
-    
-    const entry = xml.querySelector('entry');
-    if (!entry) {
+    // 使用简单的字符串解析代替 DOMParser（兼容 Node.js）
+    const entryMatch = text.match(/<entry>([\s\S]*?)<\/entry>/);
+    if (!entryMatch) {
       throw new Error(`未找到 arXiv: ${arxivId}`);
     }
     
-    // 提取数据
+    const entry = entryMatch[1];
+    
+    // 提取数据的辅助函数
     const getText = (tag: string): string => {
-      const el = entry.querySelector(tag);
-      return el?.textContent || '';
+      const match = entry.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`));
+      return match ? match[1].replace(/<[^>]+>/g, '').trim() : '';
+    };
+    
+    const getId = (): string => {
+      const match = entry.match(/<id>([^\s]+)<\/id>/);
+      return match ? match[1] : '';
     };
     
     const getAuthors = (): Array<{ given: string; family: string }> => {
-      const authors = entry.querySelectorAll('author');
-      return Array.from(authors).map(a => ({
-        given: a.querySelector('name')?.textContent?.split(' ').slice(0, -1).join(' ') || '',
-        family: a.querySelector('name')?.textContent?.split(' ').slice(-1)[0] || '',
-      }));
+      const authorMatches = entry.matchAll(/<author>[\s\S]*?<name>([^\n]+)<\/name>[\s\S]*?<\/author>/g);
+      const authors = [];
+      for (const match of authorMatches) {
+        const name = match[1].trim();
+        const parts = name.split(' ');
+        const lastName = parts.pop() || '';
+        const given = parts.join(' ');
+        authors.push({ given, family: lastName });
+      }
+      return authors;
     };
     
     const getCategories = (): string[] => {
-      const cats = entry.querySelectorAll('category');
-      return Array.from(cats).map(c => c.getAttribute('term') || '');
+      const matches = entry.matchAll(/<category[^>]+term="([^"]+)"[^>]*\/>/g);
+      const categories = [];
+      for (const match of matches) {
+        categories.push(match[1]);
+      }
+      return categories;
     };
     
     return {
-      id: getText('id'),
-      title: getText('title').replace(/\n/g, ' ').trim(),
-      summary: getText('summary').replace(/\n/g, ' ').trim(),
+      id: getId(),
+      title: getText('title'),
+      summary: getText('summary'),
       published: getText('published'),
       updated: getText('updated'),
       authors: getAuthors(),
