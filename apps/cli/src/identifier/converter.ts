@@ -50,7 +50,7 @@ export class DataConverter {
       title: data.title?.[0] || data.title || '',
       DOI: identifier,
       url: data.URL || `https://doi.org/${identifier}`,
-      publicationDate,
+      date: publicationDate,
       abstract,
       volume: data.volume || null,
       issue: data.issue || null,

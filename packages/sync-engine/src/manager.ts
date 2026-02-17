@@ -248,11 +248,40 @@ export class SyncManager extends EventEmitter {
     for (const item of unsyncedItems) {
       try {
         const rawData = JSON.parse(item.rawJson);
-        const data = rawData.data;
+        let data = rawData.data;
+
+        // Parse creators if it's a string
+        if (typeof data.creators === 'string') {
+          try {
+            data.creators = JSON.parse(data.creators);
+          } catch (e) {
+            data.creators = [];
+          }
+        }
 
         // Remove metadata fields that shouldn't be sent
         delete data.key;
         delete data.version;
+
+        // Fix: Zotero API uses 'date' not 'publicationDate'
+        if (data.publicationDate) {
+          data.date = data.publicationDate;
+          delete data.publicationDate;
+        }
+
+        // Remove fields that Zotero API doesn't accept (custom fields should be in 'extra')
+        const zoteroItemFields = [
+          'itemType', 'title', 'creators', 'abstractNote', 'date', 'url', 'DOI',
+          'accessDate', 'libraryCatalog', 'callNumber', 'rights', 'placeholder'
+        ];
+        
+        // Remove any custom/unknown fields
+        const knownFields = new Set(zoteroItemFields);
+        for (const field of Object.keys(data)) {
+          if (!knownFields.has(field)) {
+            delete data[field];
+          }
+        }
 
         if (item.deleted) {
           // Delete from remote
@@ -266,8 +295,8 @@ export class SyncManager extends EventEmitter {
         } else if (item.version === 0) {
           // Create new item
           const result = await this.apiClient.createItems(zoteroId, [data]);
-          if (result.successful['0']) {
-            const newKey = result.successful['0'];
+          if (result.successful && result.successful['0']) {
+            const newKey = result.successful['0'].key || result.successful['0'];
             console.log(`   ✅ Created new item ${newKey}`);
             
             // 如果 key 改变了，先更新本地数据库中的 key
@@ -281,6 +310,8 @@ export class SyncManager extends EventEmitter {
             
             // 使用新的 key 标记为已同步
             await this.markAsSynced(newKey, libraryId);
+          } else if (result.failed && result.failed['0']) {
+            console.log(`   ❌ Failed to create item: ${result.failed['0'].message}`);
           }
           updated++;
         } else {
