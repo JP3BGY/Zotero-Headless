@@ -72,7 +72,9 @@ export class SyncManager extends EventEmitter {
       }
 
       // 5. Two-way sync
-      const result = await this.twoWaySync(libraryId, zoteroId, localVersion, remoteVersion, options.fullSync ?? false, hasUnsyncedChanges);
+      // 注意：始终执行下载阶段，即使版本匹配也要检查远程是否有我们"认为已同步"的项目
+      // 这样可以发现那些标记为 synced 但实际上从未上传到远程的项目
+      const result = await this.twoWaySync(libraryId, zoteroId, localVersion, remoteVersion, options.fullSync ?? false, false);
 
       // 6. Update library version
       await this.updateLibraryVersion(libraryId, remoteVersion);
