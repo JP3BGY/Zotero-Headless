@@ -21,6 +21,7 @@
     "@zotero-headless/api": "workspace:*",
     "@zotero-headless/core": "workspace:*",
     "@zotero-headless/database": "workspace:*",
+    "@zotero-headless/identifier": "workspace:*",
     "@zotero-headless/sync-engine": "workspace:*",
     "@zotero-headless/types": "workspace:*",
     "commander": "^14.0.3"

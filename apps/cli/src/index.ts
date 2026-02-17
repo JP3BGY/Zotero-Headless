@@ -110,6 +110,18 @@ function formatDateTime(dateValue: any): string {
   }
 }
 
+/**
+ * 生成 Zotero 格式的随机 key
+ * 8位大写字母和数字组合
+ */
+function generateKey(): string {
+  return Array.from({ length: 8 }, () => 
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.charAt(
+      Math.floor(Math.random() * 36)
+    )
+  ).join('');
+}
+
 // ============ CLI Commands ============
 
 interface Command {
@@ -666,6 +678,124 @@ const commands: Command[] = [
       }
     }
   },
+
+  {
+    name: 'add-by-id',
+    aliases: ['add'],
+    description: 'Add item(s) by identifier (DOI, ISBN, PMID, arXiv)',
+    execute: async (args) => {
+      if (args.length === 0) {
+        console.log(`
+❌ 请提供至少一个标识符
+
+用法: zotero add-by-id <identifier> [identifier2 ...]
+
+支持的标识符类型:
+  • DOI    - 如 10.1007/s11263-019-01228-7
+  • ISBN   - 如 978-3-642-15515-4
+  • PMID   - 如 1234567
+  • arXiv  - 如 2001.12345
+
+示例:
+  zotero add-by-id "10.1007/s11263-019-01228-7"
+  zotero add-by-id "978-3-642-15515-4"
+  zotero add-by-id "1234567"
+  zotero add-by-id "10.1007/xyz, 978-3-642-15515-4"  # 批量
+        `);
+        return;
+      }
+
+      await initModules();
+      const input = args.join(' ');
+      
+      try {
+        console.log('🔍 正在解析标识符...\n');
+        
+        // 导入 identifier 模块
+        const { IdentifierParser, MetadataFetcher } = await import('./identifier/index.js');
+        
+        // 1. 解析标识符
+        const identifiers = IdentifierParser.parse(input);
+        console.log(`📝 找到 ${identifiers.length} 个标识符`);
+        
+        // 2. 显示识别结果
+        identifiers.forEach((id, index) => {
+          console.log(`   ${index + 1}. ${id.type.toUpperCase()}: ${id.value}`);
+        });
+        
+        // 3. 配置获取器
+        const fetcher = new MetadataFetcher({
+          maxConcurrent: 3,
+          timeout: 30000,
+          retries: 2,
+          cacheTTL: 3600000,
+          email: process.env.CROSSREF_EMAIL,
+        });
+        
+        // 4. 获取元数据
+        console.log('\n📦 正在获取元数据...');
+        const results = await fetcher.fetchBatch(identifiers);
+        
+        // 5. 显示结果摘要
+        const successCount = results.filter(r => !r.error).length;
+        const failCount = results.filter(r => r.error).length;
+        
+        console.log(`\n📊 结果摘要:`);
+        console.log(`   ✅ 成功: ${successCount}`);
+        console.log(`   ❌ 失败: ${failCount}`);
+        
+        // 6. 写入数据库
+        if (successCount > 0) {
+          console.log('\n💾 写入本地数据库...');
+          const db = getDatabase();
+          const library = await db.select().from(libraries).get();
+          
+          if (!library) {
+            console.log('❌ 未找到文献库。请先运行 "zotero sync"');
+            return;
+          }
+          
+          for (const result of results) {
+            if (result.error || !result.item) continue;
+            
+            const item = {
+              key: generateKey(),
+              libraryId: library.id,
+              version: 0,
+              synced: false,
+              deleted: false,
+              createdAt: Math.floor(Date.now() / 1000),
+              updatedAt: Math.floor(Date.now() / 1000),
+              ...result.item,
+              rawJson: JSON.stringify({ data: result.item }),
+            };
+            
+            await db.insert(items).values(item).run();
+            console.log(`   📄 已添加: ${item.title?.substring(0, 50) || '(无标题)'}...`);
+          }
+          
+          console.log(`\n🎉 成功添加 ${successCount} 个文献到本地数据库！`);
+          console.log('💡 运行 "zotero sync" 上传到远程');
+        }
+        
+        // 7. 显示失败详情
+        if (failCount > 0) {
+          console.log('\n⚠️ 失败的标识符:');
+          results.filter(r => r.error).forEach((result, index) => {
+            console.log(`   ${index + 1}. ${result.identifier.value}`);
+            console.log(`     原因: ${result.error}`);
+          });
+        }
+        
+      } catch (error) {
+        console.log(`\n❌ 添加失败: ${error}`);
+        console.log('\n💡 请检查:');
+        console.log('   1. 标识符格式是否正确');
+        console.log('   2. 网络连接是否正常');
+        console.log('   3. API 密钥配置是否正确');
+      }
+    }
+  },
   
   {
     name: 'help',
@@ -687,6 +817,7 @@ Commands:
   stats              Show statistics
   verify             Verify API key
   add <type> <title> [authors...]  Add new item
+  add-by-id <id>     Add item by identifier (DOI, ISBN, PMID, arXiv)
   update <key> <field> <value>      Update item
   delete <key> [--permanent]         Delete (trash) item
   export [format] [file] Export items (bibtex, ris, csv, json)
@@ -700,6 +831,9 @@ Examples:
   zotero get ABCD1234     # Show item details
   zotero verify            # Check API key
   zotero add journalArticle "My Article" "John Doe"  # Add new article
+  zotero add-by-id "10.1007/s11263-019-01228-7"  # Add by DOI
+  zotero add-by-id "978-3-642-15515-4"  # Add by ISBN
+  zotero add-by-id "10.1007/xyz, 978-3-642-15515-4"  # Batch add
   zotero update ABCD1234 title "New Title"  # Update item title
   zotero delete ABCD1234   # Move item to trash
   zotero delete ABCD1234 --permanent  # Permanently delete

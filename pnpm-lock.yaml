@@ -66,6 +66,9 @@ importers:
       '@zotero-headless/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@zotero-headless/identifier':
+        specifier: workspace:*
+        version: link:../../packages/identifier
       '@zotero-headless/sync-engine':
         specifier: workspace:*
         version: link:../../packages/sync-engine
@@ -135,6 +138,12 @@ importers:
         version: 25.2.3
       typescript:
         specifier: ^5.3.0
+        version: 5.9.3
+
+  packages/identifier:
+    devDependencies:
+      typescript:
+        specifier: ^5.0.0
         version: 5.9.3
 
   packages/sync-engine:
