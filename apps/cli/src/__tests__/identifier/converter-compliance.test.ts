@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MetadataConverter } from '../converter.js';
+import { DataConverter } from '../../identifier/converter.js';
 
 describe('Converter Field Name Compliance', () => {
   describe('CrossRef Converter', () => {
@@ -14,7 +14,7 @@ describe('Converter Field Name Compliance', () => {
         DOI: '10.1000/test'
       };
 
-      const result = MetadataConverter.fromCrossRef(crossRefData, '10.1000/test');
+      const result = DataConverter.fromCrossRef(crossRefData, '10.1000/test');
 
       // Critical: Must use 'date' for Zotero API, not 'publicationDate'
       expect(result).toHaveProperty('date');
@@ -33,7 +33,7 @@ describe('Converter Field Name Compliance', () => {
         DOI: '10.1000/test'
       };
 
-      const result = MetadataConverter.fromCrossRef(crossRefData, '10.1000/test');
+      const result = DataConverter.fromCrossRef(crossRefData, '10.1000/test');
 
       // Creators must be an array for Zotero API
       expect(Array.isArray(result.creators)).toBe(true);
@@ -45,7 +45,7 @@ describe('Converter Field Name Compliance', () => {
     const converters = [
       {
         name: 'CrossRef',
-        fn: MetadataConverter.fromCrossRef,
+        fn: DataConverter.fromCrossRef,
         sampleData: {
           type: 'journal-article',
           title: ['Test'],

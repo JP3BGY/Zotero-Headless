@@ -112,6 +112,9 @@ export interface DeletedObjects {
 export interface SyncOptions {
   libraryId?: number;
   fullSync?: boolean;
+  groupId?: string;          // Sync specific group library
+  syncAll?: boolean;         // Sync all libraries (user + groups)
+  libraryType?: 'user' | 'group';  // Library type for current sync
 }
 
 export interface SyncResult {

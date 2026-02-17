@@ -43,26 +43,39 @@ export class SyncManager extends EventEmitter {
    * Main sync method - performs two-way sync
    */
   async sync(options: SyncOptions = {}): Promise<SyncResult> {
-    this.emit('sync:start', options);
+    // If syncAll is true, sync all libraries including groups
+    if (options.syncAll) {
+      return this.syncAllLibraries(options);
+    }
+
+    // If groupId is specified, sync that specific group
+    if (options.groupId) {
+      return this.syncGroupLibrary(options.groupId, options);
+    }
+
+    // Otherwise sync user library (default behavior)
+    return this.syncUserLibrary(options);
+  }
+
+  /**
+   * Sync user library (default)
+   */
+  private async syncUserLibrary(options: SyncOptions = {}): Promise<SyncResult> {
+    this.emit('sync:start', { ...options, libraryType: 'user' });
 
     try {
-      // 1. Verify API key
       console.log('🔑 Verifying API key...');
       const keyInfo = await this.apiClient.verifyKey();
       console.log(`   Logged in as: ${keyInfo.username}`);
 
-      // 2. Ensure library exists in local DB
-      const libraryId = options.libraryId ?? await this.ensureLibrary(keyInfo.userID);
-
-      // 3. Get local and remote versions
+      const libraryId = options.libraryId ?? await this.ensureLibrary(keyInfo.userID, 'user', 'My Library');
       const library = await this.getLibrary(libraryId);
       const localVersion = library?.version ?? 0;
       const zoteroId = String(library?.zoteroId ?? keyInfo.userID);
-      const remoteVersion = await this.apiClient.getLibraryVersion(zoteroId);
+      const remoteVersion = await this.apiClient.getLibraryVersion(zoteroId, 'user');
 
       console.log(`📊 Versions - Local: ${localVersion}, Remote: ${remoteVersion}`);
 
-      // 4. Check for unsynced local changes (even if versions match)
       const unsyncedItems = await this.getUnsyncedItems(libraryId);
       const hasUnsyncedChanges = unsyncedItems.length > 0;
 
@@ -71,45 +84,167 @@ export class SyncManager extends EventEmitter {
         return { success: true, updated: 0, deleted: 0, errors: [] };
       }
 
-      // 5. Two-way sync
-      // 注意：始终执行下载阶段，即使版本匹配也要检查远程是否有我们"认为已同步"的项目
-      // 这样可以发现那些标记为 synced 但实际上从未上传到远程的项目
-      const result = await this.twoWaySync(libraryId, zoteroId, localVersion, remoteVersion, options.fullSync ?? false, false);
-
-      // 6. Update library version
+      const result = await this.twoWaySync(libraryId, zoteroId, 'user', localVersion, remoteVersion, options.fullSync ?? false);
       await this.updateLibraryVersion(libraryId, remoteVersion);
-
-      // 7. Log sync result
       await this.logSync(libraryId, result.success ? 'success' : 'partial', localVersion, remoteVersion, result);
 
       this.emit('sync:complete', result);
       
-      // 显示同步结果摘要
       const parts: string[] = [];
       if (result.updated > 0) parts.push(`${result.updated} updated`);
       if (result.deleted > 0) parts.push(`${result.deleted} deleted`);
       if (parts.length === 0) parts.push('no changes');
-      
       console.log(`✅ Sync complete: ${parts.join(', ')}`);
-
-      if (result.conflicts && result.conflicts.length > 0) {
-        console.log(`⚠️  ${result.conflicts.length} conflicts detected`);
-      }
 
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('❌ Sync failed:', message);
-
-      await this.logSync(options.libraryId ?? 1, 'failed', 0, 0, {
-        success: false,
-        updated: 0,
-        deleted: 0,
-        errors: [message]
-      });
-
-      this.emit('sync:error', error);
       return { success: false, updated: 0, deleted: 0, errors: [message] };
+    }
+  }
+
+  /**
+   * Sync a specific group library
+   */
+  private async syncGroupLibrary(groupId: string, options: SyncOptions = {}): Promise<SyncResult> {
+    this.emit('sync:start', { ...options, libraryType: 'group', groupId });
+
+    try {
+      console.log(`📚 Syncing group library: ${groupId}`);
+      
+      // Get group details
+      const groupInfo = await this.apiClient.getGroup(groupId);
+      const groupName = groupInfo.name;
+      
+      const libraryId = await this.ensureLibrary(groupId, 'group', groupName);
+      const library = await this.getLibrary(libraryId);
+      const localVersion = library?.version ?? 0;
+      const remoteVersion = await this.apiClient.getLibraryVersion(groupId, 'group');
+
+      console.log(`📊 Versions - Local: ${localVersion}, Remote: ${remoteVersion}`);
+
+      const unsyncedItems = await this.getUnsyncedItems(libraryId);
+      const hasUnsyncedChanges = unsyncedItems.length > 0;
+
+      if (remoteVersion <= localVersion && !options.fullSync && !hasUnsyncedChanges) {
+        console.log('✅ Group library is up to date!');
+        return { success: true, updated: 0, deleted: 0, errors: [] };
+      }
+
+      const result = await this.twoWaySync(libraryId, groupId, 'group', localVersion, remoteVersion, options.fullSync ?? false);
+      await this.updateLibraryVersion(libraryId, remoteVersion);
+      await this.logSync(libraryId, result.success ? 'success' : 'partial', localVersion, remoteVersion, result);
+
+      this.emit('sync:complete', result);
+      
+      const parts: string[] = [];
+      if (result.updated > 0) parts.push(`${result.updated} updated`);
+      if (result.deleted > 0) parts.push(`${result.deleted} deleted`);
+      if (parts.length === 0) parts.push('no changes');
+      console.log(`✅ Group sync complete: ${parts.join(', ')}`);
+
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('❌ Group sync failed:', message);
+      return { success: false, updated: 0, deleted: 0, errors: [message] };
+    }
+  }
+
+  /**
+   * Sync all libraries (user + all groups)
+   */
+  private async syncAllLibraries(options: SyncOptions = {}): Promise<SyncResult> {
+    this.emit('sync:start', { ...options, syncAll: true });
+
+    try {
+      console.log('🔑 Verifying API key...');
+      const keyInfo = await this.apiClient.verifyKey();
+      console.log(`   Logged in as: ${keyInfo.username}`);
+
+      let totalUpdated = 0;
+      let totalDeleted = 0;
+      const allErrors: string[] = [];
+
+      // 1. Sync user library first
+      console.log('\n📚 === Syncing User Library ===');
+      const userResult = await this.syncUserLibrary({ ...options, syncAll: false });
+      totalUpdated += userResult.updated;
+      totalDeleted += userResult.deleted;
+      allErrors.push(...userResult.errors);
+
+      // 2. Get user's groups
+      console.log('\n📚 === Fetching Groups ===');
+      const groups = await this.getUserGroups();
+      console.log(`   Found ${groups.length} groups`);
+
+      // 3. Sync each group library
+      for (const group of groups) {
+        console.log(`\n📚 === Syncing Group: ${group.name} (${group.groupId}) ===`);
+        const groupResult = await this.syncGroupLibrary(group.groupId, { ...options, syncAll: false });
+        totalUpdated += groupResult.updated;
+        totalDeleted += groupResult.deleted;
+        allErrors.push(...groupResult.errors);
+      }
+
+      const overallResult: SyncResult = {
+        success: allErrors.length === 0,
+        updated: totalUpdated,
+        deleted: totalDeleted,
+        errors: allErrors
+      };
+
+      this.emit('sync:complete', overallResult);
+      console.log(`\n✅ All libraries synced: ${totalUpdated} updated, ${totalDeleted} deleted`);
+      
+      return overallResult;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('❌ Sync all failed:', message);
+      return { success: false, updated: 0, deleted: 0, errors: [message] };
+    }
+  }
+
+  /**
+   * Get user's groups from API and sync to local DB
+   */
+  async getUserGroups(): Promise<Array<{ groupId: string; name: string; accessLevel: string }>> {
+    try {
+      const keyInfo = await this.apiClient.verifyKey();
+      const userId = keyInfo.userID;
+
+      // Get groups from Zotero API
+      const apiGroups = await this.apiClient.getGroups(userId);
+      
+      const groups: Array<{ groupId: string; name: string; accessLevel: string }> = [];
+
+      for (const apiGroup of apiGroups) {
+        const groupId = String(apiGroup.id);
+        
+        // Get detailed group info
+        try {
+          const groupDetails = await this.apiClient.getGroup(groupId);
+          const access = keyInfo.access.groups?.[groupId];
+          const accessLevel = access?.write ? 'write' : (access?.library ? 'read' : 'none');
+          
+          groups.push({
+            groupId,
+            name: groupDetails.name,
+            accessLevel
+          });
+
+          // Ensure group library exists in local DB
+          await this.ensureLibrary(groupId, 'group', groupDetails.name);
+        } catch (e) {
+          console.warn(`   ⚠️  Failed to get group details for ${groupId}`);
+        }
+      }
+
+      return groups;
+    } catch (error) {
+      console.error('❌ Failed to get user groups:', error);
+      return [];
     }
   }
 
@@ -119,6 +254,7 @@ export class SyncManager extends EventEmitter {
   private async twoWaySync(
     libraryId: number,
     zoteroId: string,
+    libraryType: 'user' | 'group' = 'user',
     localVersion: number,
     remoteVersion: number,
     fullSync: boolean,
@@ -132,9 +268,8 @@ export class SyncManager extends EventEmitter {
     // ===== PHASE 1: Download from remote =====
     if (!skipDownload) {
       console.log('\n📥 Phase 1: Downloading from remote...');
-      // For full sync, use since=0 to get all items
       const sinceVersion = fullSync ? 0 : localVersion;
-      const downloadResult = await this.downloadUpdates(libraryId, zoteroId, sinceVersion);
+      const downloadResult = await this.downloadUpdates(libraryId, zoteroId, libraryType, sinceVersion);
       totalUpdated += downloadResult.updated;
       totalDeleted += downloadResult.deleted;
       errors.push(...downloadResult.errors);
@@ -145,7 +280,7 @@ export class SyncManager extends EventEmitter {
 
     // ===== PHASE 2: Upload to remote =====
     console.log('\n📤 Phase 2: Uploading local changes...');
-    const uploadResult = await this.uploadChanges(libraryId, zoteroId, remoteVersion);
+    const uploadResult = await this.uploadChanges(libraryId, zoteroId, libraryType, remoteVersion);
     totalUpdated += uploadResult.updated;
     totalDeleted += uploadResult.deleted;
     errors.push(...uploadResult.errors);
@@ -166,6 +301,7 @@ export class SyncManager extends EventEmitter {
   private async downloadUpdates(
     libraryId: number,
     zoteroId: string,
+    libraryType: 'user' | 'group' = 'user',
     sinceVersion: number
   ): Promise<{ updated: number; deleted: number; errors: string[]; conflicts: string[] }> {
     let updated = 0;
@@ -174,7 +310,7 @@ export class SyncManager extends EventEmitter {
     const conflicts: string[] = [];
 
     // 1. Get changed item versions
-    const versionMap = await this.apiClient.getItemVersions(zoteroId, sinceVersion);
+    const versionMap = await this.apiClient.getItemVersions(zoteroId, sinceVersion, libraryType);
     const changedKeys = Object.keys(versionMap);
     console.log(`   Found ${changedKeys.length} changed items`);
 
@@ -184,7 +320,7 @@ export class SyncManager extends EventEmitter {
       const batch = changedKeys.slice(i, i + batchSize);
 
       try {
-        const apiItems = await this.apiClient.getItems(zoteroId, batch);
+        const apiItems = await this.apiClient.getItems(zoteroId, batch, libraryType);
 
         for (const apiItem of apiItems) {
           // Check for conflict
@@ -217,7 +353,7 @@ export class SyncManager extends EventEmitter {
     }
 
     // 3. Handle deletions
-    const deletedData = await this.apiClient.getDeleted(zoteroId, sinceVersion);
+    const deletedData = await this.apiClient.getDeleted(zoteroId, sinceVersion, libraryType);
     deleted = deletedData.items.length;
 
     if (deleted > 0) {
@@ -233,6 +369,7 @@ export class SyncManager extends EventEmitter {
   private async uploadChanges(
     libraryId: number,
     zoteroId: string,
+    libraryType: 'user' | 'group' = 'user',
     baseVersion: number
   ): Promise<{ updated: number; deleted: number; errors: string[]; conflicts: string[] }> {
     let updated = 0;
@@ -286,7 +423,7 @@ export class SyncManager extends EventEmitter {
         if (item.deleted) {
           // Delete from remote
           try {
-            await this.apiClient.deleteItem(zoteroId, item.key, item.version);
+            await this.apiClient.deleteItem(zoteroId, item.key, item.version, libraryType);
             console.log(`   🗑️  Deleted ${item.key} from remote`);
           } catch (e: any) {
             if (e.message?.includes('404')) {
@@ -303,7 +440,7 @@ export class SyncManager extends EventEmitter {
           deleted++;
         } else if (item.version === 0) {
           // Create new item
-          const result = await this.apiClient.createItems(zoteroId, [data]);
+          const result = await this.apiClient.createItems(zoteroId, [data], libraryType);
           if (result.successful && result.successful['0']) {
             const newKey = result.successful['0'].key || result.successful['0'];
             console.log(`   ✅ Created new item ${newKey}`);
@@ -325,7 +462,7 @@ export class SyncManager extends EventEmitter {
           updated++;
         } else {
           // Update existing item
-          await this.apiClient.updateItem(zoteroId, item.key, data, item.version);
+          await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
           console.log(`   ✅ Updated ${item.key}`);
           updated++;
           
@@ -451,19 +588,27 @@ export class SyncManager extends EventEmitter {
   /**
    * Ensure library exists
    */
-  private async ensureLibrary(zoteroId: number): Promise<number> {
+  private async ensureLibrary(
+    zoteroId: string | number, 
+    type: 'user' | 'group' = 'user', 
+    name: string = 'My Library'
+  ): Promise<number> {
+    const zoteroIdStr = String(zoteroId);
     const existing = await this.db.select()
       .from(libraries)
-      .where(eq(libraries.zoteroId, String(zoteroId)))
+      .where(and(
+        eq(libraries.zoteroId, zoteroIdStr),
+        eq(libraries.type, type)
+      ))
       .get();
 
     if (existing) return existing.id;
 
     const result = await this.db.insert(libraries)
       .values({
-        zoteroId: String(zoteroId),
-        type: 'user',
-        name: 'My Library',
+        zoteroId: zoteroIdStr,
+        type,
+        name,
         version: 0,
       })
       .returning({ id: libraries.id })

@@ -65,6 +65,9 @@ export interface DeletedObjects {
 export interface SyncOptions {
     libraryId?: number;
     fullSync?: boolean;
+    groupId?: string;
+    syncAll?: boolean;
+    libraryType?: 'user' | 'group';
 }
 export interface SyncResult {
     success: boolean;

@@ -139,14 +139,27 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const fullSync = args.includes('--full-sync') || args.includes('-f');
+      const syncGroups = args.includes('--groups') || args.includes('-g');
+      const groupArg = args.find(arg => arg.startsWith('--group='))?.split('=')[1] || 
+                       args.find(arg => arg.startsWith('-G'))?.substring(2);
       
       console.log('🔄 Starting two-way sync...');
       if (fullSync) {
         console.log('   (Full sync mode - ignoring version numbers)');
       }
+      if (syncGroups) {
+        console.log('   (Sync all group libraries)');
+      }
+      if (groupArg) {
+        console.log(`   (Sync group: ${groupArg})`);
+      }
       console.log('');
       
-      const result = await syncManager.sync({ fullSync });
+      const result = await syncManager.sync({ 
+        fullSync,
+        syncAll: syncGroups,
+        groupId: groupArg
+      });
       
       if (result.success) {
         console.log(`\n✅ Sync completed successfully!`);
@@ -161,6 +174,31 @@ const commands: Command[] = [
         }
         process.exit(1);
       }
+    }
+  },
+  
+  {
+    name: 'groups',
+    aliases: ['g'],
+    description: 'List your Zotero group libraries',
+    execute: async () => {
+      await initModules();
+      
+      console.log('📚 Fetching your groups...');
+      const groups = await syncManager.getUserGroups();
+      
+      if (groups.length === 0) {
+        console.log('   No groups found.');
+        return;
+      }
+      
+      console.log(`\n📚 Your Groups (${groups.length}):\n`);
+      groups.forEach(group => {
+        const accessIcon = group.accessLevel === 'write' ? '✏️' : '👁️';
+        console.log(`  ${accessIcon} [${group.groupId}] ${group.name}`);
+        console.log(`      Access: ${group.accessLevel}`);
+        console.log('');
+      });
     }
   },
   
