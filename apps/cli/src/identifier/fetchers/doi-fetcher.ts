@@ -85,6 +85,27 @@ export class DOIFetcher extends BaseFetcher {
     }
 
     const result = await response.json();
-    return result.data;  // DataCite 返回数据在 data 字段
+    const attrs = result.data.attributes;
+    
+    // 将 DataCite 格式转换为 CrossRef 兼容格式
+    return {
+      type: attrs.types?.citeproc || 'preprint',
+      title: attrs.titles?.map((t: any) => t.title) || [],
+      DOI: doi,
+      URL: attrs.url || `https://doi.org/${doi}`,
+      published: attrs.published || String(attrs.publicationYear || ''),
+      abstract: attrs.descriptions?.find((d: any) => d.descriptionType === 'Abstract')?.description || '',
+      volume: null,
+      issue: null,
+      page: null,
+      'container-title': attrs.container?.title ? [attrs.container.title] : [],
+      publisher: attrs.publisher || 'arXiv',
+      author: attrs.creators?.map((c: any) => ({
+        given: c.givenName || '',
+        family: c.familyName || '',
+      })) || [],
+      ISBN: attrs.identifiers?.filter((i: any) => i.identifierType === 'ISBN').map((i: any) => i.identifier) || [],
+      ISSN: attrs.identifiers?.filter((i: any) => i.identifierType === 'ISSN').map((i: any) => i.identifier) || [],
+    };
   }
 }
