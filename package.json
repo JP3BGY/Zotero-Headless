@@ -3,6 +3,17 @@
   "version": "1.0.0",
   "private": true,
   "description": "Zotero Web API 同步客户端 - 无需桌面客户端即可实现文献库同步",
+  "bin": {
+    "zotero": "./apps/cli/dist/index.js"
+  },
+  "files": [
+    "apps/**/dist/**/*",
+    "packages/**/dist/**/*",
+    "scripts/**/*",
+    "package.json",
+    "pnpm-workspace.yaml",
+    "turbo.json"
+  ],
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
@@ -10,7 +21,11 @@
     "test:watch": "vitest",
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
-    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\""
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.5.0",
