@@ -12,6 +12,7 @@ let syncManager: any;
 let getDatabase: any;
 let items: any;
 let libraries: any;
+let attachments: any;
 let zoteroApi: any;
 let attachmentManager: any;
 let webdavConfig: any;
