@@ -314,41 +314,55 @@ export class SyncManager extends EventEmitter {
     const changedKeys = Object.keys(versionMap);
     console.log(`   Found ${changedKeys.length} changed items`);
 
-    // 2. Batch download and merge
+    // 2. Parallel download with batch processing
     const batchSize = this.config.batchSize ?? 50;
+    const concurrency = this.config.concurrency ?? 5;
+    
+    console.log(`   Downloading with ${concurrency} parallel connections...`);
+    
     for (let i = 0; i < changedKeys.length; i += batchSize) {
       const batch = changedKeys.slice(i, i + batchSize);
-
+      
       try {
+        // Fetch batch from API
         const apiItems = await this.apiClient.getItems(zoteroId, batch, libraryType);
-
-        for (const apiItem of apiItems) {
-          // Check for conflict
-          const localItem = await this.getItemByKey(apiItem.key, libraryId);
-
-          if (localItem && !localItem.synced) {
-            // Local has unsynced changes - potential conflict!
-            console.log(`   ⚠️  Conflict detected for item ${apiItem.key}`);
-            conflicts.push(apiItem.key);
-
-            // Auto-resolve based on strategy
-            if (this.config.conflictStrategy === 'remote') {
-              // Accept remote, discard local
-              await this.upsertItem(apiItem, libraryId);
-              updated++;
-            } else if (this.config.conflictStrategy === 'local') {
-              // Keep local, will upload in Phase 2
-              console.log(`   → Keeping local version for ${apiItem.key}`);
+        
+        // Process batch in parallel with concurrency limit
+        const chunkSize = Math.min(concurrency, apiItems.length);
+        
+        for (let j = 0; j < apiItems.length; j += chunkSize) {
+          const chunk = apiItems.slice(j, j + chunkSize);
+          
+          await Promise.all(chunk.map(async (apiItem) => {
+            try {
+              const localItem = await this.getItemByKey(apiItem.key, libraryId);
+              
+              if (localItem && !localItem.synced) {
+                // Conflict detected
+                console.log(`   ⚠️  Conflict: ${apiItem.key}`);
+                conflicts.push(apiItem.key);
+                
+                if (this.config.conflictStrategy === 'remote') {
+                  await this.upsertItem(apiItem, libraryId);
+                  updated++;
+                }
+              } else {
+                // No conflict
+                await this.upsertItem(apiItem, libraryId);
+                updated++;
+              }
+            } catch (e) {
+              console.error(`   ❌ Failed: ${apiItem.key}:`, e);
             }
-            // 'manual' would require user input
-          } else {
-            // No conflict, just update
-            await this.upsertItem(apiItem, libraryId);
-            updated++;
-          }
+          }));
         }
+        
+        // Progress update
+        const progress = Math.min(i + batchSize, changedKeys.length);
+        console.log(`   Progress: ${progress}/${changedKeys.length} items (${Math.floor(progress / changedKeys.length * 100)}%)`);
+        
       } catch (e) {
-        errors.push(`Download batch ${Math.floor(i / batchSize) + 1} failed: ${e}`);
+        errors.push(`Batch ${Math.floor(i / batchSize) + 1} failed: ${e}`);
       }
     }
 
@@ -361,6 +375,51 @@ export class SyncManager extends EventEmitter {
     }
 
     return { updated, deleted, errors, conflicts };
+  }
+
+  /**
+   * Download items in parallel with concurrency limit
+   */
+  private async downloadItemsParallel(
+    items: any[],
+    libraryId: number,
+    concurrency: number
+  ): Promise<{ updated: number; conflicts: string[] }> {
+    const updated = 0;
+    const conflicts: string[] = [];
+    
+    // Process items in chunks with concurrency limit
+    for (let i = 0; i < items.length; i += concurrency) {
+      const chunk = items.slice(i, i + concurrency);
+      
+      await Promise.all(chunk.map(async (apiItem) => {
+        try {
+          const localItem = await this.getItemByKey(apiItem.key, libraryId);
+          
+          if (localItem && !localItem.synced) {
+            // Conflict detected
+            conflicts.push(apiItem.key);
+            
+            if (this.config.conflictStrategy === 'remote') {
+              await this.upsertItem(apiItem, libraryId);
+            }
+            // 'local' or 'manual' - skip, will handle later
+          } else {
+            // No conflict
+            await this.upsertItem(apiItem, libraryId);
+          }
+        } catch (e) {
+          console.error(`Failed to download item ${apiItem.key}:`, e);
+        }
+      }));
+      
+      // Progress update
+      if (i + concurrency < items.length) {
+        console.log(`   Downloaded ${Math.min(i + concurrency, items.length)}/${items.length} items...`);
+      }
+    }
+    
+    return { updated, conflicts };
   }
 
   /**
