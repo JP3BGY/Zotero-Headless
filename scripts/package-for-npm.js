@@ -121,21 +121,36 @@ tsconfig.json
 `.trim()
 );
 
-// Create tarball
-console.log('📦 Creating tarball...');
+// Create tarball (using zip for better compatibility)
+console.log('📦 Creating package...');
 const tarballName = `zotero-headless-${version}.tgz`;
+
+// Create a temporary staging directory
+const stagingDir = join(rootDir, 'staging-package');
+if (existsSync(stagingDir)) {
+  rmSync(stagingDir, { recursive: true });
+}
+mkdirSync(stagingDir, { recursive: true });
+
+// Copy all files to staging directory
 try {
-  execSync(`tar -czf ${tarballName} .`, {
-    cwd: distDir,
+  execSync(`cp -r ${distDir}/* ${stagingDir}/`, {
+    cwd: rootDir,
     stdio: 'pipe'
   });
-  
-  // Move tarball to root
-  fsRenameSync(
-    join(distDir, tarballName),
-    join(rootDir, tarballName)
-  );
-  
+
+  // Create tarball using Node.js native tar (more reliable)
+  const tar = await import('tar');
+  await tar.create({
+    file: join(rootDir, tarballName),
+    cwd: stagingDir,
+    sync: true,
+    gzip: true
+  }, ['.']);
+
+  // Clean up staging directory
+  rmSync(stagingDir, { recursive: true });
+
   console.log('✅ Package built successfully!');
   console.log(`📦 ${tarballName}`);
   console.log('');
@@ -145,7 +160,7 @@ try {
   console.log('To test:');
   console.log('  zotero help');
 } catch (error) {
-  console.error('❌ Failed to create tarball:', error.message);
+  console.error('❌ Failed to create package:', error.message);
   if (error.stderr) {
     console.error('stderr:', error.stderr.toString());
   }
