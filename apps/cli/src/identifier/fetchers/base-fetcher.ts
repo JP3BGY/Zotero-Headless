@@ -1,6 +1,6 @@
 // @ts-nocheck
-import { Identifier, MetadataResult, FetcherConfig } from './types';
-import { DataConverter } from '../converter';
+import { Identifier, MetadataResult, FetcherConfig } from '../types.js';
+import { DataConverter } from '../converter.js';
 
 /**
  * 基础获取器类

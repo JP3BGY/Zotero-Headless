@@ -1,9 +1,9 @@
 // @ts-nocheck
-import { Identifier, MetadataResult, FetcherConfig } from './types';
-import { DOIFetcher } from './fetchers/doi-fetcher';
-import { ISBNFetcher } from './fetchers/isbn-fetcher';
-import { PMIDFetcher } from './fetchers/pmid-fetcher';
-import { ArXivFetcher } from './fetchers/arxiv-fetcher';
+import { Identifier, MetadataResult, FetcherConfig } from './types.js';
+import { DOIFetcher } from './fetchers/doi-fetcher.js';
+import { ISBNFetcher } from './fetchers/isbn-fetcher.js';
+import { PMIDFetcher } from './fetchers/pmid-fetcher.js';
+import { ArXivFetcher } from './fetchers/arxiv-fetcher.js';
 
 /**
  * 元数据获取器主类

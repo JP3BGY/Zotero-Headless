@@ -3,7 +3,7 @@
  * 数据转换器
  * 将各种 API 返回的数据转换为 Zotero 数据格式
  */
-import { Creator } from './types';
+import { Creator } from './types.js';
 
 export class DataConverter {
   /**

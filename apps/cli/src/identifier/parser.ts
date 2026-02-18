@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { Identifier, IdentifierType } from './types';
+import { Identifier, IdentifierType } from './types.js';
 
 /**
  * 标识符解析器

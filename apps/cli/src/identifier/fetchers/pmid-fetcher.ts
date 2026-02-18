@@ -1,7 +1,7 @@
 // @ts-nocheck
-import { Identifier, MetadataResult } from './types';
-import { BaseFetcher } from './base-fetcher';
-import { DataConverter } from '../converter';
+import { Identifier, MetadataResult } from '../types.js';
+import { BaseFetcher } from './base-fetcher.js';
+import { DataConverter } from '../converter.js';
 
 /**
  * PubMed (PMID) 元数据获取器
