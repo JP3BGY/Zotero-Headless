@@ -51,46 +51,30 @@ jobs:
         run: |
           VERSION=${{ steps.get_version.outputs.VERSION }}
           mkdir -p dist-package
+          cp -r apps/cli/dist dist-package/
+          cp -r packages/*/dist dist-package/ 2>/dev/null || true
           
-          # Copy packages first (into subdirectories to avoid conflicts)
-          for pkg in packages/*/; do
-            pkg_name=$(basename "$pkg")
-            mkdir -p "dist-package/$pkg_name"
-            cp -r "$pkg/dist/"* "dist-package/$pkg_name/" 2>/dev/null || true
-          done
+          # Create Windows batch wrapper
+          cat > dist-package/zotero.cmd << 'EOFCMD'
+          @echo off
+          node "%~dp0\dist\index.js" %*
+          EOFCMD
           
-          # Copy CLI last (to root, ensuring its index.js is the CLI entry)
-          cp -r apps/cli/dist/* dist-package/
-          
-          # Create cross-platform CLI wrapper (JavaScript)
-          cat > dist-package/bin.js << 'EOFJS'
-          #!/usr/bin/env node
-          import { spawn } from 'child_process';
-          import { fileURLToPath } from 'url';
-          import { dirname, join } from 'path';
-          
-          const __dirname = dirname(fileURLToPath(import.meta.url));
-          const cliPath = join(__dirname, 'index.js');
-          
-          const child = spawn('node', [cliPath, ...process.argv.slice(2)], {
-            stdio: 'inherit',
-            shell: false
-          });
-          
-          child.on('exit', (code) => {
-            process.exitCode = code;
-          });
-          EOFJS
-          chmod +x dist-package/bin.js
+          # Create Unix shell wrapper
+          cat > dist-package/zotero << 'EOFSH'
+          #!/usr/bin/env sh
+          node "$(dirname "$0")/dist/index.js" "$@"
+          EOFSH
+          chmod +x dist-package/zotero
           
           cat > dist-package/package.json << EOF
           {
             "name": "zotero-headless",
             "version": "$VERSION",
             "description": "Zotero Web API sync client",
-            "type": "module",
-            "bin": {
-              "zotero": "./bin.js"
+            "bin": { 
+              "zotero": "./zotero",
+              "zotero.cmd": "./zotero.cmd"
             },
             "engines": { "node": ">=18.0.0" },
             "dependencies": {
@@ -105,6 +89,7 @@ jobs:
           }
           EOF
           cd dist-package && tar -czf ../zotero-headless-${VERSION}.tgz . && cd ..
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
