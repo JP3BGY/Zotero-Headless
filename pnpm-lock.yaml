@@ -60,6 +60,9 @@ importers:
       '@zotero-headless/api':
         specifier: workspace:*
         version: link:../../packages/api
+      '@zotero-headless/attachment-manager':
+        specifier: file:../../packages/attachment-manager
+        version: file:packages/attachment-manager(@types/better-sqlite3@7.5.0)(better-sqlite3@11.9.1)(sql.js@1.14.0)
       '@zotero-headless/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -72,6 +75,9 @@ importers:
       '@zotero-headless/types':
         specifier: workspace:*
         version: link:../../packages/types
+      '@zotero-headless/webdav-client':
+        specifier: file:../../packages/webdav-client
+        version: file:packages/webdav-client
       commander:
         specifier: ^14.0.3
         version: 14.0.3
@@ -2171,4 +2177,46 @@ packages:
 
   /zod@4.3.6:
     resolution: {integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==}
+    dev: false
+
+  file:packages/attachment-manager(@types/better-sqlite3@7.5.0)(better-sqlite3@11.9.1)(sql.js@1.14.0):
+    resolution: {directory: packages/attachment-manager, type: directory}
+    id: file:packages/attachment-manager
+    name: '@zotero-headless/attachment-manager'
+    dependencies:
+      '@zotero-headless/api': link:packages/api
+      '@zotero-headless/database': link:packages/database
+      '@zotero-headless/webdav-client': link:packages/webdav-client
+      drizzle-orm: 0.30.10(@types/better-sqlite3@7.5.0)(better-sqlite3@11.9.1)(sql.js@1.14.0)
+    transitivePeerDependencies:
+      - '@aws-sdk/client-rds-data'
+      - '@cloudflare/workers-types'
+      - '@electric-sql/pglite'
+      - '@libsql/client'
+      - '@neondatabase/serverless'
+      - '@op-engineering/op-sqlite'
+      - '@opentelemetry/api'
+      - '@planetscale/database'
+      - '@types/better-sqlite3'
+      - '@types/pg'
+      - '@types/react'
+      - '@types/sql.js'
+      - '@vercel/postgres'
+      - '@xata.io/client'
+      - better-sqlite3
+      - bun-types
+      - expo-sqlite
+      - knex
+      - kysely
+      - mysql2
+      - pg
+      - postgres
+      - react
+      - sql.js
+      - sqlite3
+    dev: false
+
+  file:packages/webdav-client:
+    resolution: {directory: packages/webdav-client, type: directory}
+    name: '@zotero-headless/webdav-client'
     dev: false

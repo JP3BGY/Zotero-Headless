@@ -19,10 +19,12 @@
   },
   "dependencies": {
     "@zotero-headless/api": "workspace:*",
+    "@zotero-headless/attachment-manager": "file:../../packages/attachment-manager",
     "@zotero-headless/core": "workspace:*",
     "@zotero-headless/database": "workspace:*",
     "@zotero-headless/sync-engine": "workspace:*",
     "@zotero-headless/types": "workspace:*",
+    "@zotero-headless/webdav-client": "file:../../packages/webdav-client",
     "commander": "^14.0.3"
   },
   "devDependencies": {

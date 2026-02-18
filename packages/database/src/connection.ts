@@ -125,6 +125,26 @@ export function initializeDatabase(): Database {
       UNIQUE(item_key, library_id, tag)
     );
     
+    CREATE TABLE IF NOT EXISTS attachments (
+      key TEXT NOT NULL,
+      parent_item_key TEXT NOT NULL,
+      library_id INTEGER NOT NULL,
+      filename TEXT,
+      content_type TEXT,
+      file_type TEXT,
+      path TEXT,
+      url TEXT,
+      version INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      deleted INTEGER NOT NULL DEFAULT 0,
+      size INTEGER,
+      md5 TEXT,
+      raw_json TEXT NOT NULL,
+      PRIMARY KEY (key, library_id),
+      FOREIGN KEY (library_id) REFERENCES libraries(id)
+    );
+    
     CREATE TABLE IF NOT EXISTS sync_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       library_id INTEGER NOT NULL,
@@ -137,6 +157,20 @@ export function initializeDatabase(): Database {
       items_deleted INTEGER DEFAULT 0,
       error_message TEXT,
       FOREIGN KEY (library_id) REFERENCES libraries(id)
+    );
+    
+    CREATE TABLE IF NOT EXISTS webdav_config (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      url TEXT NOT NULL,
+      username TEXT NOT NULL,
+      password TEXT NOT NULL,
+      base_path TEXT NOT NULL DEFAULT '/zotero',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      auto_sync INTEGER NOT NULL DEFAULT 0,
+      last_sync_at INTEGER,
+      last_error TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
     );
     
     CREATE INDEX IF NOT EXISTS idx_items_library ON items(library_id);
