@@ -21,8 +21,7 @@
     "test:watch": "vitest",
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
-    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
-    "postinstall": "node scripts/postinstall.js"
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\""
   },
   "engines": {
     "node": ">=18.0.0"
