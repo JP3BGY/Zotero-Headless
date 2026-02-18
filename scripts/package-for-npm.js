@@ -38,8 +38,8 @@ console.log('🔧 Checking for tsup...');
 try {
   execSync('npx tsup --version', { stdio: 'ignore' });
 } catch {
-  console.log('📥 Installing tsup...');
-  execSync('npm install -g tsup', { stdio: 'inherit' });
+  console.log('📥 Installing tsup and typescript...');
+  execSync('npm install -g tsup typescript', { stdio: 'inherit' });
 }
 
 // Bundle CLI with all workspace dependencies
