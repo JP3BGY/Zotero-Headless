@@ -59,8 +59,7 @@ const tsupCommand = [
   '--target node18',
   '--external better-sqlite3',
   '--external sql.js',
-  '--minify',
-  '--outExtension .js'
+  '--minify'
 ].join(' ');
 
 try {
@@ -71,6 +70,18 @@ try {
 } catch (error) {
   console.error('❌ Bundling failed:', error.message);
   process.exit(1);
+}
+
+// Rename .mjs to .js for compatibility
+console.log('📝 Renaming .mjs to .js...');
+import { readdirSync, renameSync } from 'fs';
+const files = readdirSync(distDir);
+for (const file of files) {
+  if (file.endsWith('.mjs')) {
+    const newName = file.replace('.mjs', '.js');
+    renameSync(join(distDir, file), join(distDir, newName));
+    console.log(`  ${file} → ${newName}`);
+  }
 }
 
 // Create package.json
