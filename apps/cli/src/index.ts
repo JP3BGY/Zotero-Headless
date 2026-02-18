@@ -13,6 +13,8 @@ let getDatabase: any;
 let items: any;
 let libraries: any;
 let zoteroApi: any;
+let attachmentManager: any;
+let webdavConfig: any;
 
 async function initModules() {
   if (!syncManager) {
@@ -24,10 +26,16 @@ async function initModules() {
     getDatabase = dbMod.getDatabase;
     items = dbMod.items;
     libraries = dbMod.libraries;
+    webdavConfig = dbMod.webdavConfig;
+    attachments = dbMod.attachments;
   }
   if (!zoteroApi) {
     const apiMod = await import('@zotero-headless/api');
     zoteroApi = apiMod.zoteroApi;
+  }
+  if (!attachmentManager) {
+    const attMod = await import('@zotero-headless/attachment-manager');
+    attachmentManager = attMod.attachmentManager;
   }
 }
 
@@ -436,6 +444,236 @@ const commands: Command[] = [
         console.log(`   Error: ${e}`);
         process.exit(1);
       }
+    }
+  },
+  
+  // ============ Attachment & WebDAV Commands ============
+  
+  {
+    name: 'attachments',
+    aliases: ['att'],
+    description: 'List attachments',
+    execute: async (args) => {
+      await initModules();
+      const options: {
+        itemKey?: string;
+        webdavSynced?: boolean;
+        limit: number;
+      } = {
+        limit: 50
+      };
+      
+      // Parse arguments
+      for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        if (arg === '--item' && args[i + 1]) {
+          options.itemKey = args[++i];
+        } else if (arg === '--webdav' && args[i + 1]) {
+          const val = args[++i];
+          options.webdavSynced = val === 'true' || val === 'yes' || val === '1';
+        } else if (arg === '--limit' && args[i + 1]) {
+          options.limit = parseInt(args[++i]) || 50;
+        }
+      }
+      
+      const db = getDatabase();
+      const library = await db.select().from(libraries).get();
+      
+      if (!library) {
+        console.log('❌ No library found. Run "sync" first.');
+        return;
+      }
+      
+      const attachmentList = await attachmentManager.listAttachments({
+        libraryId: library.id,
+        itemKey: options.itemKey,
+        webdavSynced: options.webdavSynced,
+        limit: options.limit,
+      });
+      
+      console.log(`\n📎 Attachments (${attachmentList.length}):\n`);
+      
+      if (attachmentList.length === 0) {
+        console.log('   No attachments found.');
+      } else {
+        attachmentList.forEach(att => {
+          const webdavStatus = att.webdavSynced ? '☁️' : '📁';
+          const typeIcon = att.attachmentType === 'link' ? '🔗' : '📄';
+          console.log(`  ${webdavStatus} ${typeIcon} [${att.key}] ${att.filename}`);
+          console.log(`      Title: ${att.title}`);
+          console.log(`      Size: ${att.fileSize ? (att.fileSize / 1024).toFixed(1) + ' KB' : 'N/A'}`);
+          if (att.webdavPath) {
+            console.log(`      WebDAV: ${att.webdavPath}`);
+          }
+          console.log();
+        });
+      }
+    }
+  },
+  
+  {
+    name: 'webdav:config',
+    aliases: ['wdc'],
+    description: 'Configure WebDAV server',
+    execute: async (args) => {
+      await initModules();
+      if (args.length < 3) {
+        console.log('❌ Please provide WebDAV configuration');
+        console.log('   Usage: zotero webdav:config <url> <username> <password> [basePath]');
+        console.log('   Example: zotero webdav:config https://dav.jianguoyun.com/dav/zotero user pass /');
+        return;
+      }
+      
+      const [url, username, password, basePath] = args;
+      
+      console.log('🔧 Configuring WebDAV...\n');
+      const result = await attachmentManager.configureWebDAV({
+        url,
+        username,
+        password,
+        basePath: basePath || '/zotero',
+        autoSync: false,
+      });
+      
+      if (result.success) {
+        console.log('✅ WebDAV configured successfully!');
+        console.log(`   URL: ${url}`);
+        console.log(`   Username: ${username}`);
+        console.log(`   Base Path: ${basePath || '/zotero'}`);
+      } else {
+        console.log('❌ WebDAV configuration failed!');
+        console.log(`   Error: ${result.error}`);
+        process.exit(1);
+      }
+    }
+  },
+  
+  {
+    name: 'webdav:sync',
+    aliases: ['wds'],
+    description: 'Sync attachments to WebDAV',
+    execute: async (args) => {
+      await initModules();
+      const quiet = args.includes('--quiet') || args.includes('-q');
+      
+      if (!quiet) {
+        console.log('☁️  Syncing attachments to WebDAV...\n');
+      }
+      
+      const result = await attachmentManager.syncAllToWebDAV({
+        onProgress: !quiet ? (current, total, filename) => {
+          const percent = Math.round((current / total) * 100);
+          const bar = '█'.repeat(Math.floor(percent / 5)) + '░'.repeat(20 - Math.floor(percent / 5));
+          process.stdout.write(`\r   [${bar}] ${percent}%`);
+        } : undefined,
+      });
+      
+      if (!quiet) {
+        process.stdout.write('\n');
+      }
+      
+      if (result.success) {
+        console.log(`\n✅ WebDAV sync completed!`);
+        console.log(`   Attachments synced: ${result.synced}`);
+      } else {
+        console.log(`\n⚠️  WebDAV sync completed with errors:`);
+        result.errors.forEach(e => console.log(`   Error: ${e}`));
+      }
+    }
+  },
+  
+  {
+    name: 'webdav:status',
+    aliases: ['wdst'],
+    description: 'Show WebDAV configuration status',
+    execute: async () => {
+      await initModules();
+      const db = getDatabase();
+      const config = await db.select().from(webdavConfig).get();
+      
+      if (!config) {
+        console.log('❌ WebDAV not configured');
+        console.log('   Use "zotero webdav:config" to configure');
+        return;
+      }
+      
+      console.log('\n☁️  WebDAV Configuration:\n');
+      console.log(`   URL: ${config.url}`);
+      console.log(`   Username: ${config.username}`);
+      console.log(`   Base Path: ${config.basePath}`);
+      console.log(`   Enabled: ${config.enabled ? 'Yes' : 'No'}`);
+      console.log(`   Auto Sync: ${config.autoSync ? 'Yes' : 'No'}`);
+      console.log(`   Last Sync: ${config.lastSyncAt ? new Date(config.lastSyncAt * 1000).toISOString() : 'Never'}`);
+      if (config.lastError) {
+        console.log(`   Last Error: ${config.lastError}`);
+      }
+      
+      // Test connection
+      console.log('\n🔍 Testing connection...');
+      const init = await attachmentManager.initWebDAV();
+      if (init.success) {
+        console.log('   ✅ Connection successful!');
+      } else {
+        console.log(`   ❌ Connection failed: ${init.error}`);
+      }
+      console.log();
+    }
+  },
+  
+  {
+    name: 'webdav:scan',
+    aliases: ['wdscan'],
+    description: 'Scan WebDAV for existing Zotero Desktop attachments',
+    execute: async (args) => {
+      await initModules();
+      const quiet = args.includes('--quiet') || args.includes('-q');
+      
+      if (!quiet) {
+        console.log('🔍 Scanning WebDAV for Zotero Desktop attachments...\n');
+      }
+      
+      const result = await attachmentManager.scanWebDAV();
+      
+      if (!result.success) {
+        console.log(`❌ Failed to scan WebDAV: ${result.error}`);
+        return;
+      }
+      
+      if (result.items.length === 0) {
+        console.log('ℹ️  No items found in WebDAV storage.');
+        return;
+      }
+      
+      console.log(`📂 Found ${result.items.length} item(s) in WebDAV storage:\n`);
+      
+      let totalFiles = 0;
+      let withProp = 0;
+      let withoutProp = 0;
+      
+      for (const item of result.items.slice(0, 20)) { // Limit to first 20
+        totalFiles += item.files.length;
+        item.files.forEach(f => {
+          if (f.hasProp) withProp++;
+          else withoutProp++;
+        });
+        
+        const propIcon = item.files[0]?.hasProp ? '✅' : '⚠️ ';
+        console.log(`   📁 ${item.itemKey}/`);
+        item.files.forEach(f => {
+          console.log(`      ${propIcon} ${f.filename} (${(f.size / 1024).toFixed(1)} KB)`);
+        });
+      }
+      
+      if (result.items.length > 20) {
+        console.log(`   ... and ${result.items.length - 20} more items`);
+      }
+      
+      console.log(`\n📊 Summary:`);
+      console.log(`   Total files: ${totalFiles}`);
+      console.log(`   With .prop: ${withProp}`);
+      console.log(`   Without .prop: ${withoutProp}`);
+      console.log(`\n💡 Tip: Files without .prop can still be used, but metadata may differ.`);
+      console.log();
     }
   },
   
