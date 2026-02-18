@@ -3,7 +3,7 @@
  * NPM Package Builder for Zotero-Headless
  * 
  * This script bundles the CLI and all workspace dependencies into a single
- * npm-publishable package using tsup (Turborepo's recommended bundler).
+ * npm-publishable package using esbuild.
  * 
  * Usage:
  *   node scripts/package-for-npm.js [version]
@@ -11,8 +11,9 @@
  * The version argument is optional. If not provided, it will be auto-generated.
  */
 
+import * as esbuild from 'esbuild';
 import { execSync } from 'child_process';
-import { existsSync, mkdirSync, writeFileSync, rmSync, readdirSync, renameSync, renameSync as fsRenameSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, rmSync, readdirSync, renameSync, copyFileSync } from 'fs';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
@@ -33,54 +34,36 @@ if (existsSync(distDir)) {
 }
 mkdirSync(distDir, { recursive: true });
 
-// Check if tsup is available in project
-console.log('🔧 Checking for tsup...');
-const tsupPath = join(rootDir, 'node_modules/.bin/tsup');
-const hasTsup = existsSync(tsupPath);
-
-if (!hasTsup) {
-  console.log('📥 Installing tsup in project...');
-  execSync('pnpm add -D -w tsup typescript', { 
-    cwd: rootDir,
-    stdio: 'inherit' 
-  });
-}
-
-const tsupCmd = hasTsup ? tsupPath : 'npx tsup';
-
-// Bundle CLI with all workspace dependencies
-console.log('📦 Bundling CLI with tsup...');
-const tsupCommand = [
-  tsupCmd,
-  join(rootDir, 'apps/cli/src/index.ts'),
-  '--format esm',
-  `--outDir ${distDir}`,
-  '--platform node',
-  '--target node18',
-  '--external better-sqlite3',
-  '--external sql.js',
-  '--minify'
-].join(' ');
+// Bundle CLI with esbuild
+console.log('📦 Bundling CLI with esbuild...');
 
 try {
-  execSync(tsupCommand, { 
-    cwd: rootDir,
-    stdio: 'inherit' 
+  await esbuild.build({
+    entryPoints: [join(rootDir, 'apps/cli/src/index.ts')],
+    bundle: true,
+    platform: 'node',
+    target: 'node18',
+    outfile: join(distDir, 'index.js'),
+    format: 'esm',
+    banner: {
+      js: '#!/usr/bin/env node',
+    },
+    external: [
+      // Native modules that can't be bundled
+      'better-sqlite3',
+      'sql.js',
+    ],
+    define: {
+      'process.env.BUNDLED': '"true"',
+    },
+    minify: true,
+    sourcemap: false,
   });
+  
+  console.log('✅ Bundle created successfully');
 } catch (error) {
   console.error('❌ Bundling failed:', error.message);
   process.exit(1);
-}
-
-// Rename .mjs to .js for compatibility
-console.log('📝 Renaming .mjs to .js...');
-const files = readdirSync(distDir);
-for (const file of files) {
-  if (file.endsWith('.mjs')) {
-    const newName = file.replace('.mjs', '.js');
-    renameSync(join(distDir, file), join(distDir, newName));
-    console.log(`  ${file} → ${newName}`);
-  }
 }
 
 // Create package.json
@@ -121,7 +104,7 @@ tsconfig.json
 `.trim()
 );
 
-// Create tarball (using zip for better compatibility)
+// Create tarball (using Node.js tar for reliability)
 console.log('📦 Creating package...');
 const tarballName = `zotero-headless-${version}.tgz`;
 
