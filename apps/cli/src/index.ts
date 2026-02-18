@@ -224,12 +224,48 @@ const commands: Command[] = [
   {
     name: 'list',
     aliases: ['ls'],
-    description: 'List items in library',
+    description: 'List items in library (with filters: --type, --unsynced, --deleted, --since, --until)',
     execute: async (args) => {
       await initModules();
       const db = getDatabase();
-      const limit = parseInt(args[0]) || 20;
-      const offset = parseInt(args[1]) || 0;
+      
+      // Parse options
+      const options: {
+        type?: string;
+        unsynced?: boolean;
+        deleted?: boolean;
+        since?: string;
+        until?: string;
+        limit: number;
+        offset: number;
+      } = { limit: 20, offset: 0 };
+      
+      const positionalArgs: string[] = [];
+      
+      for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        if (arg === '--type' || arg === '-t') {
+          options.type = args[++i];
+        } else if (arg === '--unsynced' || arg === '-u') {
+          options.unsynced = true;
+        } else if (arg === '--deleted' || arg === '-d') {
+          options.deleted = true;
+        } else if (arg === '--since' || arg === '-s') {
+          options.since = args[++i];
+        } else if (arg === '--until' || arg === '-e') {
+          options.until = args[++i];
+        } else if (arg === '--limit' || arg === '-l') {
+          options.limit = parseInt(args[++i]) || 20;
+        } else if (arg === '--offset' || arg === '-o') {
+          options.offset = parseInt(args[++i]) || 0;
+        } else if (!arg.startsWith('-')) {
+          positionalArgs.push(arg);
+        }
+      }
+      
+      // Backward compatibility: positional args as limit/offset
+      if (positionalArgs.length > 0) options.limit = parseInt(positionalArgs[0]) || 20;
+      if (positionalArgs.length > 1) options.offset = parseInt(positionalArgs[1]) || 0;
       
       const library = await db.select().from(libraries).get();
       if (!library) {
@@ -237,22 +273,64 @@ const commands: Command[] = [
         return;
       }
       
+      // Build where conditions
+      let whereConditions: any = eq(items.libraryId, library.id);
+      
+      if (options.type) {
+        whereConditions = and(whereConditions, eq(items.itemType, options.type));
+      }
+      if (options.unsynced) {
+        whereConditions = and(whereConditions, eq(items.synced, false));
+      }
+      if (options.deleted) {
+        whereConditions = and(whereConditions, eq(items.deleted, true));
+      } else {
+        // By default, hide deleted items
+        whereConditions = and(whereConditions, eq(items.deleted, false));
+      }
+      if (options.since) {
+        const sinceDate = new Date(options.since).getTime();
+        if (!isNaN(sinceDate)) {
+          whereConditions = and(whereConditions, desc(items.updatedAt) >= sinceDate);
+        }
+      }
+      if (options.until) {
+        const untilDate = new Date(options.until).getTime();
+        if (!isNaN(untilDate)) {
+          whereConditions = and(whereConditions, desc(items.updatedAt) <= untilDate);
+        }
+      }
+      
       const results = await db.select()
         .from(items)
-        .where(eq(items.libraryId, library.id))
+        .where(whereConditions)
         .orderBy(desc(items.updatedAt))
-        .limit(limit)
-        .offset(offset)
+        .limit(options.limit)
+        .offset(options.offset)
         .all();
       
-      console.log(`\n📚 Items (${results.length} shown):\n`);
-      results.forEach(item => {
-        const syncStatus = item.synced ? '✅' : '🔄';
-        const delStatus = item.deleted ? ' (deleted)' : '';
-        console.log(`  ${syncStatus} [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}${delStatus}`);
-        console.log(`      Type: ${item.itemType} | Updated: ${formatDate(item.updatedAt)}`);
-        console.log();
-      });
+      // Build filter description
+      const filters: string[] = [];
+      if (options.type) filters.push(`type:${options.type}`);
+      if (options.unsynced) filters.push('unsynced');
+      if (options.deleted) filters.push('deleted');
+      if (options.since) filters.push(`since:${options.since}`);
+      if (options.until) filters.push(`until:${options.until}`);
+      
+      const filterDesc = filters.length > 0 ? ` (filtered: ${filters.join(', ')})` : '';
+      console.log(`\n📚 Items (${results.length} shown)${filterDesc}:\n`);
+      
+      if (results.length === 0) {
+        console.log('   No items match the criteria.');
+      } else {
+        results.forEach(item => {
+          const syncStatus = item.synced ? '✅' : '🔄';
+          const delStatus = item.deleted ? ' (deleted)' : '';
+          console.log(`  ${syncStatus} [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}${delStatus}`);
+          console.log(`      Type: ${item.itemType} | Updated: ${formatDate(item.updatedAt)}`);
+          console.log();
+        });
+      }
     }
   },
   
