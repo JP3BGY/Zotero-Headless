@@ -10,12 +10,20 @@ import { dirname, join } from 'path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(__dirname, '..');
 
+// Skip in CI environment
+if (process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true') {
+  console.log('🔧 CI environment detected, skipping postinstall build...');
+  console.log('   (Build will be handled by GitHub Actions workflow)');
+  process.exit(0);
+}
+
 // Check if we're in a global npm install context
 const isGlobalInstall = process.env.npm_config_global === 'true' || 
                         process.cwd().includes('node_modules') === false;
 
 if (!isGlobalInstall) {
   // Local development install, skip
+  console.log('📦 Local install, skipping postinstall build...');
   process.exit(0);
 }
 
@@ -38,9 +46,9 @@ try {
     }
   }
 
-  // Install dependencies
+  // Install dependencies (if needed)
   console.log('📦 Installing dependencies...');
-  execSync(`${pnpmCmd} install`, { 
+  execSync(`${pnpmCmd} install --frozen-lockfile`, { 
     cwd: rootDir, 
     stdio: 'inherit'
   });
