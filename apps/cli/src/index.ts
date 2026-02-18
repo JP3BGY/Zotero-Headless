@@ -146,8 +146,8 @@ interface Command {
 const commands: Command[] = [
   {
     name: 'sync',
-    aliases: ['s'],
-    description: 'Synchronize Zotero library. Options: --full-sync, --groups, --quiet, --interactive',
+    aliases: ['s', 'pull', 'fetch', 'refresh'],
+    description: 'Synchronize library. Aliases: s, pull, fetch, refresh. Options: -f/--full-sync, -g/--groups, -q/--quiet, -i/--interactive',
     execute: async (args) => {
       await initModules();
       const fullSync = args.includes('--full-sync') || args.includes('-f');
@@ -263,8 +263,8 @@ const commands: Command[] = [
   
   {
     name: 'groups',
-    aliases: ['g'],
-    description: 'List your Zotero group libraries',
+    aliases: ['g', 'team', 'org'],
+    description: 'List group libraries. Aliases: g, team, org',
     execute: async () => {
       await initModules();
       
@@ -298,9 +298,10 @@ const commands: Command[] = [
   
   {
     name: 'list',
-    aliases: ['ls'],
-    description: 'List items in library (with filters: --type, --unsynced, --deleted, --since, --until, --sort, --order)',
+    aliases: ['ls', 'll'],
+    description: 'List items. Aliases: ls, ll (detailed). Options: -t/--type, -u/--unsynced, -d/--deleted, -s/--since, -e/--until, -S/--sort, -o/--order, -l/--limit, -O/--offset',
     execute: async (args) => {
+      const isDetailed = process.argv.includes('ll');  // Check if invoked as 'll'
       await initModules();
       const db = getDatabase();
       
@@ -458,8 +459,8 @@ const commands: Command[] = [
   
   {
     name: 'search',
-    aliases: ['find'],
-    description: 'Search items by title/author/tags (--field, --since, --unsynced, --limit)',
+    aliases: ['find', 'grep', 'f'],
+    description: 'Search items. Aliases: find, grep, f. Options: -f/--field, -s/--since, -u/--unsynced, -l/--limit',
     execute: async (args) => {
       await initModules();
       
@@ -569,8 +570,8 @@ const commands: Command[] = [
   
   {
     name: 'get',
-    aliases: ['show'],
-    description: 'Get single item details',
+    aliases: ['show', 'cat', 'view'],
+    description: 'Show item details. Aliases: show, cat, view',
     execute: async (args) => {
       await initModules();
       if (args.length === 0) {
@@ -621,8 +622,8 @@ const commands: Command[] = [
   
   {
     name: 'stats',
-    aliases: ['st'],
-    description: 'Show library statistics',
+    aliases: ['st', 'info', 'status', 'df'],
+    description: 'Show library statistics. Aliases: st, info, status, df',
     execute: async () => {
       await initModules();
       const db = getDatabase();
@@ -663,8 +664,8 @@ const commands: Command[] = [
   
   {
     name: 'verify',
-    aliases: ['v'],
-    description: 'Verify API key',
+    aliases: ['v', 'check', 'test', 'ping'],
+    description: 'Verify API key and connection. Aliases: v, check, test, ping',
     execute: async () => {
       await initModules();
       console.log('🔑 Verifying API key...\n');
@@ -690,8 +691,8 @@ const commands: Command[] = [
   
   {
     name: 'attachments',
-    aliases: ['att'],
-    description: 'List attachments',
+    aliases: ['att', 'files', 'docs'],
+    description: 'List attachments. Aliases: att, files, docs',
     execute: async (args) => {
       await initModules();
       const options: {
@@ -918,8 +919,8 @@ const commands: Command[] = [
   
   {
     name: 'add',
-    aliases: ['a'],
-    description: 'Add a new item to library',
+    aliases: ['a', 'new', 'touch', 'create'],
+    description: 'Add a new item. Aliases: a, new, touch, create',
     execute: async (args) => {
       await initModules();
       console.log('📝 Adding new item to library...\n');
@@ -988,8 +989,8 @@ const commands: Command[] = [
   
   {
     name: 'update',
-    aliases: ['u'],
-    description: 'Update an existing item (local only, run sync to upload)',
+    aliases: ['u', 'edit', 'set', 'mod'],
+    description: 'Update an item. Aliases: u, edit, set, mod',
     execute: async (args) => {
       await initModules();
       console.log('📝 Updating item locally...\n');
@@ -1073,14 +1074,15 @@ const commands: Command[] = [
   
   {
     name: 'delete',
-    aliases: ['d', 'del'],
-    description: 'Delete (trash) an item (local only, run sync to upload)',
+    aliases: ['d', 'del', 'rm', 'trash'],
+    description: 'Delete (trash) an item. Aliases: rm, del, d. Options: -p/--permanent, -f/--force',
     execute: async (args) => {
       await initModules();
       console.log('🗑️  Deleting item locally...\n');
       
       const key = args[0];
       const permanent = args.includes('--permanent') || args.includes('-p');
+      const force = args.includes('--force') || args.includes('-f');
       
       if (!key) {
         console.log('❌ Usage: zotero delete <key> [--permanent]');
@@ -1152,8 +1154,8 @@ const commands: Command[] = [
   
   {
     name: 'export',
-    aliases: ['e'],
-    description: 'Export items to various formats',
+    aliases: ['e', 'out', 'save'],
+    description: 'Export items to various formats. Aliases: e, out, save',
     execute: async (args) => {
       await initModules();
       console.log('📤 Exporting items...\n');
@@ -1322,54 +1324,44 @@ const commands: Command[] = [
 
 Usage: zotero <command> [options]
 
-Commands:
-  sync              Synchronize library (two-way)
-                      Options: --full-sync, --groups, --quiet, --interactive
-  sync:upload        Upload local changes only
-  list [limit]       List items
-  list:unsynced      List unsynced items
-  search <query>     Search by title
-  get <key>          Get item details
-  stats              Show statistics
-  verify             Verify API key
-  add <type> <title> [authors...]  Add new item
-  add-by-id <id>     Add item by identifier (DOI, ISBN, PMID, arXiv)
-  update <key> <field> <value>      Update item
-  delete <key> [--permanent]         Delete (trash) item
-  export [format] [file] Export items (bibtex, ris, csv, json)
-  attachments        List attachments
-  webdav:config      Configure WebDAV server
-  webdav:sync        Sync attachments to WebDAV
-  webdav:status      Show WebDAV status
-  webdav:scan        Scan WebDAV for attachments
-  help               Show this message
+Core Commands:
+  sync (s, pull, fetch)        Synchronize library
+  list (ls, ll)                List items with filters
+  search (find, grep, f)       Search by title/author/tags
+  get (show, cat, view)        Show item details
+  stats (st, info, df)         Show statistics
+  verify (v, check, ping)      Verify API key
+
+Item Management:
+  add (a, new, touch)          Add new item
+  add-by-id (add)              Add by DOI/ISBN/PMID/arXiv
+  update (u, edit, set)        Update item field
+  delete (rm, del, d, trash)   Delete/trash item
+  export (e, out, save)        Export to bibtex/ris/csv/json
+
+Group & Attachments:
+  groups (g, team)             List group libraries
+  attachments (att, files)     List attachments
+
+WebDAV:
+  webdav:config (wdc)          Configure WebDAV
+  webdav:sync (wds)            Sync attachments to WebDAV
+  webdav:status (wdst)         Show WebDAV status
+  webdav:scan (wdscan)         Scan WebDAV attachments
 
 Global Options:
-  --lang=en          Set language to English
-  --lang=zh          Set language to Chinese (default)
+  --lang=en|zh                 Set language (default: zh)
 
-Examples:
-  zotero sync              # Full two-way sync
-  zotero list 50 0        # List first 50 items
-  zotero search machine    # Search for "machine"
-  zotero stats             # Show library stats
-  zotero get ABCD1234     # Show item details
-  zotero verify            # Check API key
-  zotero add journalArticle "My Article" "John Doe"  # Add new article
-  zotero add-by-id "10.1007/s11263-019-01228-7"  # Add by DOI
-  zotero add-by-id "978-3-642-15515-4"  # Add by ISBN
-  zotero add-by-id "10.1007/xyz, 978-3-642-15515-4"  # Batch add
-  zotero update ABCD1234 title "New Title"  # Update item title
-  zotero delete ABCD1234   # Move item to trash
-  zotero delete ABCD1234 --permanent  # Permanently delete
-  zotero export bibtex     # Export as BibTeX
-  zotero export ris refs.ris # Export RIS to file
-  zotero attachments       # List all attachments
-  zotero attachments --item ABCD1234  # List attachments for item
-  zotero webdav:config https://dav.jianguoyun.com/dav/zotero user pass /
-  zotero webdav:sync       # Sync all attachments to WebDAV
-  zotero webdav:status     # Check WebDAV configuration
-  zotero webdav:scan       # Scan for Zotero Desktop attachments
+Quick Examples:
+  zotero sync                           # Sync library
+  zotero ls -t book                     # List books
+  zotero grep "machine learning"        # Search
+  zotero cat ABCD1234                   # View item
+  zotero rm ABCD1234 -f                 # Force delete
+  zotero touch journalArticle "Title"   # Add item
+
+For more info: https://github.com/altairwei/Zotero-Headless
+`);
 
 For more info: https://github.com/altairwei/Zotero-Headless
 `);
