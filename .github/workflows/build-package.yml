@@ -53,12 +53,29 @@ jobs:
           mkdir -p dist-package
           cp -r apps/cli/dist dist-package/
           cp -r packages/*/dist dist-package/ 2>/dev/null || true
+          
+          # Create Windows batch wrapper
+          cat > dist-package/zotero.cmd << 'EOFCMD'
+          @echo off
+          node "%~dp0\dist\index.js" %*
+          EOFCMD
+          
+          # Create Unix shell wrapper
+          cat > dist-package/zotero << 'EOFSH'
+          #!/usr/bin/env sh
+          node "$(dirname "$0")/dist/index.js" "$@"
+          EOFSH
+          chmod +x dist-package/zotero
+          
           cat > dist-package/package.json << EOF
           {
             "name": "zotero-headless",
             "version": "$VERSION",
             "description": "Zotero Web API sync client",
-            "bin": { "zotero": "./dist/index.js" },
+            "bin": { 
+              "zotero": "./zotero",
+              "zotero.cmd": "./zotero.cmd"
+            },
             "engines": { "node": ">=18.0.0" },
             "dependencies": {
               "axios": "^1.13.5",
