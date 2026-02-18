@@ -1097,6 +1097,11 @@ Commands:
   update <key> <field> <value>      Update item
   delete <key> [--permanent]         Delete (trash) item
   export [format] [file] Export items (bibtex, ris, csv, json)
+  attachments        List attachments
+  webdav:config      Configure WebDAV server
+  webdav:sync        Sync attachments to WebDAV
+  webdav:status      Show WebDAV status
+  webdav:scan        Scan WebDAV for attachments
   help               Show this message
 
 Examples:
@@ -1115,6 +1120,12 @@ Examples:
   zotero delete ABCD1234 --permanent  # Permanently delete
   zotero export bibtex     # Export as BibTeX
   zotero export ris refs.ris # Export RIS to file
+  zotero attachments       # List all attachments
+  zotero attachments --item ABCD1234  # List attachments for item
+  zotero webdav:config https://dav.jianguoyun.com/dav/zotero user pass /
+  zotero webdav:sync       # Sync all attachments to WebDAV
+  zotero webdav:status     # Check WebDAV configuration
+  zotero webdav:scan       # Scan for Zotero Desktop attachments
 
 For more info: https://github.com/altairwei/Zotero-Headless
 `);
