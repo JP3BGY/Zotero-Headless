@@ -191,6 +191,33 @@ Zotero-Headless 会按以下优先级加载 `.env` 文件（后面的覆盖前�
 
 **最佳实践**：将配置放在 `~/.config/zotero-headless/.env`，这样无论在哪里运行命令都能正确加载。
 
+### ⚠️ 故障排除
+
+**问题**：运行 `zotero` 命令时提示 "Configuration error: expected string, received undefined"
+
+**原因**：全局安装后，CLI 无法找到 .env 配置文件
+
+**解决方案**：
+
+1. **检查配置文件是否存在**：
+   ```bash
+   ls -la ~/.config/zotero-headless/.env
+   ```
+
+2. **如果是符号链接且指向旧路径**（项目移动后常见）：
+   ```bash
+   # 删除旧链接
+   rm -f ~/.config/zotero-headless/.env
+   
+   # 创建新链接（指向当前项目位置）
+   ln -s /home/altairwei/.openclaw/workspace/zotero-headless/.env ~/.config/zotero-headless/.env
+   ```
+
+3. **或者直接复制配置文件**：
+   ```bash
+   cp /home/altairwei/.openclaw/workspace/zotero-headless/.env ~/.config/zotero-headless/.env
+   ```
+
 ### 配置示例
 
 创建 `~/.config/zotero-headless/.env`：
