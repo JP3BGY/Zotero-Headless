@@ -8,6 +8,7 @@ import { appConfig } from '@zotero-headless/core';
 import { eq, like, desc, asc, count, and, isNull } from 'drizzle-orm';
 import { ProgressBar } from './progress-bar.js';
 import { resolveConflictsInteractive, isInteractive, ConflictItem } from './conflict-resolver.js';
+import { t, setLanguage, formatItemType, formatField, type Language } from './i18n.js';
 
 // Lazy-loaded modules (to avoid initialization on help commands)
 let syncManager: any;
@@ -157,15 +158,15 @@ const commands: Command[] = [
                        args.find(arg => arg.startsWith('-G'))?.substring(2);
       
       if (!quiet) {
-        console.log('🔄 Starting two-way sync...');
+        console.log(t('commands.sync.starting'));
         if (fullSync) {
-          console.log('   (Full sync mode - ignoring version numbers)');
+          console.log(t('commands.sync.fullSync'));
         }
         if (syncGroups) {
-          console.log('   (Sync all group libraries)');
+          console.log(t('commands.sync.groupSync'));
         }
         if (groupArg) {
-          console.log(`   (Sync group: ${groupArg})`);
+          console.log(t('commands.sync.groupSingle', groupArg));
         }
         console.log('');
       }
@@ -198,7 +199,7 @@ const commands: Command[] = [
       // Handle conflicts interactively if requested
       if (result.conflicts && result.conflicts.length > 0) {
         if (interactive && isInteractive()) {
-          console.log(`\n⚠️  ${result.conflicts.length} conflicts detected.`);
+          console.log(`\n⚠️  ${result.conflicts.length} ${t('conflict.title')}`);
           
           // Get item details for conflicts
           const conflictItems: ConflictItem[] = [];
@@ -225,16 +226,16 @@ const commands: Command[] = [
           for (const [key, resolution] of resolutions) {
             if (resolution === 'remote') {
               // Re-fetch and apply remote version
-              console.log(`   Resolving ${key} with remote version...`);
+              console.log(`   ${t('conflict.remote')}: ${key}`);
               // Note: Would need to re-fetch from API here
               resolvedCount++;
             } else if (resolution === 'local') {
-              console.log(`   Keeping local version for ${key}`);
+              console.log(`   ${t('conflict.local')}: ${key}`);
               resolvedCount++;
             }
           }
           
-          console.log(`\n✅ Resolved ${resolvedCount} conflicts`);
+          console.log(`\n✅ ${t('common.success')}: ${resolvedCount}`);
         } else if (!quiet) {
           console.log(`\n⚠️  ${result.conflicts.length} conflicts detected.`);
           console.log('   Run with --interactive (-i) to resolve manually');
@@ -1343,6 +1344,10 @@ Commands:
   webdav:scan        Scan WebDAV for attachments
   help               Show this message
 
+Global Options:
+  --lang=en          Set language to English
+  --lang=zh          Set language to Chinese (default)
+
 Examples:
   zotero sync              # Full two-way sync
   zotero list 50 0        # List first 50 items
@@ -1376,6 +1381,16 @@ For more info: https://github.com/altairwei/Zotero-Headless
 
 async function main() {
   const args = process.argv.slice(2);
+  
+  // Check for --lang option before command parsing
+  const langArg = args.find(arg => arg.startsWith('--lang='));
+  if (langArg) {
+    const lang = langArg.split('=')[1] as Language;
+    if (lang === 'en' || lang === 'zh') {
+      setLanguage(lang);
+    }
+  }
+  
   const commandName = args[0]?.toLowerCase() || 'help';
   const commandArgs = args.slice(1);
   

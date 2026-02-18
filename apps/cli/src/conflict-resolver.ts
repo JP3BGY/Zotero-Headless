@@ -5,6 +5,7 @@
  */
 
 import readline from 'readline';
+import { t } from './i18n.js';
 
 export interface ConflictItem {
   key: string;
@@ -24,19 +25,19 @@ export async function promptConflictResolution(
   item: ConflictItem,
   rl: readline.Interface
 ): Promise<ConflictResolution> {
-  console.log(`\n📄 Conflict detected for: ${item.title || item.key}`);
-  console.log(`   Local version:  ${item.localVersion} (${item.localModified?.toLocaleString() || 'unknown'})`);
-  console.log(`   Remote version: ${item.remoteVersion} (${item.remoteModified?.toLocaleString() || 'unknown'})`);
+  console.log(`\n📄 ${t('conflict.title')}: ${item.title || item.key}`);
+  console.log(`   ${t('conflict.local')}: ${item.localVersion} (${item.localModified?.toLocaleString() || t('common.unknown')})`);
+  console.log(`   ${t('conflict.remote')}: ${item.remoteVersion} (${item.remoteModified?.toLocaleString() || t('common.unknown')})`);
   console.log('');
-  console.log('   [r] Use remote version (discard local changes)');
-  console.log('   [l] Use local version (keep local changes)');
-  console.log('   [s] Skip (resolve later)');
-  console.log('   [R] Use remote for all remaining conflicts');
-  console.log('   [L] Use local for all remaining conflicts');
+  console.log(`   [r] ${t('conflict.remote')}`);
+  console.log(`   [l] ${t('conflict.local')}`);
+  console.log(`   [s] ${t('conflict.skip')}`);
+  console.log(`   [R] ${t('conflict.allRemote')}`);
+  console.log(`   [L] ${t('conflict.allLocal')}`);
   console.log('');
   
   return new Promise((resolve) => {
-    rl.question('Your choice (r/l/s/R/L): ', (answer) => {
+    rl.question(t('conflict.prompt'), (answer) => {
       const choice = answer.trim().toLowerCase();
       
       switch (choice) {
@@ -56,7 +57,7 @@ export async function promptConflictResolution(
           resolve('all-local');
           break;
         default:
-          console.log('Invalid choice, defaulting to skip');
+          console.log(t('errors.invalidKey'));
           resolve('skip');
       }
     });
@@ -87,13 +88,13 @@ export async function resolveConflictsInteractive(
   const resolutions = new Map<string, 'remote' | 'local' | 'skip'>();
   let globalStrategy: 'remote' | 'local' | null = null;
   
-  console.log(`\n⚠️  ${conflicts.length} conflicts detected that need your attention.\n`);
+  console.log(`\n⚠️  ${conflicts.length} ${t('conflict.title')}\n`);
   
   for (const item of conflicts) {
     // Skip if already resolved via global strategy
     if (globalStrategy) {
       resolutions.set(item.key, globalStrategy);
-      console.log(`   ${item.title || item.key}: Using ${globalStrategy} (global)`);
+      console.log(`   ${item.title || item.key}: ${globalStrategy} (${t('common.all')})`);
       continue;
     }
     
@@ -104,24 +105,24 @@ export async function resolveConflictsInteractive(
       case 'all-remote':
         globalStrategy = 'remote';
         resolutions.set(item.key, 'remote');
-        console.log(`   → Set global strategy to: remote`);
+        console.log(`   → ${t('conflict.allRemote')}`);
         break;
       case 'all-local':
         globalStrategy = 'local';
         resolutions.set(item.key, 'local');
-        console.log(`   → Set global strategy to: local`);
+        console.log(`   → ${t('conflict.allLocal')}`);
         break;
       case 'remote':
         resolutions.set(item.key, 'remote');
-        console.log(`   → Using remote version`);
+        console.log(`   → ${t('conflict.remote')}`);
         break;
       case 'local':
         resolutions.set(item.key, 'local');
-        console.log(`   → Keeping local version`);
+        console.log(`   → ${t('conflict.local')}`);
         break;
       case 'skip':
         resolutions.set(item.key, 'skip');
-        console.log(`   → Skipped`);
+        console.log(`   → ${t('conflict.skip')}`);
         break;
     }
   }
