@@ -5,7 +5,7 @@
 // See Zotero-Headless-Complete-Design.md Section 7
 
 import { appConfig } from '@zotero-headless/core';
-import { eq, like, desc, count, and, isNull } from 'drizzle-orm';
+import { eq, like, desc, asc, count, and, isNull } from 'drizzle-orm';
 
 // Lazy-loaded modules (to avoid initialization on help commands)
 let syncManager: any;
@@ -224,7 +224,7 @@ const commands: Command[] = [
   {
     name: 'list',
     aliases: ['ls'],
-    description: 'List items in library (with filters: --type, --unsynced, --deleted, --since, --until)',
+    description: 'List items in library (with filters: --type, --unsynced, --deleted, --since, --until, --sort, --order)',
     execute: async (args) => {
       await initModules();
       const db = getDatabase();
@@ -236,6 +236,8 @@ const commands: Command[] = [
         deleted?: boolean;
         since?: string;
         until?: string;
+        sort?: 'title' | 'date' | 'updated' | 'type';
+        order?: 'asc' | 'desc';
         limit: number;
         offset: number;
       } = { limit: 20, offset: 0 };
@@ -254,6 +256,10 @@ const commands: Command[] = [
           options.since = args[++i];
         } else if (arg === '--until' || arg === '-e') {
           options.until = args[++i];
+        } else if (arg === '--sort') {
+          options.sort = args[++i] as any;
+        } else if (arg === '--order') {
+          options.order = args[++i] as any;
         } else if (arg === '--limit' || arg === '-l') {
           options.limit = parseInt(args[++i]) || 20;
         } else if (arg === '--offset' || arg === '-o') {
@@ -301,10 +307,18 @@ const commands: Command[] = [
         }
       }
       
+      // Build order by
+      let orderByColumn = items.updatedAt;
+      if (options.sort === 'title') orderByColumn = items.title;
+      else if (options.sort === 'date') orderByColumn = items.publicationDate;
+      else if (options.sort === 'type') orderByColumn = items.itemType;
+      
+      const orderDirection = options.order === 'asc' ? asc : desc;
+      
       const results = await db.select()
         .from(items)
         .where(whereConditions)
-        .orderBy(desc(items.updatedAt))
+        .orderBy(orderDirection(orderByColumn))
         .limit(options.limit)
         .offset(options.offset)
         .all();
@@ -316,6 +330,7 @@ const commands: Command[] = [
       if (options.deleted) filters.push('deleted');
       if (options.since) filters.push(`since:${options.since}`);
       if (options.until) filters.push(`until:${options.until}`);
+      if (options.sort) filters.push(`sort:${options.sort}(${options.order || 'desc'})`);
       
       const filterDesc = filters.length > 0 ? ` (filtered: ${filters.join(', ')})` : '';
       console.log(`\n📚 Items (${results.length} shown)${filterDesc}:\n`);
@@ -369,17 +384,53 @@ const commands: Command[] = [
   {
     name: 'search',
     aliases: ['find'],
-    description: 'Search items by title',
+    description: 'Search items by title/author/tags (--field, --since, --unsynced, --limit)',
     execute: async (args) => {
       await initModules();
-      if (args.length === 0) {
+      
+      // Parse options
+      const options: {
+        query: string;
+        field: 'title' | 'author' | 'tags' | 'all';
+        since?: string;
+        unsynced?: boolean;
+        limit: number;
+      } = {
+        field: 'title',
+        limit: 20
+      };
+      
+      const queryParts: string[] = [];
+      
+      for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        if (arg === '--field' || arg === '-f') {
+          options.field = args[++i] as any;
+        } else if (arg === '--since' || arg === '-s') {
+          options.since = args[++i];
+        } else if (arg === '--unsynced' || arg === '-u') {
+          options.unsynced = true;
+        } else if (arg === '--limit' || arg === '-l') {
+          options.limit = parseInt(args[++i]) || 20;
+        } else if (!arg.startsWith('-')) {
+          queryParts.push(arg);
+        }
+      }
+      
+      options.query = queryParts.join(' ');
+      
+      if (!options.query) {
         console.log('❌ Please provide a search query');
-        console.log('   Usage: zotero search <query>');
+        console.log('   Usage: zotero search <query> [options]');
+        console.log('   Options:');
+        console.log('     --field title|author|tags|all  (default: title)');
+        console.log('     --since YYYY-MM-DD');
+        console.log('     --unsynced');
+        console.log('     --limit N');
         return;
       }
       
       const db = getDatabase();
-      const query = args.join(' ');
       const library = await db.select().from(libraries).get();
       
       if (!library) {
@@ -387,22 +438,56 @@ const commands: Command[] = [
         return;
       }
       
+      // Build search conditions
+      let whereConditions: any = eq(items.libraryId, library.id);
+      
+      // Field-specific search
+      if (options.field === 'title' || options.field === 'all') {
+        whereConditions = and(whereConditions, like(items.title, `%${options.query}%`));
+      } else if (options.field === 'author') {
+        whereConditions = and(whereConditions, like(items.creators, `%${options.query}%`));
+      } else if (options.field === 'tags') {
+        whereConditions = and(whereConditions, like(items.tags, `%${options.query}%`));
+      }
+      
+      // Date filter
+      if (options.since) {
+        const sinceDate = new Date(options.since).getTime();
+        if (!isNaN(sinceDate)) {
+          whereConditions = and(whereConditions, desc(items.updatedAt) >= sinceDate);
+        }
+      }
+      
+      // Unsynced filter
+      if (options.unsynced) {
+        whereConditions = and(whereConditions, eq(items.synced, false));
+      }
+      
       const results = await db.select()
         .from(items)
-        .where(and(
-          eq(items.libraryId, library.id),
-          like(items.title, `%${query}%`)
-        ))
-        .limit(20)
+        .where(whereConditions)
+        .limit(options.limit)
         .all();
       
-      console.log(`\n🔍 Search results for "${query}" (${results.length}):\n`);
-      results.forEach(item => {
-        console.log(`  [${item.key}] ${item.title?.substring(0, 70) || '(no title)'}`);
-      });
+      // Build search description
+      const filters: string[] = [];
+      if (options.field !== 'title') filters.push(`field:${options.field}`);
+      if (options.since) filters.push(`since:${options.since}`);
+      if (options.unsynced) filters.push('unsynced');
+      
+      const filterDesc = filters.length > 0 ? ` (${filters.join(', ')})` : '';
+      console.log(`\n🔍 Search results for "${options.query}"${filterDesc} (${results.length}):\n`);
       
       if (results.length === 0) {
         console.log('   No results found.');
+      } else {
+        results.forEach(item => {
+          const syncStatus = item.synced ? '✅' : '🔄';
+          console.log(`  ${syncStatus} [${item.key}] ${item.title?.substring(0, 70) || '(no title)'}`);
+          if (options.field === 'author' && item.creators) {
+            console.log(`      Authors: ${item.creators.substring(0, 50)}`);
+          }
+        });
       }
     }
   },
