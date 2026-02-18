@@ -6,6 +6,7 @@
 
 import { appConfig } from '@zotero-headless/core';
 import { eq, like, desc, asc, count, and, isNull } from 'drizzle-orm';
+import { ProgressBar } from './progress-bar.js';
 
 // Lazy-loaded modules (to avoid initialization on help commands)
 let syncManager: any;
@@ -144,36 +145,60 @@ const commands: Command[] = [
   {
     name: 'sync',
     aliases: ['s'],
-    description: 'Synchronize Zotero library (two-way). Use --full-sync to force complete re-sync',
+    description: 'Synchronize Zotero library (two-way). Options: --full-sync, --groups, --quiet',
     execute: async (args) => {
       await initModules();
       const fullSync = args.includes('--full-sync') || args.includes('-f');
       const syncGroups = args.includes('--groups') || args.includes('-g');
+      const quiet = args.includes('--quiet') || args.includes('-q');
       const groupArg = args.find(arg => arg.startsWith('--group='))?.split('=')[1] || 
                        args.find(arg => arg.startsWith('-G'))?.substring(2);
       
-      console.log('🔄 Starting two-way sync...');
-      if (fullSync) {
-        console.log('   (Full sync mode - ignoring version numbers)');
+      if (!quiet) {
+        console.log('🔄 Starting two-way sync...');
+        if (fullSync) {
+          console.log('   (Full sync mode - ignoring version numbers)');
+        }
+        if (syncGroups) {
+          console.log('   (Sync all group libraries)');
+        }
+        if (groupArg) {
+          console.log(`   (Sync group: ${groupArg})`);
+        }
+        console.log('');
       }
-      if (syncGroups) {
-        console.log('   (Sync all group libraries)');
-      }
-      if (groupArg) {
-        console.log(`   (Sync group: ${groupArg})`);
-      }
-      console.log('');
+      
+      // Create progress bar if not quiet
+      let progressBar: ProgressBar | null = null;
       
       const result = await syncManager.sync({ 
         fullSync,
         syncAll: syncGroups,
-        groupId: groupArg
+        groupId: groupArg,
+        onProgress: quiet ? undefined : (progress) => {
+          if (progress.total > 0) {
+            if (!progressBar) {
+              progressBar = new ProgressBar({ 
+                total: progress.total, 
+                label: progress.phase 
+              });
+            }
+            progressBar.update(progress.current, progress.phase);
+            
+            if (progress.phase === 'complete') {
+              progressBar.complete();
+              progressBar = null;
+            }
+          }
+        }
       });
       
       if (result.success) {
-        console.log(`\n✅ Sync completed successfully!`);
-        console.log(`   Items updated: ${result.updated}`);
-        console.log(`   Items deleted: ${result.deleted}`);
+        if (!quiet) {
+          console.log(`\n✅ Sync completed successfully!`);
+          console.log(`   Items updated: ${result.updated}`);
+          console.log(`   Items deleted: ${result.deleted}`);
+        }
       } else {
         console.log(`\n⚠️  Sync completed with issues:`);
         result.errors.forEach(e => console.log(`   Error: ${e}`));

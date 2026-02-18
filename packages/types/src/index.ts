@@ -109,12 +109,22 @@ export interface DeletedObjects {
 
 // ============ Sync Types ============
 
+export interface SyncProgress {
+  phase: 'fetching' | 'downloading' | 'uploading' | 'deleting' | 'complete';
+  current: number;
+  total: number;
+  message?: string;
+}
+
+export type ProgressCallback = (progress: SyncProgress) => void;
+
 export interface SyncOptions {
   libraryId?: number;
   fullSync?: boolean;
   groupId?: string;          // Sync specific group library
   syncAll?: boolean;         // Sync all libraries (user + groups)
   libraryType?: 'user' | 'group';  // Library type for current sync
+  onProgress?: ProgressCallback;   // Progress callback
 }
 
 export interface SyncResult {

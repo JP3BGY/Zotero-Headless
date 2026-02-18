@@ -3,4 +3,4 @@
 
 export { SyncManager, syncManager } from './manager.js';
 export { ConflictResolver, conflictResolver } from './conflict.js';
-export type { SyncOptions, SyncResult, SyncConfig } from './manager.js';
+export type { SyncResult, SyncConfig } from './manager.js';

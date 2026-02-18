@@ -62,12 +62,20 @@ export interface DeletedObjects {
     collections: string[];
     tags: string[];
 }
+export interface SyncProgress {
+    phase: 'fetching' | 'downloading' | 'uploading' | 'deleting' | 'complete';
+    current: number;
+    total: number;
+    message?: string;
+}
+export type ProgressCallback = (progress: SyncProgress) => void;
 export interface SyncOptions {
     libraryId?: number;
     fullSync?: boolean;
     groupId?: string;
     syncAll?: boolean;
     libraryType?: 'user' | 'group';
+    onProgress?: ProgressCallback;
 }
 export interface SyncResult {
     success: boolean;
