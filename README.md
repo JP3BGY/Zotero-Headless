@@ -1,77 +1,61 @@
 # Zotero-Headless
 
-Zotero-Headless 是一个基于 Node.js + TypeScript 的 Zotero Web API 同步客户端，无需 Zotero 桌面客户端即可实现完整的文献库同步、管理和离线访问。
+Zotero Web API 同步客户端 - 无需桌面客户端即可实现文献库同步
 
 ## 快速开始
 
-### 设计文档
+```bash
+# 安装
+pnpm install
 
-**⚠️ 在开始编写代码之前，请务必先阅读设计文档：**
+# 配置
+cp .env.example .env
+# 编辑 .env，填入 ZOTERO_API_KEY 和 ZOTERO_USER_ID
 
-📄 **[Zotero-Headless-Complete-Design.md](./Zotero-Headless-Complete-Design.md)**
+# 构建
+pnpm build
 
-这份文档包含了项目的完整设计指导，专门为 Coding Agent 编写，确保项目能够顺利实施。
+# 首次同步
+pnpm start sync
+```
 
-### 设计文档包含：
+## 文档导航
 
-- 项目概述和架构
-- 技术选型和项目结构
-- 数据库设计（Drizzle ORM + 简化 schema）
-- Zotero API 客户端实现
-- 同步引擎设计
-- Repository 实现
-- CLI 命令设计
-- Coding Agent 指导（代码风格、实现提示、常见陷阱）
-- 5 阶段实施计划
+| 文档 | 说明 | 目标读者 |
+|------|------|----------|
+| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | 用户指南、命令参考 | 使用者 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构设计、技术决策 | 开发者 |
+| [docs/ZOTERO_API_FIELDS.md](docs/ZOTERO_API_FIELDS.md) | Zotero API 字段映射 | 开发者 |
+| [docs/IMPORTANT-WORK-PRINCIPLES.md](docs/IMPORTANT-WORK-PRINCIPLES.md) | 开发工作原则 | 贡献者 |
 
 ## 项目结构
 
 ```
 zotero-headless/
-├── apps/
-│   └── cli/                    # CLI 应用
+├── apps/cli/              # CLI 入口
 ├── packages/
-│   ├── types/                  # 共享类型
-│   ├── api/                    # Zotero API 客户端
-│   ├── database/               # 数据库层
-│   └── sync-engine/            # 同步引擎
-├── Zotero-Headless-Complete-Design.md  # ⚠️ 必读设计文档
-└── README.md
+│   ├── api/              # Zotero API 客户端
+│   ├── core/             # 核心配置
+│   ├── database/         # SQLite 数据库
+│   ├── sync-engine/      # 同步引擎
+│   ├── attachment-manager/  # 附件管理
+│   └── webdav-client/    # WebDAV 客户端
+└── docs/                 # 文档
 ```
 
-## 配置
+## 核心功能
 
-### 1. 复制环境变量模板
+- **双向同步** - 本地 SQLite 与 Zotero 云端自动同步
+- **群组库支持** - 同步 Zotero Groups
+- **附件同步** - WebDAV 文件同步
+- **多语言** - 中英文界面切换
+- **增量同步** - 只同步变化的部分
 
-```bash
-cp .env.example .env
-```
-
-### 2. 编辑 .env 文件，填入你的 Zotero API Key
-
-```bash
-# 从 https://www.zotero.org/settings/keys 获取 API Key
-ZOTERO_API_KEY=你的_api_key
-
-# 你的 Zotero 用户 ID（通常是数字）
-ZOTERO_USER_ID=你的_user_id
-```
-
-**⚠️ 重要：.env 文件已经被 .gitignore 保护，不会被提交到 git！**
-
-### 3. 安装依赖
-
-```bash
-pnpm install
-```
-
-## 开始开发
-
-1. **首先阅读设计文档** - 了解项目的架构和技术决策
-2. **按照实施计划开发** - 参考设计文档中的 Phase 1-5
-3. **遵循代码风格** - 参考设计文档中的 Agent 指导章节
-
-## 相关文档
+## 相关链接
 
 - [Zotero Web API v3 文档](https://www.zotero.org/support/dev/web_api/v3/start)
 - [Zotero 同步协议](https://www.zotero.org/support/dev/web_api/v3/syncing)
+
+## License
+
+MIT
