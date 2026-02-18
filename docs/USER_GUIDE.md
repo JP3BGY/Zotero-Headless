@@ -26,6 +26,8 @@
 - 💻 **WSL/Linux**：在 Linux 子系统使用 Zotero
 - 🔄 **双向同步**：本地修改与云端自动合并
 - ⚡ **快速访问**：无需启动桌面客户端即可查询文献
+- 🌐 **多语言支持**：中英文界面切换
+- 📎 **附件同步**：WebDAV 文件同步支持
 
 ---
 
@@ -34,12 +36,16 @@
 | 功能 | 状态 | 说明 |
 |------|------|------|
 | 双向同步 | ✅ | 自动检测并合并本地/远程变化 |
-| 冲突解决 | ✅ | 三向合并算法处理编辑冲突 |
+| 并行下载 | ✅ | 支持 5 个并发连接加速同步 |
+| 冲突解决 | ✅ | 交互式/自动模式处理编辑冲突 |
 | 智能重试 | ✅ | 指数退避处理网络错误和限流 |
 | 本地缓存 | ✅ | SQLite 数据库存储 |
-| CLI 命令 | ✅ | 列表、搜索、统计等 |
+| CLI 命令 | ✅ | 列表、搜索、统计、过滤等 |
 | 增量同步 | ✅ | 只同步自上次以来的变化 |
 | **文献添加** | ✅ | 通过 DOI/arXiv/ISBN/PMID 自动获取元数据 |
+| **群组库** | ✅ | 支持同步 Zotero Groups |
+| **WebDAV** | ✅ | 附件文件同步到 WebDAV |
+| **i18n** | ✅ | 中英文界面切换 |
 
 ---
 
@@ -128,24 +134,27 @@ zotero sync
 输出示例：
 
 ```
-🔄 Starting two-way sync...
+🔄 开始双向同步...
 
-🔑 Verifying API key...
-   Logged in as: your-username
-📊 Versions - Local: 0, Remote: 100
-✅ Sync complete: 50 updated, 0 deleted
+🔑 验证 API key...
+   登录用户: your-username
+📊 版本 - 本地: 0, 远程: 100
+✅ 同步完成：更新 50 个，删除 0 个
 ```
 
 ### 2. 查看文献列表
 
 ```bash
 zotero list
+zotero list --limit 50
+zotero list --type journalArticle
 ```
 
 ### 3. 搜索文献
 
 ```bash
-zotero search machine learning
+zotero search "machine learning"
+zotero search "张" --field author
 ```
 
 ### 4. 查看统计
@@ -158,6 +167,7 @@ zotero stats
 
 ```bash
 zotero add journalArticle "论文标题" "作者名"
+zotero add-by-id "10.1038/nature23477"
 ```
 
 ### 6. 更新文献
@@ -173,9 +183,30 @@ zotero delete ABCD1234        # 移至回收站
 zotero delete ABCD1234 --permanent  # 永久删除
 ```
 
+### 8. 附件同步 (WebDAV)
+
+```bash
+zotero webdav:config https://dav.example.com/dav user pass
+zotero webdav:sync
+```
+
 ---
 
 ## 配置说明
+
+### 语言设置
+
+```bash
+# 使用中文（默认）
+zotero sync
+
+# 使用英文
+zotero --lang=en sync
+
+# 通过环境变量
+export LANG=en_US.UTF-8
+zotero sync
+```
 
 ### 配置文件加载优先级
 
@@ -251,29 +282,62 @@ LOG_LEVEL=info
 
 ## 命令参考
 
+### 全局选项
+
+| 选项 | 说明 |
+|------|------|
+| `--lang=en` | 设置语言为英文 |
+| `--lang=zh` | 设置语言为中文（默认） |
+| `--help`, `-h` | 显示帮助信息 |
+
 ### 同步命令
 
 | 命令 | 别名 | 说明 |
 |------|------|------|
 | `zotero sync` | `zotero s` | 双向同步 |
-| `zotero sync --full` | `zotero s -f` | 完整同步（忽略版本号） |
+| `zotero sync --full-sync` | `zotero s -f` | 完整同步（忽略版本号） |
+| `zotero sync --groups` | `zotero s -g` | 同步所有群组库 |
+| `zotero sync --group=ID` | `zotero s -G<ID>` | 同步指定群组 |
+| `zotero sync --quiet` | `zotero s -q` | 静默模式（无进度条） |
+| `zotero sync --interactive` | `zotero s -i` | 交互式冲突解决 |
 | `zotero sync:upload` | `zotero su` | 仅上传本地修改 |
 | `zotero sync:download` | `zotero sd` | 仅下载远程修改 |
+
+### 群组库命令
+
+| 命令 | 说明 |
+|------|------|
+| `zotero groups` | 列出所有加入的群组 |
+| `zotero sync --groups` | 同步所有群组库 |
+| `zotero sync --group=12345` | 同步指定群组 |
 
 ### 查看命令
 
 | 命令 | 别名 | 说明 |
 |------|------|------|
 | `zotero list` | `zotero ls` | 列出文献 |
-| `zotero list:unsynced` | | 列出未同步文献 |
-| `zotero get <key>` | | 查看单条文献 |
+| `zotero list --limit 50` | | 限制显示数量 |
+| `zotero list --type book` | | 按类型过滤 |
+| `zotero list --unsynced` | | 列出未同步项 |
+| `zotero list --deleted` | | 列出已删除项 |
+| `zotero list --since 2024-01-01` | | 显示指定日期后修改的项 |
+| `zotero list --sort title` | | 按字段排序 |
+| `zotero list --order desc` | | 降序排列 |
+| `zotero list:unsynced` | `zotero lsu` | 列出未同步文献 |
+| `zotero get <key>` | `zotero show <key>` | 查看单条文献详情 |
 | `zotero stats` | `zotero st` | 库统计信息 |
+| `zotero attachments` | `zotero att` | 列出附件 |
+| `zotero attachments --item ABCD1234` | | 查看指定项的附件 |
 
 ### 搜索命令
 
 | 命令 | 别名 | 说明 |
 |------|------|------|
-| `zotero search <query>` | | 按标题搜索 |
+| `zotero search <query>` | `zotero find <query>` | 搜索标题 |
+| `zotero search "词" --field author` | | 按作者搜索 |
+| `zotero search "词" --field tags` | | 按标签搜索 |
+| `zotero search "词" --unsynced` | | 在未同步项中搜索 |
+| `zotero search "词" --since 2024-01-01` | | 搜索指定日期后的项 |
 
 ### 管理命令
 
@@ -313,6 +377,28 @@ zotero add-by-id "10.1038/nature23477, 1706.03762"
 - ISBN: `978-0-13-110362-7`
 - PMID: `27626369`
 
+### WebDAV 附件同步
+
+| 命令 | 说明 |
+|------|------|
+| `zotero webdav:config <url> <user> <pass>` | 配置 WebDAV 服务器 |
+| `zotero webdav:sync` | 同步所有附件到 WebDAV |
+| `zotero webdav:status` | 查看 WebDAV 配置状态 |
+| `zotero webdav:scan` | 扫描 WebDAV 上的附件 |
+
+**配置示例**：
+
+```bash
+# 坚果云
+zotero webdav:config https://dav.jianguoyun.com/dav/zotero user pass
+
+# NextCloud
+zotero webdav:config https://cloud.example.com/remote.php/dav/files/user/zotero user pass
+
+# 同步附件
+zotero webdav:sync
+```
+
 ### 导出命令
 
 | 命令 | 说明 |
@@ -322,15 +408,6 @@ zotero add-by-id "10.1038/nature23477, 1706.03762"
 | `zotero export ris [文件]` | 导出为 RIS |
 | `zotero export csv [文件]` | 导出为 CSV |
 | `zotero export json [文件]` | 导出为 JSON |
-| `zotero list:unsynced` | `zotero lsu` | 列出未同步文献 |
-| `zotero get <key>` | `zotero show <key>` | 查看单条文献 |
-| `zotero stats` | `zotero st` | 库统计信息 |
-
-### 搜索命令
-
-| 命令 | 别名 | 说明 |
-|------|------|------|
-| `zotero search <query>` | `zotero find <query>` | 按标题搜索 |
 
 ### 工具命令
 
@@ -340,19 +417,31 @@ zotero add-by-id "10.1038/nature23477, 1706.03762"
 | `zotero --help` | 显示帮助信息 |
 | `zotero --version` | 显示版本 |
 
-### 命令选项
+### 命令选项示例
 
 ```bash
 # 查看帮助
 zotero --help
 zotero sync --help
 
-# 干运行模式（不实际执行）
-zotero sync --dry-run
+# 静默模式
+zotero sync --quiet
 
 # 完整同步（忽略版本差异）
-zotero sync --full
+zotero sync --full-sync
 zotero sync -f
+
+# 交互式冲突解决
+zotero sync --interactive
+
+# 同步群组库
+zotero sync --groups
+
+# 过滤显示
+zotero list --type journalArticle --sort title --limit 20
+
+# 搜索作者
+zotero search "Smith" --field author --limit 10
 ```
 
 ### 添加/更新/删除示例
@@ -411,10 +500,11 @@ zotero sync
 # 查看未同步项目
 zotero list:unsynced
 
-# 强制使用本地版本
-zotero sync --full-sync
+# 交互式解决冲突
+zotero sync --interactive
 
-# 或手动修复版本号后同步
+# 或强制使用远程版本
+zotero sync --full-sync
 ```
 
 #### 4. "Rate limit exceeded"
@@ -423,6 +513,7 @@ zotero sync --full-sync
 
 **解决**：
 - 系统会自动重试，等待后重试
+- 使用 `--quiet` 模式减少输出
 
 #### 5. "SQLite database locked"
 
@@ -458,7 +549,7 @@ DEBUG=zotero:* zotero sync
 
 ```bash
 # 删除本地数据库（下次同步会重新下载）
-rm .zotero-headless.db
+rm ~/.config/zotero-headless/data/zotero.sqlite
 zotero sync
 ```
 
@@ -522,14 +613,16 @@ npm test -- packages/sync-engine
 
 ```
 Zotero-Headless/
-├── apps/cli/           # CLI 入口
+├── apps/cli/              # CLI 入口
 ├── packages/
-│   ├── api/           # Zotero API 客户端
-│   ├── core/          # 核心配置
-│   ├── database/      # SQLite 数据库层
-│   ├── sync-engine/   # 同步引擎
-│   └── types/         # TypeScript 类型
-└── tests/             # 测试套件
+│   ├── api/              # Zotero API 客户端
+│   ├── core/             # 核心配置
+│   ├── database/         # SQLite 数据库层
+│   ├── sync-engine/      # 同步引擎
+│   ├── attachment-manager/  # 附件管理
+│   ├── webdav-client/    # WebDAV 客户端
+│   └── types/            # TypeScript 类型
+└── tests/                # 测试套件
 ```
 
 ---
@@ -543,23 +636,40 @@ Zotero-Headless/
 ### Q: 支持哪些 Zotero 库类型？
 
 - ✅ 个人库 (User Library)
-- ✅ 小组库 (Group Library) - 需要相应的 API Key 权限
+- ✅ 群组库 (Group Library) - 需要相应的 API Key 权限
 
 ### Q: 如何处理大量文献（>10000条）？
 
-系统会自动分批处理（默认每批50条）。可以调整配置：
+系统会自动分批处理（默认每批50条），并使用并行下载加速：
 
-```json
-{
-  "sync": {
-    "batchSize": 100
-  }
-}
+```bash
+# 查看并发设置
+zotero sync
+# 输出：使用 5 个并行连接下载...
 ```
 
 ### Q: 数据存储在哪里？
 
-默认存储在当前目录的 `.zotero-headless.db` 文件中（SQLite 格式）。
+默认存储在 `~/.config/zotero-headless/data/zotero.sqlite`（SQLite 格式）。
+
+### Q: WebDAV 同步支持哪些服务？
+
+- ✅ 坚果云 (jianguoyun.com)
+- ✅ NextCloud / ownCloud
+- ✅ 任何支持 WebDAV 协议的存储服务
+
+### Q: 如何切换语言？
+
+```bash
+# 英文
+zotero --lang=en sync
+
+# 中文（默认）
+zotero sync
+
+# 环境变量
+export LANG=en_US.UTF-8
+```
 
 ---
 
@@ -577,4 +687,4 @@ MIT License - See [LICENSE](LICENSE)
 
 ---
 
-*最后更新：2026-02-17*
+*最后更新：2026-02-18*
