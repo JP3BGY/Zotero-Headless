@@ -40,7 +40,7 @@ const hasTsup = existsSync(tsupPath);
 
 if (!hasTsup) {
   console.log('📥 Installing tsup in project...');
-  execSync('pnpm add -D tsup typescript', { 
+  execSync('pnpm add -D -w tsup typescript', { 
     cwd: rootDir,
     stdio: 'inherit' 
   });
