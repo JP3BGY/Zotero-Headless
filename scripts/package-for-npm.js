@@ -59,7 +59,8 @@ const tsupCommand = [
   '--target node18',
   '--external better-sqlite3',
   '--external sql.js',
-  '--minify'
+  '--minify',
+  '--outExtension .js'
 ].join(' ');
 
 try {
