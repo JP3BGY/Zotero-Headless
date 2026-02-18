@@ -142,45 +142,63 @@ zotero sync
 ✅ 同步完成：更新 50 个，删除 0 个
 ```
 
-### 2. 查看文献列表
+### 2. 查看文献列表 (list / ls / ll)
 
 ```bash
-zotero list
-zotero list --limit 50
-zotero list --type journalArticle
+zotero list              # 完整命令
+zotero ls                # 短别名
+zotero ll                # 详细列表（类似 ls -l）
+zotero ls -t book        # 只显示书籍
+zotero ls -u             # 显示未同步项
 ```
 
-### 3. 搜索文献
+### 3. 搜索文献 (search / find / grep / f)
 
 ```bash
-zotero search "machine learning"
-zotero search "张" --field author
+zotero search "machine learning"    # 完整命令
+zotero find "machine learning"      # 别名
+zotero grep "machine learning"      # 类似 Unix grep
+zotero f "machine learning"         # 最短形式
+zotero grep "张" -f author          # 按作者搜索
 ```
 
-### 4. 查看统计
+### 4. 查看统计 (stats / st / info / df)
 
 ```bash
-zotero stats
+zotero stats             # 完整命令
+zotero st                # 短别名
+zotero info              # 类似 Unix info
+zotero df                # 类似 Unix df（磁盘使用情况）
 ```
 
-### 5. 添加文献
+### 5. 添加文献 (add / a / new / touch)
 
 ```bash
-zotero add journalArticle "论文标题" "作者名"
-zotero add-by-id "10.1038/nature23477"
+zotero add journalArticle "论文标题" "作者名"      # 完整命令
+zotero a journalArticle "论文标题" "作者名"        # 短别名
+zotero new journalArticle "论文标题"               # 类似 Unix 风格
+zotero touch journalArticle "论文标题"             # 类似 Unix touch
+zotero add-by-id "10.1038/nature23477"            # 通过标识符添加
 ```
 
-### 6. 更新文献
+### 6. 更新文献 (update / u / edit / set)
 
 ```bash
-zotero update ABCD1234 title "新标题"
+zotero update ABCD1234 title "新标题"     # 完整命令
+zotero u ABCD1234 title "新标题"          # 短别名
+zotero edit ABCD1234 title "新标题"       # 类似 Unix 风格
+zotero set ABCD1234 title "新标题"        # 类似设置变量
 ```
 
-### 7. 删除文献
+### 7. 删除文献 (delete / rm / del / d / trash)
 
 ```bash
-zotero delete ABCD1234        # 移至回收站
-zotero delete ABCD1234 --permanent  # 永久删除
+zotero delete ABCD1234              # 移至回收站（完整命令）
+zotero rm ABCD1234                  # Unix 风格删除
+zotero rm ABCD1234 -f               # 强制永久删除（类似 rm -f）
+zotero rm ABCD1234 -p               # --permanent 短形式
+zotero del ABCD1234                 # del 别名
+zotero trash ABCD1234               # trash 别名
 ```
 
 ### 8. 附件同步 (WebDAV)
@@ -294,60 +312,61 @@ LOG_LEVEL=info
 
 | 命令 | 别名 | 说明 |
 |------|------|------|
-| `zotero sync` | `zotero s` | 双向同步 |
-| `zotero sync --full-sync` | `zotero s -f` | 完整同步（忽略版本号） |
-| `zotero sync --groups` | `zotero s -g` | 同步所有群组库 |
-| `zotero sync --group=ID` | `zotero s -G<ID>` | 同步指定群组 |
-| `zotero sync --quiet` | `zotero s -q` | 静默模式（无进度条） |
-| `zotero sync --interactive` | `zotero s -i` | 交互式冲突解决 |
-| `zotero sync:upload` | `zotero su` | 仅上传本地修改 |
-| `zotero sync:download` | `zotero sd` | 仅下载远程修改 |
+| `zotero sync` | `s`, `pull`, `fetch`, `refresh` | 双向同步 |
+| `zotero sync --full-sync` | `-f` | 完整同步（忽略版本号） |
+| `zotero sync --groups` | `-g` | 同步所有群组库 |
+| `zotero sync --group=ID` | `-G<ID>` | 同步指定群组 |
+| `zotero sync --quiet` | `-q` | 静默模式（无进度条） |
+| `zotero sync --interactive` | `-i` | 交互式冲突解决 |
+| `zotero sync:upload` | `su` | 仅上传本地修改 |
+| `zotero sync:download` | `sd` | 仅下载远程修改 |
 
 ### 群组库命令
 
-| 命令 | 说明 |
-|------|------|
-| `zotero groups` | 列出所有加入的群组 |
-| `zotero sync --groups` | 同步所有群组库 |
-| `zotero sync --group=12345` | 同步指定群组 |
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `zotero groups` | `g`, `team`, `org` | 列出所有群组 |
+| `zotero sync --groups` | `s -g` | 同步所有群组库 |
+| `zotero sync --group=12345` | `s -G12345` | 同步指定群组 |
 
 ### 查看命令
 
 | 命令 | 别名 | 说明 |
 |------|------|------|
-| `zotero list` | `zotero ls` | 列出文献 |
-| `zotero list --limit 50` | | 限制显示数量 |
-| `zotero list --type book` | | 按类型过滤 |
-| `zotero list --unsynced` | | 列出未同步项 |
-| `zotero list --deleted` | | 列出已删除项 |
-| `zotero list --since 2024-01-01` | | 显示指定日期后修改的项 |
-| `zotero list --sort title` | | 按字段排序 |
-| `zotero list --order desc` | | 降序排列 |
-| `zotero list:unsynced` | `zotero lsu` | 列出未同步文献 |
-| `zotero get <key>` | `zotero show <key>` | 查看单条文献详情 |
-| `zotero stats` | `zotero st` | 库统计信息 |
-| `zotero attachments` | `zotero att` | 列出附件 |
+| `zotero list` | `ls`, `ll` | 列出文献（ll=详细） |
+| `zotero list --limit 50` | `-l 50` | 限制显示数量 |
+| `zotero list --type book` | `-t book` | 按类型过滤 |
+| `zotero list --unsynced` | `-u` | 列出未同步项 |
+| `zotero list --deleted` | `-d` | 列出已删除项 |
+| `zotero list --since 2024-01-01` | `-s 2024-01-01` | 显示指定日期后修改的项 |
+| `zotero list --sort title` | `-S title` | 按字段排序 |
+| `zotero list --order desc` | `-o desc` | 降序排列 |
+| `zotero list:unsynced` | `lsu` | 列出未同步文献 |
+| `zotero get <key>` | `show`, `cat`, `view` | 查看单条文献详情 |
+| `zotero stats` | `st`, `info`, `status`, `df` | 库统计信息 |
+| `zotero attachments` | `att`, `files`, `docs` | 列出附件 |
 | `zotero attachments --item ABCD1234` | | 查看指定项的附件 |
 
 ### 搜索命令
 
 | 命令 | 别名 | 说明 |
 |------|------|------|
-| `zotero search <query>` | `zotero find <query>` | 搜索标题 |
-| `zotero search "词" --field author` | | 按作者搜索 |
-| `zotero search "词" --field tags` | | 按标签搜索 |
-| `zotero search "词" --unsynced` | | 在未同步项中搜索 |
-| `zotero search "词" --since 2024-01-01` | | 搜索指定日期后的项 |
+| `zotero search <query>` | `find`, `grep`, `f` | 搜索标题 |
+| `zotero search "词" --field author` | `-f author` | 按作者搜索 |
+| `zotero search "词" --field tags` | `-f tags` | 按标签搜索 |
+| `zotero search "词" --unsynced` | `-u` | 在未同步项中搜索 |
+| `zotero search "词" --since 2024-01-01` | `-s 2024-01-01` | 搜索指定日期后的项 |
 
 ### 管理命令
 
-| 命令 | 说明 | 同步需求 |
-|------|------|----------|
-| `zotero add-by-id <identifier>` | 通过 DOI/arXiv/ISBN/PMID 添加文献 | 自动同步 |
-| `zotero add <类型> <标题> [作者...]` | 手动添加新文献 | 自动同步 |
-| `zotero update <key> <字段> <值>` | 更新文献（仅本地） | 需运行 `sync` |
-| `zotero delete <key>` | 删除文献（仅本地标记） | 需运行 `sync` |
-| `zotero delete <key> --permanent` | 永久删除（仅本地标记） | 需运行 `sync` |
+| 命令 | 别名 | 说明 | 同步需求 |
+|------|------|------|----------|
+| `zotero add-by-id <id>` | `add` | 通过 DOI/arXiv/ISBN/PMID 添加 | 自动同步 |
+| `zotero add <类型> <标题>` | `a`, `new`, `touch` | 手动添加新文献 | 自动同步 |
+| `zotero update <key> <字段> <值>` | `u`, `edit`, `set` | 更新文献（仅本地） | 需运行 `sync` |
+| `zotero delete <key>` | `rm`, `del`, `d`, `trash` | 删除/移至回收站 | 需运行 `sync` |
+| `zotero delete <key> --permanent` | `rm -p` | 永久删除 | 需运行 `sync` |
+| `zotero delete <key> --force` | `rm -f` | 强制删除（同 --permanent） | 需运行 `sync` |
 
 ### add-by-id 命令
 
@@ -464,6 +483,38 @@ zotero sync
 ```
 
 > ⚠️ **重要**：`update` 和 `delete` 命令只修改本地数据库，需要运行 `zotero sync` 才能将更改同步到远程。这样可以避免直接操作远程导致的版本冲突。
+
+---
+
+## 别名速查表
+
+如果你熟悉 Unix/Linux 命令，这些别名会让你上手更快：
+
+| Unix 习惯 | Zotero 命令 | 示例 |
+|-----------|-------------|------|
+| `ls` / `ll` | `list` | `zotero ls`, `zotero ll` |
+| `rm` | `delete` | `zotero rm ABCD1234` |
+| `rm -f` | `delete --force` | `zotero rm -f ABCD1234` |
+| `cat` | `get` | `zotero cat ABCD1234` |
+| `grep` | `search` | `zotero grep "keyword"` |
+| `touch` | `add` | `zotero touch journalArticle "Title"` |
+| `df` | `stats` | `zotero df` |
+| `ping` | `verify` | `zotero ping` |
+
+### 最常用短命令
+
+```bash
+zotero s              # sync
+zotero ls             # list
+zotero ll             # list detailed
+zotero rm <key>      # delete
+zotero cat <key>     # get/show
+zotero grep <word>   # search
+zotero a <type>      # add
+zotero u <key>       # update
+zotero st             # stats
+zotero v              # verify
+```
 
 ---
 
