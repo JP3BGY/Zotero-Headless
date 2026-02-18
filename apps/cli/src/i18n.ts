@@ -4,7 +4,7 @@
 export type Language = 'en' | 'zh';
 
 export interface Translations {
-  [key: string]: string | Translations;
+  [key: string]: string | Translations | ((...args: any[]) => string);
 }
 
 // English translations

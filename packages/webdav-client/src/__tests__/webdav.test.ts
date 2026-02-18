@@ -94,11 +94,11 @@ describe('AttachmentManager WebDAV Integration', () => {
       const config = {
         url: 'http://test.com/dav',
         username: 'user',
-        password: 'pass'
+        password: 'pass',
+        basePath: '/zotero'
       };
       
-      const basePath = config.basePath || '/zotero';
-      expect(basePath).toBe('/zotero');
+      expect(config.basePath).toBe('/zotero');
     });
   });
   

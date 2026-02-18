@@ -1362,9 +1362,6 @@ Quick Examples:
 
 For more info: https://github.com/altairwei/Zotero-Headless
 `);
-
-For more info: https://github.com/altairwei/Zotero-Headless
-`);
     }
   }
 ];
