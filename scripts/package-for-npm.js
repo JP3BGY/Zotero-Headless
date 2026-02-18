@@ -49,13 +49,11 @@ const tsupCommand = [
   join(rootDir, 'apps/cli/src/index.ts'),
   '--format esm',
   `--outDir ${distDir}`,
-  '--bundle',
   '--platform node',
   '--target node18',
   '--external better-sqlite3',
   '--external sql.js',
-  '--minify',
-  '--clean'
+  '--minify'
 ].join(' ');
 
 try {
