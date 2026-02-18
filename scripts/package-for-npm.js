@@ -12,7 +12,7 @@
  */
 
 import { execSync } from 'child_process';
-import { existsSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, rmSync, readdirSync, renameSync, renameSync as fsRenameSync } from 'fs';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
@@ -74,7 +74,6 @@ try {
 
 // Rename .mjs to .js for compatibility
 console.log('📝 Renaming .mjs to .js...');
-import { readdirSync, renameSync } from 'fs';
 const files = readdirSync(distDir);
 for (const file of files) {
   if (file.endsWith('.mjs')) {
@@ -128,12 +127,11 @@ const tarballName = `zotero-headless-${version}.tgz`;
 try {
   execSync(`tar -czf ${tarballName} .`, {
     cwd: distDir,
-    stdio: 'ignore'
+    stdio: 'pipe'
   });
   
   // Move tarball to root
-  const fs = await import('fs');
-  fs.renameSync(
+  fsRenameSync(
     join(distDir, tarballName),
     join(rootDir, tarballName)
   );
@@ -148,5 +146,11 @@ try {
   console.log('  zotero help');
 } catch (error) {
   console.error('❌ Failed to create tarball:', error.message);
+  if (error.stderr) {
+    console.error('stderr:', error.stderr.toString());
+  }
+  if (error.stdout) {
+    console.error('stdout:', error.stdout.toString());
+  }
   process.exit(1);
 }
