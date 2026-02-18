@@ -137,7 +137,7 @@ export class AttachmentManager {
   async listAttachments(options: AttachmentListOptions = {}): Promise<AttachmentInfo[]> {
     const { itemKey, libraryId, webdavSynced, limit = 100, offset = 0 } = options;
 
-    let whereCondition = isNull(attachments.deleted); // Not deleted
+    let whereCondition: any = isNull(attachments.deleted); // Not deleted
 
     if (itemKey) {
       whereCondition = and(whereCondition, eq(attachments.itemKey, itemKey));
@@ -159,7 +159,7 @@ export class AttachmentManager {
       .offset(offset)
       .all();
 
-    return results.map(a => ({
+    return results.map((a: any) => ({
       key: a.key,
       title: a.title,
       filename: a.filename,
@@ -296,7 +296,7 @@ export class AttachmentManager {
 
       // Upload ZIP
       const zipStats = fs.statSync(tempZip);
-      await this.webdavClient!.uploadFile(tempZip, webdavPath, (uploaded, total) => {
+      await this.webdavClient!.uploadFile(tempZip, webdavPath, (uploaded: number, total: number) => {
         if (onProgress) {
           onProgress(uploaded, total, attachment.filename);
         }

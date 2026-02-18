@@ -1,4 +1,4 @@
 // WebDAV Client Entry Point
 
-export { WebDAVClient, createWebDAVClient } from './client';
-export type { WebDAVConfig, WebDAVFileInfo, WebDAVClientOptions } from './client';
+export { WebDAVClient, createWebDAVClient } from './client.js';
+export type { WebDAVConfig, WebDAVFileInfo, WebDAVClientOptions } from './client.js';
