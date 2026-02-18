@@ -3,7 +3,7 @@
 
 import * as esbuild from 'esbuild';
 import { execSync } from 'child_process';
-import { existsSync, mkdirSync, copyFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, copyFileSync, writeFileSync, readdirSync, readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -17,6 +17,80 @@ if (!existsSync(outputDir)) {
 }
 
 console.log('🔨 Bundling Zotero-Headless CLI...');
+
+// Create esbuild plugin to resolve workspace packages
+const workspacePlugin = {
+  name: 'workspace-resolver',
+  setup(build) {
+    // Read pnpm-workspace.yaml to get workspace package locations
+    const workspaceYaml = readFileSync(join(rootDir, 'pnpm-workspace.yaml'), 'utf8');
+    
+    // Parse YAML - look for lines with dash and value
+    const workspacePatterns = [];
+    for (const line of workspaceYaml.split('\n')) {
+      const trimmed = line.trim();
+      // Match patterns like "  - 'apps/*'" or "- 'packages/*'"
+      const match = trimmed.match(/^[-*]\s*['"]([^'"]+)['"]/);
+      if (match) {
+        workspacePatterns.push(match[1]);
+      }
+    }
+    
+    console.log('📦 Parsed workspace patterns:', workspacePatterns);
+    
+    // Build a map of package names to their paths
+    const packageMap = new Map();
+    
+    for (const pattern of workspacePatterns) {
+      const basePath = pattern.replace('/*', '');
+      const fullBasePath = join(rootDir, basePath);
+      
+      console.log(`🔍 Checking workspace pattern: ${pattern} -> ${fullBasePath}`);
+      
+      if (existsSync(fullBasePath)) {
+        const dirs = readdirSync(fullBasePath, { withFileTypes: true })
+          .filter(dirent => dirent.isDirectory())
+          .map(dirent => dirent.name);
+        
+        console.log(`  Found directories: ${dirs.join(', ')}`);
+        
+        for (const dir of dirs) {
+          const packageJsonPath = join(fullBasePath, dir, 'package.json');
+          if (existsSync(packageJsonPath)) {
+            const pkgJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
+            if (pkgJson.name) {
+              // Point to the source entry point instead of dist
+              const entryPoint = pkgJson.exports?.['.']?.import || 
+                                pkgJson.exports?.['.']?.require ||
+                                pkgJson.main || 
+                                'dist/index.js';
+              packageMap.set(pkgJson.name, join(fullBasePath, dir, entryPoint));
+              console.log(`  ✓ Found package: ${pkgJson.name} -> ${entryPoint}`);
+            }
+          }
+        }
+      } else {
+        console.log(`  ⚠ Path does not exist: ${fullBasePath}`);
+      }
+    }
+    
+    console.log('📦 Resolved workspace packages:');
+    for (const [name, path] of packageMap) {
+      console.log(`  - ${name} -> ${path}`);
+    }
+    
+    // Intercept workspace package imports
+    build.onResolve({ filter: /^@zotero-headless\// }, args => {
+      const resolvedPath = packageMap.get(args.path);
+      if (resolvedPath) {
+        console.log(`🔗 Resolving ${args.path} to ${resolvedPath}`);
+        return { path: resolvedPath };
+      }
+      console.error(`❌ Could not resolve ${args.path}`);
+      return null;
+    });
+  }
+};
 
 // Bundle with esbuild
 await esbuild.build({
@@ -37,6 +111,7 @@ await esbuild.build({
   define: {
     'process.env.BUNDLED': '"true"',
   },
+  plugins: [workspacePlugin],
   minify: true,
   sourcemap: false,
 });
