@@ -13,8 +13,8 @@
 
 import * as esbuild from 'esbuild';
 import { execSync } from 'child_process';
-import { existsSync, mkdirSync, writeFileSync, rmSync, readdirSync, renameSync, copyFileSync } from 'fs';
-import { join } from 'path';
+import { existsSync, mkdirSync, writeFileSync, rmSync, readdirSync, readFileSync } from 'fs';
+import { join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
@@ -33,6 +33,52 @@ if (existsSync(distDir)) {
   rmSync(distDir, { recursive: true });
 }
 mkdirSync(distDir, { recursive: true });
+
+// Create esbuild plugin to resolve workspace packages
+const workspacePlugin = {
+  name: 'workspace-resolver',
+  setup(build) {
+    // Read pnpm-workspace.yaml to get workspace package locations
+    const workspaceYaml = readFileSync(join(rootDir, 'pnpm-workspace.yaml'), 'utf8');
+    const workspacePatterns = workspaceYaml
+      .split('\n')
+      .filter(line => line.includes('- '))
+      .map(line => line.split('- ')[1].trim());
+    
+    // Build a map of package names to their paths
+    const packageMap = new Map();
+    
+    for (const pattern of workspacePatterns) {
+      const basePath = pattern.replace('/*', '');
+      const fullBasePath = join(rootDir, basePath);
+      
+      if (existsSync(fullBasePath)) {
+        const dirs = readdirSync(fullBasePath, { withFileTypes: true })
+          .filter(dirent => dirent.isDirectory())
+          .map(dirent => dirent.name);
+        
+        for (const dir of dirs) {
+          const packageJsonPath = join(fullBasePath, dir, 'package.json');
+          if (existsSync(packageJsonPath)) {
+            const pkgJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
+            if (pkgJson.name) {
+              packageMap.set(pkgJson.name, join(fullBasePath, dir, 'dist', 'index.js'));
+            }
+          }
+        }
+      }
+    }
+    
+    // Intercept workspace package imports
+    build.onResolve({ filter: /^@zotero-headless\// }, args => {
+      const resolvedPath = packageMap.get(args.path);
+      if (resolvedPath) {
+        return { path: resolvedPath };
+      }
+      return null;
+    });
+  }
+};
 
 // Bundle CLI with esbuild
 console.log('📦 Bundling CLI with esbuild...');
@@ -56,6 +102,7 @@ try {
     define: {
       'process.env.BUNDLED': '"true"',
     },
+    plugins: [workspacePlugin],
     minify: true,
     sourcemap: false,
   });
