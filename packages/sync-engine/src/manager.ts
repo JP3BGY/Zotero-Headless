@@ -13,12 +13,14 @@ import { eq, gt, and, inArray, like, desc } from 'drizzle-orm';
 export interface SyncConfig {
   maxRetries?: number;
   batchSize?: number;
+  concurrency?: number;
   conflictStrategy?: 'local' | 'remote' | 'manual';
 }
 
 const DEFAULT_CONFIG: SyncConfig = {
   maxRetries: 3,
   batchSize: 50,
+  concurrency: 5,
   conflictStrategy: 'local',
 };
 
