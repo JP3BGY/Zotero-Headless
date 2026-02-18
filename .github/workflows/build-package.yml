@@ -54,25 +54,34 @@ jobs:
           cp -r apps/cli/dist dist-package/
           cp -r packages/*/dist dist-package/ 2>/dev/null || true
           
-          # Create Windows batch wrapper
-          cat > dist-package/zotero.cmd << 'EOFCMD'
-          @echo off
-          node "%~dp0\dist\index.js" %*
-          EOFCMD
+          # Create cross-platform CLI wrapper (JavaScript)
+          cat > dist-package/bin.js << 'EOFJS'
+          #!/usr/bin/env node
+          import { spawn } from 'child_process';
+          import { fileURLToPath } from 'url';
+          import { dirname, join } from 'path';
           
-          # Create Unix shell wrapper
-          cat > dist-package/zotero << 'EOFSH'
-          #!/usr/bin/env sh
-          node "$(dirname "$0")/dist/index.js" "$@"
-          EOFSH
-          chmod +x dist-package/zotero
+          const __dirname = dirname(fileURLToPath(import.meta.url));
+          const cliPath = join(__dirname, 'dist', 'index.js');
+          
+          const child = spawn('node', [cliPath, ...process.argv.slice(2)], {
+            stdio: 'inherit',
+            shell: false
+          });
+          
+          child.on('exit', (code) => {
+            process.exitCode = code;
+          });
+          EOFJS
+          chmod +x dist-package/bin.js
           
           cat > dist-package/package.json << EOF
           {
             "name": "zotero-headless",
             "version": "$VERSION",
             "description": "Zotero Web API sync client",
-            "bin": "./zotero",
+            "type": "module",
+            "bin": "./bin.js",
             "engines": { "node": ">=18.0.0" },
             "dependencies": {
               "axios": "^1.13.5",
