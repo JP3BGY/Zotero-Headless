@@ -33,19 +33,25 @@ if (existsSync(distDir)) {
 }
 mkdirSync(distDir, { recursive: true });
 
-// Check if tsup is available
+// Check if tsup is available in project
 console.log('🔧 Checking for tsup...');
-try {
-  execSync('npx tsup --version', { stdio: 'ignore' });
-} catch {
-  console.log('📥 Installing tsup and typescript...');
-  execSync('npm install -g tsup typescript', { stdio: 'inherit' });
+const tsupPath = join(rootDir, 'node_modules/.bin/tsup');
+const hasTsup = existsSync(tsupPath);
+
+if (!hasTsup) {
+  console.log('📥 Installing tsup in project...');
+  execSync('npm install --save-dev tsup typescript', { 
+    cwd: rootDir,
+    stdio: 'inherit' 
+  });
 }
+
+const tsupCmd = hasTsup ? tsupPath : 'npx tsup';
 
 // Bundle CLI with all workspace dependencies
 console.log('📦 Bundling CLI with tsup...');
 const tsupCommand = [
-  'npx tsup',
+  tsupCmd,
   join(rootDir, 'apps/cli/src/index.ts'),
   '--format esm',
   `--outDir ${distDir}`,
