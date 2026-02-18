@@ -108,7 +108,7 @@ export class AttachmentManager {
             basePath: config.basePath || '/zotero',
             autoSync: config.autoSync || false,
             enabled: true,
-            updatedAt: now.toString(),
+            updatedAt: now,
           })
           .where(eq(webdavConfig.id, existing.id));
       } else {
@@ -119,8 +119,8 @@ export class AttachmentManager {
           basePath: config.basePath || '/zotero',
           autoSync: config.autoSync || false,
           enabled: true,
-          createdAt: now.toString(),
-          updatedAt: now.toString(),
+          createdAt: now,
+          updatedAt: now,
         });
       }
 

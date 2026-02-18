@@ -150,6 +150,21 @@ export const syncLogs = sqliteTable('sync_logs', {
   errorMessage: textCol('error_message'),
 });
 
+// ============ WebDAV Config 表 ============
+export const webdavConfig = sqliteTable('webdav_config', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  url: textCol('url').notNull(),
+  username: textCol('username').notNull(),
+  password: textCol('password').notNull(),
+  basePath: textCol('base_path').notNull().default('/zotero'),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  autoSync: integer('auto_sync', { mode: 'boolean' }).notNull().default(false),
+  lastSyncAt: integer('last_sync_at', {  }),
+  lastError: textCol('last_error'),
+  createdAt: integer('created_at', {  }).notNull(),
+  updatedAt: integer('updated_at', {  }).notNull(),
+});
+
 // ============ Relations ============
 export const librariesRelations = relations(libraries, ({ many }) => ({
   items: many(items),
@@ -180,3 +195,5 @@ export type Attachment = typeof attachments.$inferSelect;
 export type NewAttachment = typeof attachments.$inferInsert;
 export type SyncLog = typeof syncLogs.$inferSelect;
 export type NewSyncLog = typeof syncLogs.$inferInsert;
+export type WebDAVConfig = typeof webdavConfig.$inferSelect;
+export type NewWebDAVConfig = typeof webdavConfig.$inferInsert;
