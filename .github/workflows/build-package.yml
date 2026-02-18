@@ -51,26 +51,15 @@ jobs:
         run: |
           VERSION=${{ steps.get_version.outputs.VERSION }}
           mkdir -p dist-package
-          
-          # Copy built files
           cp -r apps/cli/dist dist-package/
           cp -r packages/*/dist dist-package/ 2>/dev/null || true
-          
-          # Copy necessary files
-          cp package.json dist-package/
-          
-          # Create package.json for distribution
           cat > dist-package/package.json << EOF
           {
             "name": "zotero-headless",
             "version": "$VERSION",
             "description": "Zotero Web API sync client",
-            "bin": {
-              "zotero": "./dist/index.js"
-            },
-            "engines": {
-              "node": ">=18.0.0"
-            },
+            "bin": { "zotero": "./dist/index.js" },
+            "engines": { "node": ">=18.0.0" },
             "dependencies": {
               "axios": "^1.13.5",
               "better-sqlite3": "^11.9.1",
@@ -82,13 +71,7 @@ jobs:
             }
           }
           EOF
-          
-          # Create tarball
-          cd dist-package
-          tar -czf ../zotero-headless-${VERSION}.tgz .
-          cd ..
-          
-          echo "✅ Created zotero-headless-${VERSION}.tgz"
+          cd dist-package && tar -czf ../zotero-headless-${VERSION}.tgz . && cd ..
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -96,9 +79,3 @@ jobs:
           name: zotero-headless-${{ steps.get_version.outputs.VERSION }}
           path: zotero-headless-*.tgz
           retention-days: 30
-
-      - name: Output package info
-        run: |
-          echo "✅ Build complete!"
-          echo "Package: zotero-headless-${{ steps.get_version.outputs.VERSION }}.tgz"
-          ls -lh zotero-headless-*.tgz
