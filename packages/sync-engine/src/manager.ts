@@ -470,7 +470,8 @@ export class SyncManager extends EventEmitter {
         // Remove fields that Zotero API doesn't accept (custom fields should be in 'extra')
         const zoteroItemFields = [
           'itemType', 'title', 'creators', 'abstractNote', 'date', 'url', 'DOI',
-          'accessDate', 'libraryCatalog', 'callNumber', 'rights', 'placeholder'
+          'accessDate', 'libraryCatalog', 'callNumber', 'rights', 'placeholder',
+          'note', 'parentItem', 'tags', 'collections', 'relations'
         ];
         
         // Remove any custom/unknown fields

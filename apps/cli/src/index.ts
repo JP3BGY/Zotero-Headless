@@ -123,13 +123,18 @@ function formatDateTime(dateValue: any): string {
 }
 
 /**
- * 生成 Zotero 格式的随机 key
- * 8位大写字母和数字组合
+ * Generate a Zotero-compatible object key
+ * Uses the same algorithm as Zotero Desktop:
+ * - 8 characters from allowedKeyChars
+ * - Excludes 0, 1, O to avoid visual confusion
  */
 function generateKey(): string {
+  // Zotero's allowedKeyChars: "23456789ABCDEFGHIJKLMNPQRSTUVWXYZ"
+  // Excludes: 0, 1, O (to avoid confusion with O, I, L)
+  const allowedKeyChars = '23456789ABCDEFGHIJKLMNPQRSTUVWXYZ';
   return Array.from({ length: 8 }, () =>
-    'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.charAt(
-      Math.floor(Math.random() * 36)
+    allowedKeyChars.charAt(
+      Math.floor(Math.random() * allowedKeyChars.length)
     )
   ).join('');
 }
