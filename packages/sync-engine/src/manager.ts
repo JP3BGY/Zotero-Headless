@@ -509,6 +509,8 @@ export class SyncManager extends EventEmitter {
             
             // 如果 key 改变了，先更新本地数据库中的 key
             if (newKey !== item.key) {
+              console.warn(`   ⚠️  WARNING: Server reassigned key for item ${item.key} -> ${newKey}`);
+              console.warn(`      This may indicate key collision or invalid key format.`);
               await this.db.update(items)
                 .set({ key: newKey })
                 .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
