@@ -61,6 +61,28 @@ importers:
         specifier: ^1.2.0
         version: 1.6.1(@types/node@25.2.3)
 
+  apps/api:
+    dependencies:
+      '@zotero-headless/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@zotero-headless/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@zotero-headless/sync-engine':
+        specifier: workspace:*
+        version: link:../../packages/sync-engine
+      '@zotero-headless/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+    devDependencies:
+      typescript:
+        specifier: ^5.3.0
+        version: 5.9.3
+
   apps/cli:
     dependencies:
       '@types/jsdom':
