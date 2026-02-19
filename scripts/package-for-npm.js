@@ -46,6 +46,23 @@ try {
   process.exit(1);
 }
 
+// Bundle shell as well
+console.log('📦 Bundling shell...');
+try {
+  const shellSrc = join(rootDir, 'apps', 'shell', 'dist', 'index.js');
+  const shellBundle = join(distDir, 'shell.js');
+  
+  // Use esbuild to bundle shell with all dependencies
+  execSync(`npx esbuild ${shellSrc} --bundle --platform=node --format=cjs --outfile=${shellBundle} --external:better-sqlite3 --external:sql.js`, {
+    cwd: rootDir,
+    stdio: 'inherit'
+  });
+  console.log('✅ Shell bundled successfully');
+} catch (error) {
+  console.error('❌ Shell bundling failed:', error.message);
+  console.log('⚠️ Continuing without shell...');
+}
+
 // Copy the bundled file from cli-bundle/dist
 const bundleOutputDir = join(cliBundleDir, 'dist');
 const bundleFile = join(bundleOutputDir, 'zotero.js');
@@ -77,7 +94,7 @@ const packageJson = {
   description: 'Zotero Web API sync client - CLI tool for syncing Zotero libraries without desktop app',
   bin: {
     zotero: './index.js',
-    'zotero-sh': './apps/shell/dist/index.js'
+    'zotero-sh': './shell.js'
   },
   engines: {
     node: '>=18.0.0'
@@ -95,21 +112,6 @@ writeFileSync(
   join(distDir, 'package.json'),
   JSON.stringify(packageJson, null, 2)
 );
-
-// Copy shell dist files
-console.log('📦 Copying shell dist files...');
-const shellDistDir = join(rootDir, 'apps', 'shell', 'dist');
-const shellDistTarget = join(distDir, 'apps', 'shell', 'dist');
-if (existsSync(shellDistDir)) {
-  mkdirSync(shellDistTarget, { recursive: true });
-  execSync(`cp -r ${shellDistDir}/* ${shellDistTarget}/`, {
-    cwd: rootDir,
-    stdio: 'ignore'
-  });
-  console.log('✅ Shell dist files copied');
-} else {
-  console.log('⚠️ Shell dist not found, skipping');
-}
 
 // Create .npmignore
 console.log('📝 Creating .npmignore...');
