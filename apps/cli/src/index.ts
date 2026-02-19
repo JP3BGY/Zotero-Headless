@@ -300,6 +300,46 @@ const commands: Command[] = [
   },
 
   {
+    name: 'attachment-download',
+    aliases: ['attdl', 'down'],
+    description: 'Download attachment from WebDAV',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
+      const result = await attachmentManager.downloadFromWebDAV(args[0]);
+      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-open',
+    aliases: ['atto', 'open'],
+    description: 'Open attachment with system default app',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
+      const result = await attachmentManager.openAttachment(args[0]);
+      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-dedup',
+    aliases: ['attdedup', 'dedup'],
+    description: 'Find and remove duplicate attachments',
+    execute: async (args) => {
+      await initModules();
+      const result = await attachmentManager.findDuplicates();
+      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      console.log(`Found ${result.duplicates.length} duplicates`);
+      if (args.includes('--delete')) {
+        for (const g of result.duplicates) {
+          await attachmentManager.removeDuplicates(g);
+        }
+        console.log('🗑️  Removed');
+      }
+    }
+  },
+
+  {
     name: 'groups',
     aliases: ['g', 'team', 'org'],
     description: 'List group libraries. Aliases: g, team, org',
@@ -325,12 +365,92 @@ const commands: Command[] = [
   },
 
   {
+    name: 'attachment-download',
+    aliases: ['attdl', 'down'],
+    description: 'Download attachment from WebDAV',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
+      const result = await attachmentManager.downloadFromWebDAV(args[0]);
+      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-open',
+    aliases: ['atto', 'open'],
+    description: 'Open attachment with system default app',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
+      const result = await attachmentManager.openAttachment(args[0]);
+      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-dedup',
+    aliases: ['attdedup', 'dedup'],
+    description: 'Find and remove duplicate attachments',
+    execute: async (args) => {
+      await initModules();
+      const result = await attachmentManager.findDuplicates();
+      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      console.log(`Found ${result.duplicates.length} duplicates`);
+      if (args.includes('--delete')) {
+        for (const g of result.duplicates) {
+          await attachmentManager.removeDuplicates(g);
+        }
+        console.log('🗑️  Removed');
+      }
+    }
+  },
+
+  {
     name: 'sync:upload',
     aliases: ['su'],
     description: 'Upload local changes only',
     execute: async () => {
       console.log('📤 This would upload local changes...');
       // Implementation for upload-only would go here
+    }
+  },
+
+  {
+    name: 'attachment-download',
+    aliases: ['attdl', 'down'],
+    description: 'Download attachment from WebDAV',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
+      const result = await attachmentManager.downloadFromWebDAV(args[0]);
+      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-open',
+    aliases: ['atto', 'open'],
+    description: 'Open attachment with system default app',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
+      const result = await attachmentManager.openAttachment(args[0]);
+      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-dedup',
+    aliases: ['attdedup', 'dedup'],
+    description: 'Find and remove duplicate attachments',
+    execute: async (args) => {
+      await initModules();
+      const result = await attachmentManager.findDuplicates();
+      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      console.log(`Found ${result.duplicates.length} duplicates`);
+      if (args.includes('--delete')) {
+        for (const g of result.duplicates) {
+          await attachmentManager.removeDuplicates(g);
+        }
+        console.log('🗑️  Removed');
+      }
     }
   },
 
@@ -482,6 +602,46 @@ const commands: Command[] = [
   },
 
   {
+    name: 'attachment-download',
+    aliases: ['attdl', 'down'],
+    description: 'Download attachment from WebDAV',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
+      const result = await attachmentManager.downloadFromWebDAV(args[0]);
+      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-open',
+    aliases: ['atto', 'open'],
+    description: 'Open attachment with system default app',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
+      const result = await attachmentManager.openAttachment(args[0]);
+      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-dedup',
+    aliases: ['attdedup', 'dedup'],
+    description: 'Find and remove duplicate attachments',
+    execute: async (args) => {
+      await initModules();
+      const result = await attachmentManager.findDuplicates();
+      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      console.log(`Found ${result.duplicates.length} duplicates`);
+      if (args.includes('--delete')) {
+        for (const g of result.duplicates) {
+          await attachmentManager.removeDuplicates(g);
+        }
+        console.log('🗑️  Removed');
+      }
+    }
+  },
+
+  {
     name: 'list:unsynced',
     aliases: ['lsu'],
     description: 'List unsynced items',
@@ -509,6 +669,46 @@ const commands: Command[] = [
         results.forEach(item => {
           console.log(`  [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}`);
         });
+      }
+    }
+  },
+
+  {
+    name: 'attachment-download',
+    aliases: ['attdl', 'down'],
+    description: 'Download attachment from WebDAV',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
+      const result = await attachmentManager.downloadFromWebDAV(args[0]);
+      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-open',
+    aliases: ['atto', 'open'],
+    description: 'Open attachment with system default app',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
+      const result = await attachmentManager.openAttachment(args[0]);
+      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-dedup',
+    aliases: ['attdedup', 'dedup'],
+    description: 'Find and remove duplicate attachments',
+    execute: async (args) => {
+      await initModules();
+      const result = await attachmentManager.findDuplicates();
+      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      console.log(`Found ${result.duplicates.length} duplicates`);
+      if (args.includes('--delete')) {
+        for (const g of result.duplicates) {
+          await attachmentManager.removeDuplicates(g);
+        }
+        console.log('🗑️  Removed');
       }
     }
   },
@@ -693,6 +893,46 @@ const commands: Command[] = [
   },
 
   {
+    name: 'attachment-download',
+    aliases: ['attdl', 'down'],
+    description: 'Download attachment from WebDAV',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
+      const result = await attachmentManager.downloadFromWebDAV(args[0]);
+      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-open',
+    aliases: ['atto', 'open'],
+    description: 'Open attachment with system default app',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
+      const result = await attachmentManager.openAttachment(args[0]);
+      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-dedup',
+    aliases: ['attdedup', 'dedup'],
+    description: 'Find and remove duplicate attachments',
+    execute: async (args) => {
+      await initModules();
+      const result = await attachmentManager.findDuplicates();
+      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      console.log(`Found ${result.duplicates.length} duplicates`);
+      if (args.includes('--delete')) {
+        for (const g of result.duplicates) {
+          await attachmentManager.removeDuplicates(g);
+        }
+        console.log('🗑️  Removed');
+      }
+    }
+  },
+
+  {
     name: 'get',
     aliases: ['show', 'cat', 'view'],
     description: 'Show item details. Aliases: show, cat, view',
@@ -745,6 +985,46 @@ const commands: Command[] = [
   },
 
   {
+    name: 'attachment-download',
+    aliases: ['attdl', 'down'],
+    description: 'Download attachment from WebDAV',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
+      const result = await attachmentManager.downloadFromWebDAV(args[0]);
+      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-open',
+    aliases: ['atto', 'open'],
+    description: 'Open attachment with system default app',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
+      const result = await attachmentManager.openAttachment(args[0]);
+      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-dedup',
+    aliases: ['attdedup', 'dedup'],
+    description: 'Find and remove duplicate attachments',
+    execute: async (args) => {
+      await initModules();
+      const result = await attachmentManager.findDuplicates();
+      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      console.log(`Found ${result.duplicates.length} duplicates`);
+      if (args.includes('--delete')) {
+        for (const g of result.duplicates) {
+          await attachmentManager.removeDuplicates(g);
+        }
+        console.log('🗑️  Removed');
+      }
+    }
+  },
+
+  {
     name: 'stats',
     aliases: ['st', 'info', 'status', 'df'],
     description: 'Show library statistics. Aliases: st, info, status, df',
@@ -787,6 +1067,46 @@ const commands: Command[] = [
   },
 
   {
+    name: 'attachment-download',
+    aliases: ['attdl', 'down'],
+    description: 'Download attachment from WebDAV',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
+      const result = await attachmentManager.downloadFromWebDAV(args[0]);
+      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-open',
+    aliases: ['atto', 'open'],
+    description: 'Open attachment with system default app',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
+      const result = await attachmentManager.openAttachment(args[0]);
+      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-dedup',
+    aliases: ['attdedup', 'dedup'],
+    description: 'Find and remove duplicate attachments',
+    execute: async (args) => {
+      await initModules();
+      const result = await attachmentManager.findDuplicates();
+      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      console.log(`Found ${result.duplicates.length} duplicates`);
+      if (args.includes('--delete')) {
+        for (const g of result.duplicates) {
+          await attachmentManager.removeDuplicates(g);
+        }
+        console.log('🗑️  Removed');
+      }
+    }
+  },
+
+  {
     name: 'verify',
     aliases: ['v', 'check', 'test', 'ping'],
     description: 'Verify API key and connection. Aliases: v, check, test, ping',
@@ -807,6 +1127,46 @@ const commands: Command[] = [
         console.log(`❌ API key verification failed!`);
         console.log(`   Error: ${e}`);
         process.exit(1);
+      }
+    }
+  },
+
+  {
+    name: 'attachment-download',
+    aliases: ['attdl', 'down'],
+    description: 'Download attachment from WebDAV',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
+      const result = await attachmentManager.downloadFromWebDAV(args[0]);
+      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-open',
+    aliases: ['atto', 'open'],
+    description: 'Open attachment with system default app',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
+      const result = await attachmentManager.openAttachment(args[0]);
+      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-dedup',
+    aliases: ['attdedup', 'dedup'],
+    description: 'Find and remove duplicate attachments',
+    execute: async (args) => {
+      await initModules();
+      const result = await attachmentManager.findDuplicates();
+      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      console.log(`Found ${result.duplicates.length} duplicates`);
+      if (args.includes('--delete')) {
+        for (const g of result.duplicates) {
+          await attachmentManager.removeDuplicates(g);
+        }
+        console.log('🗑️  Removed');
       }
     }
   },
@@ -876,6 +1236,46 @@ const commands: Command[] = [
   },
 
   {
+    name: 'attachment-download',
+    aliases: ['attdl', 'down'],
+    description: 'Download attachment from WebDAV',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
+      const result = await attachmentManager.downloadFromWebDAV(args[0]);
+      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-open',
+    aliases: ['atto', 'open'],
+    description: 'Open attachment with system default app',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
+      const result = await attachmentManager.openAttachment(args[0]);
+      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-dedup',
+    aliases: ['attdedup', 'dedup'],
+    description: 'Find and remove duplicate attachments',
+    execute: async (args) => {
+      await initModules();
+      const result = await attachmentManager.findDuplicates();
+      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      console.log(`Found ${result.duplicates.length} duplicates`);
+      if (args.includes('--delete')) {
+        for (const g of result.duplicates) {
+          await attachmentManager.removeDuplicates(g);
+        }
+        console.log('🗑️  Removed');
+      }
+    }
+  },
+
+  {
     name: 'webdav:config',
     aliases: ['wdc'],
     description: 'Configure WebDAV server',
@@ -908,6 +1308,46 @@ const commands: Command[] = [
         console.log('❌ WebDAV configuration failed!');
         console.log(`   Error: ${result.error}`);
         process.exit(1);
+      }
+    }
+  },
+
+  {
+    name: 'attachment-download',
+    aliases: ['attdl', 'down'],
+    description: 'Download attachment from WebDAV',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
+      const result = await attachmentManager.downloadFromWebDAV(args[0]);
+      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-open',
+    aliases: ['atto', 'open'],
+    description: 'Open attachment with system default app',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
+      const result = await attachmentManager.openAttachment(args[0]);
+      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-dedup',
+    aliases: ['attdedup', 'dedup'],
+    description: 'Find and remove duplicate attachments',
+    execute: async (args) => {
+      await initModules();
+      const result = await attachmentManager.findDuplicates();
+      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      console.log(`Found ${result.duplicates.length} duplicates`);
+      if (args.includes('--delete')) {
+        for (const g of result.duplicates) {
+          await attachmentManager.removeDuplicates(g);
+        }
+        console.log('🗑️  Removed');
       }
     }
   },
@@ -947,6 +1387,46 @@ const commands: Command[] = [
   },
 
   {
+    name: 'attachment-download',
+    aliases: ['attdl', 'down'],
+    description: 'Download attachment from WebDAV',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
+      const result = await attachmentManager.downloadFromWebDAV(args[0]);
+      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-open',
+    aliases: ['atto', 'open'],
+    description: 'Open attachment with system default app',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
+      const result = await attachmentManager.openAttachment(args[0]);
+      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-dedup',
+    aliases: ['attdedup', 'dedup'],
+    description: 'Find and remove duplicate attachments',
+    execute: async (args) => {
+      await initModules();
+      const result = await attachmentManager.findDuplicates();
+      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      console.log(`Found ${result.duplicates.length} duplicates`);
+      if (args.includes('--delete')) {
+        for (const g of result.duplicates) {
+          await attachmentManager.removeDuplicates(g);
+        }
+        console.log('🗑️  Removed');
+      }
+    }
+  },
+
+  {
     name: 'webdav:status',
     aliases: ['wdst'],
     description: 'Show WebDAV configuration status',
@@ -981,6 +1461,46 @@ const commands: Command[] = [
         console.log(`   ❌ Connection failed: ${init.error}`);
       }
       console.log();
+    }
+  },
+
+  {
+    name: 'attachment-download',
+    aliases: ['attdl', 'down'],
+    description: 'Download attachment from WebDAV',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
+      const result = await attachmentManager.downloadFromWebDAV(args[0]);
+      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-open',
+    aliases: ['atto', 'open'],
+    description: 'Open attachment with system default app',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
+      const result = await attachmentManager.openAttachment(args[0]);
+      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-dedup',
+    aliases: ['attdedup', 'dedup'],
+    description: 'Find and remove duplicate attachments',
+    execute: async (args) => {
+      await initModules();
+      const result = await attachmentManager.findDuplicates();
+      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      console.log(`Found ${result.duplicates.length} duplicates`);
+      if (args.includes('--delete')) {
+        for (const g of result.duplicates) {
+          await attachmentManager.removeDuplicates(g);
+        }
+        console.log('🗑️  Removed');
+      }
     }
   },
 
@@ -1038,6 +1558,46 @@ const commands: Command[] = [
       console.log(`   Without .prop: ${withoutProp}`);
       console.log(`\n💡 Tip: Files without .prop can still be used, but metadata may differ.`);
       console.log();
+    }
+  },
+
+  {
+    name: 'attachment-download',
+    aliases: ['attdl', 'down'],
+    description: 'Download attachment from WebDAV',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
+      const result = await attachmentManager.downloadFromWebDAV(args[0]);
+      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-open',
+    aliases: ['atto', 'open'],
+    description: 'Open attachment with system default app',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
+      const result = await attachmentManager.openAttachment(args[0]);
+      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-dedup',
+    aliases: ['attdedup', 'dedup'],
+    description: 'Find and remove duplicate attachments',
+    execute: async (args) => {
+      await initModules();
+      const result = await attachmentManager.findDuplicates();
+      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      console.log(`Found ${result.duplicates.length} duplicates`);
+      if (args.includes('--delete')) {
+        for (const g of result.duplicates) {
+          await attachmentManager.removeDuplicates(g);
+        }
+        console.log('🗑️  Removed');
+      }
     }
   },
 
@@ -1180,6 +1740,46 @@ const commands: Command[] = [
   },
 
   {
+    name: 'attachment-download',
+    aliases: ['attdl', 'down'],
+    description: 'Download attachment from WebDAV',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
+      const result = await attachmentManager.downloadFromWebDAV(args[0]);
+      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-open',
+    aliases: ['atto', 'open'],
+    description: 'Open attachment with system default app',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
+      const result = await attachmentManager.openAttachment(args[0]);
+      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-dedup',
+    aliases: ['attdedup', 'dedup'],
+    description: 'Find and remove duplicate attachments',
+    execute: async (args) => {
+      await initModules();
+      const result = await attachmentManager.findDuplicates();
+      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      console.log(`Found ${result.duplicates.length} duplicates`);
+      if (args.includes('--delete')) {
+        for (const g of result.duplicates) {
+          await attachmentManager.removeDuplicates(g);
+        }
+        console.log('🗑️  Removed');
+      }
+    }
+  },
+
+  {
     name: 'update',
     aliases: ['u', 'edit', 'set', 'mod'],
     description: 'Update an item. Aliases: u, edit, set, mod',
@@ -1265,6 +1865,46 @@ const commands: Command[] = [
   },
 
   {
+    name: 'attachment-download',
+    aliases: ['attdl', 'down'],
+    description: 'Download attachment from WebDAV',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
+      const result = await attachmentManager.downloadFromWebDAV(args[0]);
+      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-open',
+    aliases: ['atto', 'open'],
+    description: 'Open attachment with system default app',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
+      const result = await attachmentManager.openAttachment(args[0]);
+      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-dedup',
+    aliases: ['attdedup', 'dedup'],
+    description: 'Find and remove duplicate attachments',
+    execute: async (args) => {
+      await initModules();
+      const result = await attachmentManager.findDuplicates();
+      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      console.log(`Found ${result.duplicates.length} duplicates`);
+      if (args.includes('--delete')) {
+        for (const g of result.duplicates) {
+          await attachmentManager.removeDuplicates(g);
+        }
+        console.log('🗑️  Removed');
+      }
+    }
+  },
+
+  {
     name: 'delete',
     aliases: ['d', 'del', 'rm', 'trash'],
     description: 'Delete (trash) an item. Aliases: rm, del, d. Options: -p/--permanent, -f/--force',
@@ -1345,6 +1985,46 @@ const commands: Command[] = [
   },
 
   {
+    name: 'attachment-download',
+    aliases: ['attdl', 'down'],
+    description: 'Download attachment from WebDAV',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
+      const result = await attachmentManager.downloadFromWebDAV(args[0]);
+      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-open',
+    aliases: ['atto', 'open'],
+    description: 'Open attachment with system default app',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
+      const result = await attachmentManager.openAttachment(args[0]);
+      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-dedup',
+    aliases: ['attdedup', 'dedup'],
+    description: 'Find and remove duplicate attachments',
+    execute: async (args) => {
+      await initModules();
+      const result = await attachmentManager.findDuplicates();
+      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      console.log(`Found ${result.duplicates.length} duplicates`);
+      if (args.includes('--delete')) {
+        for (const g of result.duplicates) {
+          await attachmentManager.removeDuplicates(g);
+        }
+        console.log('🗑️  Removed');
+      }
+    }
+  },
+
+  {
     name: 'export',
     aliases: ['e', 'out', 'save'],
     description: 'Export items to various formats. Aliases: e, out, save',
@@ -1384,6 +2064,46 @@ const commands: Command[] = [
       } catch (error) {
         console.error('❌ Export failed:', error);
         process.exit(1);
+      }
+    }
+  },
+
+  {
+    name: 'attachment-download',
+    aliases: ['attdl', 'down'],
+    description: 'Download attachment from WebDAV',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
+      const result = await attachmentManager.downloadFromWebDAV(args[0]);
+      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-open',
+    aliases: ['atto', 'open'],
+    description: 'Open attachment with system default app',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
+      const result = await attachmentManager.openAttachment(args[0]);
+      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-dedup',
+    aliases: ['attdedup', 'dedup'],
+    description: 'Find and remove duplicate attachments',
+    execute: async (args) => {
+      await initModules();
+      const result = await attachmentManager.findDuplicates();
+      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      console.log(`Found ${result.duplicates.length} duplicates`);
+      if (args.includes('--delete')) {
+        for (const g of result.duplicates) {
+          await attachmentManager.removeDuplicates(g);
+        }
+        console.log('🗑️  Removed');
       }
     }
   },
@@ -1578,6 +2298,46 @@ const commands: Command[] = [
         console.log('   1. 标识符格式是否正确');
         console.log('   2. 网络连接是否正常');
         console.log('   3. API 密钥配置是否正确');
+      }
+    }
+  },
+
+  {
+    name: 'attachment-download',
+    aliases: ['attdl', 'down'],
+    description: 'Download attachment from WebDAV',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
+      const result = await attachmentManager.downloadFromWebDAV(args[0]);
+      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-open',
+    aliases: ['atto', 'open'],
+    description: 'Open attachment with system default app',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
+      const result = await attachmentManager.openAttachment(args[0]);
+      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-dedup',
+    aliases: ['attdedup', 'dedup'],
+    description: 'Find and remove duplicate attachments',
+    execute: async (args) => {
+      await initModules();
+      const result = await attachmentManager.findDuplicates();
+      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      console.log(`Found ${result.duplicates.length} duplicates`);
+      if (args.includes('--delete')) {
+        for (const g of result.duplicates) {
+          await attachmentManager.removeDuplicates(g);
+        }
+        console.log('🗑️  Removed');
       }
     }
   },
@@ -2021,6 +2781,46 @@ Notes:
         default:
           console.log(`❌ Unknown subcommand: ${subcommand}`);
           console.log('   Run "zotero note --help" for usage.');
+      }
+    }
+  },
+
+  {
+    name: 'attachment-download',
+    aliases: ['attdl', 'down'],
+    description: 'Download attachment from WebDAV',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
+      const result = await attachmentManager.downloadFromWebDAV(args[0]);
+      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-open',
+    aliases: ['atto', 'open'],
+    description: 'Open attachment with system default app',
+    execute: async (args) => {
+      await initModules();
+      if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
+      const result = await attachmentManager.openAttachment(args[0]);
+      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+    }
+  },
+  {
+    name: 'attachment-dedup',
+    aliases: ['attdedup', 'dedup'],
+    description: 'Find and remove duplicate attachments',
+    execute: async (args) => {
+      await initModules();
+      const result = await attachmentManager.findDuplicates();
+      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      console.log(`Found ${result.duplicates.length} duplicates`);
+      if (args.includes('--delete')) {
+        for (const g of result.duplicates) {
+          await attachmentManager.removeDuplicates(g);
+        }
+        console.log('🗑️  Removed');
       }
     }
   },

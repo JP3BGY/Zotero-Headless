@@ -4,7 +4,7 @@
 import { getDatabase, attachments, libraries, webdavConfig, items } from '@zotero-headless/database';
 import { zoteroApi } from '@zotero-headless/api';
 import { WebDAVClient, createWebDAVClient } from '@zotero-headless/webdav-client';
-import { eq, and, desc, sql, isNull } from 'drizzle-orm';
+import { eq, and, or, desc, sql, isNull, isNotNull } from 'drizzle-orm';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
@@ -458,6 +458,331 @@ export class AttachmentManager {
       return { success: true, items };
     } catch (error: any) {
       return { success: false, items: [], error: error.message };
+    }
+  }
+
+  /**
+   * Download attachment from WebDAV to local storage
+   */
+  async downloadFromWebDAV(
+    attachmentKey: string,
+    localDir?: string,
+    onProgress?: (downloaded: number, total: number) => void
+  ): Promise<{ success: boolean; localPath?: string; error?: string }> {
+    if (!this.webdavClient) {
+      const init = await this.initWebDAV();
+      if (!init.success) {
+        return { success: false, error: init.error };
+      }
+    }
+
+    // Get attachment info
+    const attachment = await this.db.select()
+      .from(attachments)
+      .where(eq(attachments.key, attachmentKey))
+      .get();
+
+    if (!attachment) {
+      return { success: false, error: `Attachment ${attachmentKey} not found` };
+    }
+
+    if (!attachment.webdavPath) {
+      return { success: false, error: `Attachment ${attachmentKey} has no WebDAV path` };
+    }
+
+    try {
+      // Download from WebDAV
+      const remotePath = attachment.webdavPath;
+      const filename = attachment.filename || `${attachmentKey}.zip`;
+      
+      // Use provided directory or default storage location
+      const storageDir = localDir || this.getDefaultStorageDir();
+      if (!fs.existsSync(storageDir)) {
+        fs.mkdirSync(storageDir, { recursive: true });
+      }
+
+      const localPath = path.join(storageDir, filename);
+
+      // Download file
+      await this.webdavClient!.downloadFile(remotePath, localPath, onProgress);
+
+      // Update database
+      await this.db.update(attachments)
+        .set({ 
+          localPath,
+          webdavSynced: true,
+          updatedAt: Math.floor(Date.now() / 1000)
+        })
+        .where(eq(attachments.key, attachmentKey))
+        .run();
+
+      return { success: true, localPath };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Download all missing attachments from WebDAV
+   */
+  async downloadAll(
+    localDir?: string,
+    options?: {
+      onProgress?: (current: number, total: number, filename: string) => void;
+      onlyMissing?: boolean;
+    }
+  ): Promise<{ success: boolean; downloaded: number; errors: string[] }> {
+    // Get attachments to download
+    let attachmentsToDownload: typeof attachments.$inferSelect[];
+    
+    if (options?.onlyMissing) {
+      // Only attachments without local path but with webdav path
+      attachmentsToDownload = await this.db.select()
+        .from(attachments)
+        .where(and(
+          isNull(attachments.localPath),
+          sql`${attachments.webdavPath} IS NOT NULL`,
+          eq(attachments.deleted, false)
+        ))
+        .all();
+    } else {
+      // All attachments with webdav path
+      attachmentsToDownload = await this.db.select()
+        .from(attachments)
+        .where(and(
+          sql`${attachments.webdavPath} IS NOT NULL`,
+          eq(attachments.deleted, false)
+        ))
+        .all();
+    }
+
+    if (attachmentsToDownload.length === 0) {
+      return { success: true, downloaded: 0, errors: [] };
+    }
+
+    const errors: string[] = [];
+    let downloaded = 0;
+
+    for (let i = 0; i < attachmentsToDownload.length; i++) {
+      const attachment = attachmentsToDownload[i];
+      
+      try {
+        // Wrap progress callback
+        const originalCallback = options?.onProgress;
+        const wrappedCallback = originalCallback 
+          ? (d: number, t: number) => originalCallback(i + 1, attachmentsToDownload.length, attachment.filename)
+          : undefined;
+        
+        const result = await this.downloadFromWebDAV(
+          attachment.key,
+          localDir,
+          wrappedCallback
+        );
+        
+        if (result.success) {
+          downloaded++;
+        } else {
+          errors.push(`${attachment.key}: ${result.error}`);
+        }
+      } catch (error: any) {
+        errors.push(`${attachment.key}: ${error.message}`);
+      }
+    }
+
+    return { success: errors.length === 0, downloaded, errors };
+  }
+
+  /**
+   * Get default storage directory for attachments
+   */
+  private getDefaultStorageDir(): string {
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '/tmp';
+    return path.join(homeDir, '.local', 'share', 'zotero-headless', 'attachments');
+  }
+
+  /**
+   * Find duplicate attachments by file hash
+   */
+  async findDuplicates(): Promise<{
+    success: boolean;
+    duplicates: Array<{
+      hash: string;
+      size: number;
+      attachments: Array<{
+        key: string;
+        filename: string;
+        localPath?: string;
+        webdavPath?: string;
+      }>;
+    }>;
+    error?: string;
+  }> {
+    try {
+      // Get all attachments with local or webdav path
+      const allAttachments = await this.db.select()
+        .from(attachments)
+        .where(eq(attachments.deleted, false))
+        .all();
+      
+      // Filter attachments with local or webdav path
+      const filteredAttachments = allAttachments.filter(att => 
+        att.localPath !== null && att.localPath !== undefined ||
+        att.webdavPath !== null && att.webdavPath !== undefined
+      );
+
+      if (filteredAttachments.length === 0) {
+        return { success: true, duplicates: [] };
+      }
+
+      // Calculate hash for each attachment
+      const hashMap = new Map<string, typeof filteredAttachments>();
+
+      for (const att of filteredAttachments) {
+        let hash: string | null = null;
+        let size = 0;
+
+        try {
+          if (att.localPath && fs.existsSync(att.localPath)) {
+            // Calculate hash from local file
+            const content = fs.readFileSync(att.localPath);
+            hash = crypto.createHash('md5').update(content).digest('hex');
+            size = content.length;
+          } else if (att.md5) {
+            // Use stored MD5 if available
+            hash = att.md5;
+          }
+        } catch (error) {
+          console.warn(`Failed to hash attachment ${att.key}:`, error);
+          continue;
+        }
+
+        if (hash) {
+          const key = `${hash}_${size}`; // Include size to avoid collisions
+          if (!hashMap.has(key)) {
+            hashMap.set(key, []);
+          }
+          hashMap.get(key)!.push(att);
+        }
+      }
+
+      // Filter groups with duplicates (2+ attachments with same hash)
+      const duplicates = Array.from(hashMap.entries())
+        .filter(([_, group]) => group.length > 1)
+        .map(([key, group]) => {
+          const [hash, sizeStr] = key.split('_');
+          return {
+            hash,
+            size: parseInt(sizeStr) || 0,
+            attachments: group.map(att => ({
+              key: att.key,
+              filename: att.filename,
+              localPath: att.localPath || undefined,
+              webdavPath: att.webdavPath || undefined,
+            })),
+          };
+        });
+
+      return { success: true, duplicates };
+    } catch (error: any) {
+      return { success: false, duplicates: [], error: error.message };
+    }
+  }
+
+  /**
+   * Remove duplicate attachments (keep one)
+   */
+  async removeDuplicates(
+    duplicateGroup: { hash: string; attachments: Array<{ key: string }> },
+    keepKey?: string
+  ): Promise<{ success: boolean; removed: number; error?: string }> {
+    try {
+      if (duplicateGroup.attachments.length < 2) {
+        return { success: true, removed: 0 };
+      }
+
+      // Determine which one to keep
+      let keepIndex = 0;
+      if (keepKey) {
+        const idx = duplicateGroup.attachments.findIndex(a => a.key === keepKey);
+        if (idx >= 0) keepIndex = idx;
+      }
+
+      // Remove others
+      let removed = 0;
+      for (let i = 0; i < duplicateGroup.attachments.length; i++) {
+        if (i === keepIndex) continue;
+
+        const attKey = duplicateGroup.attachments[i].key;
+        
+        // Mark as deleted
+        await this.db.update(attachments)
+          .set({ 
+            deleted: true,
+            updatedAt: Math.floor(Date.now() / 1000)
+          })
+          .where(eq(attachments.key, attKey))
+          .run();
+
+        removed++;
+      }
+
+      return { success: true, removed };
+    } catch (error: any) {
+      return { success: false, removed: 0, error: error.message };
+    }
+  }
+
+  /**
+   * Open attachment with system default application
+   */
+  async openAttachment(attachmentKey: string): Promise<{ success: boolean; error?: string }> {
+    // Get attachment info
+    const attachment = await this.db.select()
+      .from(attachments)
+      .where(eq(attachments.key, attachmentKey))
+      .get();
+
+    if (!attachment) {
+      return { success: false, error: `Attachment ${attachmentKey} not found` };
+    }
+
+    // Determine file path
+    let filePath = attachment.localPath;
+    
+    if (!filePath) {
+      // Try to download first
+      if (attachment.webdavPath) {
+        const download = await this.downloadFromWebDAV(attachmentKey);
+        if (!download.success) {
+          return { success: false, error: `File not available locally and download failed: ${download.error}` };
+        }
+        filePath = download.localPath;
+      } else {
+        return { success: false, error: 'No local file or WebDAV path available' };
+      }
+    }
+
+    if (!fs.existsSync(filePath)) {
+      return { success: false, error: `File not found: ${filePath}` };
+    }
+
+    // Open with system default application
+    try {
+      const platform = process.platform;
+      let command: string;
+      
+      if (platform === 'darwin') {
+        command = `open "${filePath}"`;
+      } else if (platform === 'win32') {
+        command = `start "" "${filePath}"`;
+      } else {
+        command = `xdg-open "${filePath}"`;
+      }
+
+      execSync(command, { stdio: 'ignore' });
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: `Failed to open file: ${error.message}` };
     }
   }
 }
