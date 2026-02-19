@@ -12,7 +12,7 @@
  */
 
 import { execSync } from 'child_process';
-import { existsSync, mkdirSync, writeFileSync, rmSync, copyFileSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, rmSync, copyFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
@@ -55,9 +55,19 @@ if (!existsSync(bundleFile)) {
   process.exit(1);
 }
 
-// Copy bundle to dist-package as index.js
-copyFileSync(bundleFile, join(distDir, 'index.js'));
-console.log('✅ Bundle copied to dist-package/index.js');
+// Copy bundle to dist-package as index.js and ensure shebang is on first line
+const bundleContent = readFileSync(bundleFile, 'utf-8');
+const indexPath = join(distDir, 'index.js');
+
+// Ensure shebang is on the first line
+if (bundleContent.startsWith('#!/usr/bin/env node')) {
+  // Shebang is already first, just copy
+  writeFileSync(indexPath, bundleContent);
+} else {
+  // Add shebang at the very beginning
+  writeFileSync(indexPath, '#!/usr/bin/env node\n' + bundleContent);
+}
+console.log('✅ Bundle copied to dist-package/index.js with shebang');
 
 // Create package.json
 console.log('📝 Creating package.json...');

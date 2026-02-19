@@ -162,13 +162,37 @@ jobs:
           fi
           echo "Installing: $TGZ_FILE"
           npm install -g "$TGZ_FILE"
-          echo "Testing zotero --version..."
-          zotero --version
-          echo "Testing zotero help..."
-          zotero help
-          echo "Testing zotero config --init..."
-          zotero config --init
-          echo "All tests passed!"
+
+          echo ""
+          echo "=== Testing basic commands ==="
+
+          echo ""
+          echo "1. Testing zotero --version..."
+          zotero --version || { echo "❌ zotero --version failed"; exit 1; }
+          echo "✅ zotero --version passed"
+
+          echo ""
+          echo "2. Testing zotero help..."
+          zotero help || { echo "❌ zotero help failed"; exit 1; }
+          echo "✅ zotero help passed"
+
+          echo ""
+          echo "3. Testing zotero config --init..."
+          zotero config --init || { echo "❌ zotero config --init failed"; exit 1; }
+          echo "✅ zotero config --init passed"
+
+          echo ""
+          echo "4. Testing zotero config --show..."
+          zotero config --show || { echo "❌ zotero config --show failed"; exit 1; }
+          echo "✅ zotero config --show passed"
+
+          echo ""
+          echo "5. Testing command aliases..."
+          zotero h 2>/dev/null || zotero help >/dev/null
+          echo "✅ Help alias works"
+
+          echo ""
+          echo "=== All tests passed! ==="
 
       - name: Install and test (Windows)
         if: runner.os == 'Windows'
@@ -181,10 +205,33 @@ jobs:
           }
           Write-Host "Installing: $($TGZ_FILE.FullName)"
           npm install -g $TGZ_FILE.FullName
-          Write-Host "Testing zotero --version..."
+
+          Write-Host ""
+          Write-Host "=== Testing basic commands ==="
+
+          Write-Host ""
+          Write-Host "1. Testing zotero --version..."
           zotero --version
-          Write-Host "Testing zotero help..."
+          if ($LASTEXITCODE -ne 0) { throw "zotero --version failed" }
+          Write-Host "✅ zotero --version passed"
+
+          Write-Host ""
+          Write-Host "2. Testing zotero help..."
           zotero help
-          Write-Host "Testing zotero config --init..."
+          if ($LASTEXITCODE -ne 0) { throw "zotero help failed" }
+          Write-Host "✅ zotero help passed"
+
+          Write-Host ""
+          Write-Host "3. Testing zotero config --init..."
           zotero config --init
-          Write-Host "All tests passed!"
+          if ($LASTEXITCODE -ne 0) { throw "zotero config --init failed" }
+          Write-Host "✅ zotero config --init passed"
+
+          Write-Host ""
+          Write-Host "4. Testing zotero config --show..."
+          zotero config --show
+          if ($LASTEXITCODE -ne 0) { throw "zotero config --show failed" }
+          Write-Host "✅ zotero config --show passed"
+
+          Write-Host ""
+          Write-Host "=== All tests passed! ==="

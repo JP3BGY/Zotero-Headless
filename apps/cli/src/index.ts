@@ -2984,6 +2984,24 @@ For more info: https://github.com/altairwei/Zotero-Headless
 async function main() {
   const args = process.argv.slice(2);
 
+  // Check for --version flag
+  if (args[0] === '--version' || args[0] === '-v') {
+    const { readFileSync } = await import('fs');
+    const { dirname, join } = await import('path');
+    const { fileURLToPath } = await import('url');
+
+    try {
+      // Try to read version from package.json
+      const __dirname = dirname(fileURLToPath(import.meta.url));
+      const packageJsonPath = join(__dirname, '..', '..', 'package.json');
+      const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+      console.log(packageJson.version || 'unknown');
+    } catch {
+      console.log('unknown');
+    }
+    return;
+  }
+
   // Check for --lang option before command parsing
   const langArg = args.find(arg => arg.startsWith('--lang='));
   if (langArg) {

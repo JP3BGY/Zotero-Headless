@@ -100,9 +100,6 @@ await esbuild.build({
   target: 'node18',
   outfile: join(outputDir, 'zotero.js'),
   format: 'esm',
-  banner: {
-    js: '#!/usr/bin/env node',
-  },
   external: [
     // Native modules that can't be bundled
     'better-sqlite3',
