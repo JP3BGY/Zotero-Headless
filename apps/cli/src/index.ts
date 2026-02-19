@@ -2988,31 +2988,45 @@ For more info: https://github.com/altairwei/Zotero-Headless
       try {
         const { spawn } = await import('child_process');
         const { join, dirname } = await import('path');
-        const { createRequire } = await import('module');
+        const { fileURLToPath } = await import('url');
 
-        // 使用多种方法尝试找到 shell 路径
+        // 尝试多种方法找到 shell 路径
         let shellPath: string | null = null;
 
-        // 方法1: 尝试从 package 入口解析
+        // 方法1: 通过 npm root -g 找到全局安装路径
         try {
-          const require = createRequire(import.meta.url || 'file://' + process.cwd() + '/');
-          const pkgPath = require.resolve('zotero-headless/package.json');
-          shellPath = join(dirname(pkgPath), 'apps', 'shell', 'dist', 'index.js');
+          const { execSync } = await import('child_process');
+          const globalPath = execSync('npm root -g', { encoding: 'utf-8' }).trim();
+          shellPath = join(globalPath, 'zotero-headless', 'apps', 'shell', 'dist', 'index.js');
         } catch {
-          // 方法2: 从当前文件位置推导（开发环境）
+          // ignore
+        }
+
+        // 方法2: 从当前文件位置推导
+        if (!shellPath) {
           try {
-            const { fileURLToPath } = await import('url');
-            if (import.meta.url) {
-              const __dirname = dirname(fileURLToPath(import.meta.url));
-              shellPath = join(__dirname, '..', '..', '..', 'shell', 'dist', 'index.js');
-            }
+            const __dirname = dirname(fileURLToPath(import.meta.url));
+            shellPath = join(__dirname, '..', '..', '..', 'shell', 'dist', 'index.js');
           } catch {
             // ignore
           }
         }
 
+        // 方法3: 尝试直接运行 zotero-sh 命令
         if (!shellPath) {
-          throw new Error('Cannot find shell path. Is zotero-headless properly installed?');
+          const child = spawn('zotero-sh', [], {
+            stdio: 'inherit',
+            shell: true
+          });
+
+          child.on('exit', (code) => {
+            process.exitCode = code ?? 0;
+          });
+          return;
+        }
+
+        if (!shellPath) {
+          throw new Error('Cannot find shell path. Try running "zotero-sh" directly.');
         }
 
         const child = spawn('node', [shellPath], {
@@ -3025,7 +3039,7 @@ For more info: https://github.com/altairwei/Zotero-Headless
         });
       } catch (error) {
         console.error('❌ Failed to start shell:', error);
-        console.log('💡 Try running "zotero-sh" directly if available.');
+        console.log('💡 Try running "zotero-sh" directly or check installation.');
       }
     }
   }
