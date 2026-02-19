@@ -2976,6 +2976,36 @@ With Notes (Markdown):
 For more info: https://github.com/altairwei/Zotero-Headless
 `);
     }
+  },
+
+  // ============ Shell Command ============
+
+  {
+    name: 'shell',
+    aliases: ['sh', 'repl', 'interactive', 'i'],
+    description: 'Start interactive shell. Aliases: sh, repl, interactive, i',
+    execute: async () => {
+      try {
+        const { spawn } = await import('child_process');
+        const { fileURLToPath } = await import('url');
+        const { dirname, join } = await import('path');
+
+        const __dirname = dirname(fileURLToPath(import.meta.url));
+        const shellPath = join(__dirname, '..', '..', '..', 'shell', 'dist', 'index.js');
+
+        const child = spawn('node', [shellPath], {
+          stdio: 'inherit',
+          shell: false
+        });
+
+        child.on('exit', (code) => {
+          process.exitCode = code ?? 0;
+        });
+      } catch (error) {
+        console.error('❌ Failed to start shell:', error);
+        console.log('💡 Try running "zotero-sh" directly if available.');
+      }
+    }
   }
 ];
 
