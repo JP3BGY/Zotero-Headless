@@ -23,10 +23,14 @@ pnpm start sync
 
 | 文档 | 说明 | 目标读者 |
 |------|------|----------|
-| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | 用户指南、命令参考 | 使用者 |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构设计、技术决策 | 开发者 |
-| [docs/ZOTERO_API_FIELDS.md](docs/ZOTERO_API_FIELDS.md) | Zotero API 字段映射 | 开发者 |
-| [docs/IMPORTANT-WORK-PRINCIPLES.md](docs/IMPORTANT-WORK-PRINCIPLES.md) | 开发工作原则 | 贡献者 |
+| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | 用户指南、命令参考、功能详解 | 👤 使用者 |
+| [docs/INSTALL.md](docs/INSTALL.md) | 安装指南（npm/Docker/GitHub Actions）| 👤 使用者 |
+| [docs/DOCKER.md](docs/DOCKER.md) | Docker 部署指南 | 👤 使用者 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构设计 | 👨‍💻 开发者 |
+| [docs/ARCHITECTURE_DECISIONS.md](docs/ARCHITECTURE_DECISIONS.md) | 架构决策记录 | 👨‍💻 开发者 |
+| [docs/ZOTERO_API_FIELDS.md](docs/ZOTERO_API_FIELDS.md) | API 字段映射 | 👨‍💻 开发者 |
+| [docs/IMPORTANT-WORK-PRINCIPLES.md](docs/IMPORTANT-WORK-PRINCIPLES.md) | 开发工作原则 | 🤝 贡献者 |
+| [docs/GITHUB_ISSUES_TEMPLATE.md](docs/GITHUB_ISSUES_TEMPLATE.md) | Issue 模板 | 🤝 贡献者 |
 
 ## 项目结构
 
