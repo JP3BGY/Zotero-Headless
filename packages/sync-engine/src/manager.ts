@@ -473,9 +473,10 @@ export class SyncManager extends EventEmitter {
 
         // Remove metadata fields that shouldn't be sent
         // For 'key'-based writes, we must include 'version' property
+        // CRITICAL: Never delete key for deleted items - they need it for the delete API call
         const isNewItem = item.version === 0;
-        if (!isNewItem) {
-          delete data.key;  // Only delete key for existing items
+        if (!isNewItem && !item.deleted) {
+          delete data.key;  // Only delete key for existing items that are NOT being deleted
         }
         // Keep version for key-based writes
         // delete data.version;
