@@ -59,6 +59,28 @@ if (!existsSync(bundleFile)) {
 copyFileSync(bundleFile, join(distDir, 'index.js'));
 console.log('✅ Bundle copied to dist-package/index.js');
 
+// Create cross-platform CLI wrapper
+console.log('📝 Creating bin.js wrapper...');
+const binWrapper = `#!/usr/bin/env node
+import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const cliPath = join(__dirname, 'index.js');
+
+const child = spawn('node', [cliPath, ...process.argv.slice(2)], {
+  stdio: 'inherit',
+  shell: false
+});
+
+child.on('exit', (code) => {
+  process.exitCode = code;
+});
+`;
+writeFileSync(join(distDir, 'bin.js'), binWrapper);
+console.log('✅ bin.js wrapper created');
+
 // Create package.json
 console.log('📝 Creating package.json...');
 const packageJson = {
@@ -67,7 +89,7 @@ const packageJson = {
   description: 'Zotero Web API sync client - CLI tool for syncing Zotero libraries without desktop app',
   type: 'module',
   bin: {
-    zotero: './index.js'
+    zotero: './bin.js'
   },
   engines: {
     node: '>=18.0.0'
