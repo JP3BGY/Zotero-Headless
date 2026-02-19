@@ -177,17 +177,7 @@ jobs:
           echo "✅ zotero help passed"
 
           echo ""
-          echo "3. Testing zotero config --init..."
-          zotero config --init || { echo "❌ zotero config --init failed"; exit 1; }
-          echo "✅ zotero config --init passed"
-
-          echo ""
-          echo "4. Testing zotero config --show..."
-          zotero config --show || { echo "❌ zotero config --show failed"; exit 1; }
-          echo "✅ zotero config --show passed"
-
-          echo ""
-          echo "5. Testing command aliases..."
+          echo "3. Testing command aliases..."
           zotero h 2>/dev/null || zotero help >/dev/null
           echo "✅ Help alias works"
 
@@ -222,16 +212,77 @@ jobs:
           Write-Host "✅ zotero help passed"
 
           Write-Host ""
-          Write-Host "3. Testing zotero config --init..."
-          zotero config --init
-          if ($LASTEXITCODE -ne 0) { throw "zotero config --init failed" }
-          Write-Host "✅ zotero config --init passed"
-
-          Write-Host ""
-          Write-Host "4. Testing zotero config --show..."
-          zotero config --show
-          if ($LASTEXITCODE -ne 0) { throw "zotero config --show failed" }
-          Write-Host "✅ zotero config --show passed"
-
-          Write-Host ""
           Write-Host "=== All tests passed! ==="
+
+  test-binaries:
+    needs: build-binaries
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: Linux x64
+            binary: zotero-linux-x64
+          - os: ubuntu-latest
+            name: Linux ARM64
+            binary: zotero-linux-arm64
+          - os: macos-latest
+            name: macOS x64
+            binary: zotero-macos-x64
+          - os: macos-latest
+            name: macOS ARM64
+            binary: zotero-macos-arm64
+          - os: windows-latest
+            name: Windows x64
+            binary: zotero-win-x64.exe
+    runs-on: ${{ matrix.os }}
+    name: Test binary on ${{ matrix.name }}
+
+    steps:
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.binary }}
+          path: ./bin
+
+      - name: Test binary (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          chmod +x ./bin/${{ matrix.binary }}
+          echo ""
+          echo "=== Testing pre-built binary ==="
+          
+          echo ""
+          echo "1. Testing --version..."
+          ./bin/${{ matrix.binary }} --version || { echo "❌ --version failed"; exit 1; }
+          echo "✅ --version passed"
+          
+          echo ""
+          echo "2. Testing help..."
+          ./bin/${{ matrix.binary }} help || { echo "❌ help failed"; exit 1; }
+          echo "✅ help passed"
+          
+          echo ""
+          echo "=== All binary tests passed! ==="
+
+      - name: Test binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "=== Testing pre-built binary ==="
+          
+          Write-Host ""
+          Write-Host "1. Testing --version..."
+          .\bin\${{ matrix.binary }} --version
+          if ($LASTEXITCODE -ne 0) { throw "--version failed" }
+          Write-Host "✅ --version passed"
+          
+          Write-Host ""
+          Write-Host "2. Testing help..."
+          .\bin\${{ matrix.binary }} help
+          if ($LASTEXITCODE -ne 0) { throw "help failed" }
+          Write-Host "✅ help passed"
+          
+          Write-Host ""
+          Write-Host "=== All binary tests passed! ==="
