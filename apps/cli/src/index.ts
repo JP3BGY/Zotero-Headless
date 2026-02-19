@@ -1023,7 +1023,10 @@ const commands: Command[] = [
           process.exit(1);
         }
         
-        // Create item data
+        // Create item data (for local database and future sync)
+        const now = Math.floor(Date.now() / 1000);
+        const itemKey = generateKey();
+        
         const itemData = {
           itemType,
           title,
@@ -1035,83 +1038,67 @@ const commands: Command[] = [
           })
         };
         
-        // Call Zotero API to create item
+        // Insert item to local database only (marked as unsynced)
         console.log(`   Creating ${itemType}: "${title}"`);
-        const result = await zoteroApi.createItems(String(library.zoteroId), [itemData]);
+        await getDatabase().insert(items).values({
+          key: itemKey,
+          libraryId: library.id,
+          version: 0,
+          synced: false,
+          deleted: false,
+          createdAt: now,
+          updatedAt: now,
+          itemType,
+          title,
+          creators: JSON.stringify(itemData.creators),
+          rawJson: JSON.stringify({ data: itemData }),
+        }).run();
         
-        if (result.successful && result.successful['0']) {
-          const newKey = result.successful['0'];
-          console.log(`✅ Item created successfully!`);
-          console.log(`   Key: ${newKey}`);
+        console.log(`✅ Item created successfully!`);
+        console.log(`   Key: ${itemKey}`);
+        
+        // Create attachments if provided (only in local database)
+        if (validAttachments.length > 0) {
+          console.log(`\n📎 Adding ${validAttachments.length} attachment(s) locally...`);
           
-          // Create attachments if provided
-          if (validAttachments.length > 0) {
-            console.log(`\n📎 Adding ${validAttachments.length} attachment(s)...`);
+          for (const attPath of validAttachments) {
+            const filename = path.basename(attPath);
+            const stats = fs.statSync(attPath);
+            const attKey = generateKey();
             
-            for (const attPath of validAttachments) {
-              const filename = path.basename(attPath);
-              const stats = fs.statSync(attPath);
-              
-              // Create attachment item data
-              const attachmentData = {
-                itemType: 'attachment',
-                title: filename,
-                filename: filename,
-                contentType: getContentType(filename),
-                parentItem: newKey,
-                linkMode: 'linked_file'
-              };
-              
-              try {
-                const attResult = await zoteroApi.createItems(String(library.zoteroId), [attachmentData]);
-                if (attResult.successful && attResult.successful['0']) {
-                  const attKey = attResult.successful['0'];
-                  console.log(`   ✅ Added: ${filename} (${(stats.size / 1024).toFixed(1)} KB)`);
-                  
-                  // Also add to local database
-                  const now = Math.floor(Date.now() / 1000);
-                  await getDatabase().insert(attachments).values({
-                    key: attKey,
-                    parentItemKey: newKey,
-                    libraryId: library.id,
-                    filename: filename,
-                    contentType: getContentType(filename),
-                    fileType: path.extname(filename).toLowerCase(),
-                    localPath: attPath,
-                    version: 0,
-                    createdAt: now,
-                    updatedAt: now,
-                    deleted: false,
-                    size: stats.size,
-                    webdavSynced: false,
-                    rawJson: JSON.stringify({ data: attachmentData }),
-                  }).run();
-                } else if (attResult.failed) {
-                  console.log(`   ❌ Failed to add ${filename}:`);
-                  Object.values(attResult.failed).forEach((err: any) => {
-                    console.log(`      ${err.code}: ${err.message}`);
-                  });
-                }
-              } catch (attError) {
-                console.log(`   ❌ Failed to add ${filename}: ${attError}`);
-              }
-            }
+            // Create attachment data
+            const attachmentData = {
+              itemType: 'attachment',
+              title: filename,
+              filename: filename,
+              contentType: getContentType(filename),
+              parentItem: itemKey,
+              linkMode: 'linked_file'
+            };
+            
+            // Insert attachment to local database only (marked as unsynced)
+            await getDatabase().insert(attachments).values({
+              key: attKey,
+              parentItemKey: itemKey,
+              libraryId: library.id,
+              filename: filename,
+              contentType: getContentType(filename),
+              fileType: path.extname(filename).toLowerCase(),
+              localPath: attPath,
+              version: 0,
+              createdAt: now,
+              updatedAt: now,
+              deleted: false,
+              size: stats.size,
+              webdavSynced: false,
+              rawJson: JSON.stringify({ data: attachmentData }),
+            }).run();
+            
+            console.log(`   ✅ Added locally: ${filename} (${(stats.size / 1024).toFixed(1)} KB)`);
           }
-          
-          // Update local version to trigger re-sync
-          await getDatabase().update(libraries)
-            .set({ version: library.version - 1 })
-            .where(eq(libraries.id, library.id))
-            .run();
-          
-          console.log(`\n💡 Run "zotero sync" to download the new item.`);
-        } else if (result.failed) {
-          console.log(`❌ Failed to create item:`);
-          Object.values(result.failed).forEach((err: any) => {
-            console.log(`   ${err.code}: ${err.message}`);
-          });
-          process.exit(1);
         }
+        
+        console.log(`\n💡 Run "zotero sync" to upload to remote.`);
       } catch (error) {
         console.log(`❌ Failed to add item: ${error}`);
         process.exit(1);
