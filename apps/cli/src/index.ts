@@ -4,6 +4,7 @@
 // Zotero-Headless CLI
 // See Zotero-Headless-Complete-Design.md Section 7
 
+import { existsSync } from 'fs';
 import { appConfig } from '@zotero-headless/core';
 import { eq, like, desc, asc, count, and, isNull, sql } from 'drizzle-orm';
 import { ProgressBar } from './progress-bar.js';
@@ -2990,14 +2991,30 @@ For more info: https://github.com/altairwei/Zotero-Headless
         const { fileURLToPath } = await import('url');
         const { dirname, join } = await import('path');
 
-        // Find shell bundle path
-        let shellPath: string;
+        // Find shell path - try multiple locations
+        let shellPath: string | null = null;
+        
         try {
           const __dirname = dirname(fileURLToPath(import.meta.url));
-          shellPath = join(__dirname, '..', '..', 'shell.js');
+          // Try relative to current file (development)
+          const devPath = join(__dirname, '..', '..', '..', 'shell', 'dist', 'index.js');
+          if (existsSync(devPath)) {
+            shellPath = devPath;
+          } else {
+            // Try relative to package root (installed package)
+            const pkgPath = join(__dirname, '..', '..', 'apps', 'shell', 'dist', 'index.js');
+            if (existsSync(pkgPath)) {
+              shellPath = pkgPath;
+            }
+          }
         } catch {
-          // Fallback for bundled package
-          shellPath = join(process.cwd(), 'shell.js');
+          // ignore
+        }
+
+        if (!shellPath) {
+          console.error('❌ Cannot find shell. Make sure zotero-headless is properly installed.');
+          console.log('💡 Try: npm install -g zotero-headless');
+          return;
         }
 
         const child = spawn('node', [shellPath], {
