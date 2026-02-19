@@ -108,6 +108,13 @@ export class SyncManager extends EventEmitter {
   }
 
   /**
+   * Sync a specific group library (public API)
+   */
+  async syncGroup(groupId: string, options: SyncOptions = {}): Promise<SyncResult> {
+    return this.syncGroupLibrary(groupId, options);
+  }
+
+  /**
    * Sync a specific group library
    */
   private async syncGroupLibrary(groupId: string, options: SyncOptions = {}): Promise<SyncResult> {

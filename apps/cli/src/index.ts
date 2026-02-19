@@ -342,25 +342,53 @@ const commands: Command[] = [
   {
     name: 'groups',
     aliases: ['g', 'team', 'org'],
-    description: 'List group libraries. Aliases: g, team, org',
-    execute: async () => {
+    description: 'List and sync group libraries. Aliases: g, team, org. Use --sync <group-id> to sync a group library',
+    execute: async (args) => {
       await initModules();
 
+      // Check for sync option
+      const syncIndex = args.indexOf('--sync');
+      if (syncIndex >= 0 && args[syncIndex + 1]) {
+        const groupId = args[syncIndex + 1];
+        console.log(`🔄 Syncing group library ${groupId}...\n`);
+        
+        try {
+          const result = await syncManager.syncGroup(groupId);
+          if (result.success) {
+            console.log(`✅ Group library synced successfully!`);
+            console.log(`   Downloaded: ${result.downloaded || 0}`);
+            console.log(`   Updated: ${result.updated || 0}`);
+          } else {
+            console.log(`❌ Sync failed: ${result.error}`);
+          }
+        } catch (error: any) {
+          console.log(`❌ Error: ${error.message}`);
+        }
+        return;
+      }
+
+      // List groups
       console.log('📚 Fetching your groups...');
       const groups = await syncManager.getUserGroups();
 
       if (groups.length === 0) {
         console.log('   No groups found.');
+        console.log('\n💡 To create a group, visit: https://www.zotero.org/groups/new');
         return;
       }
 
       console.log(`\n📚 Your Groups (${groups.length}):\n`);
       groups.forEach(group => {
         const accessIcon = group.accessLevel === 'write' ? '✏️' : '👁️';
-        console.log(`  ${accessIcon} [${group.groupId}] ${group.name}`);
+        const libraryIcon = group.isLibrary ? '📚' : '👥';
+        console.log(`  ${libraryIcon} ${accessIcon} [${group.groupId}] ${group.name}`);
         console.log(`      Access: ${group.accessLevel}`);
+        console.log(`      Sync: zotero groups --sync ${group.groupId}`);
         console.log('');
       });
+      
+      console.log('💡 To sync a group library:');
+      console.log('   zotero groups --sync <group-id>');
     }
   },
 
