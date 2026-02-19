@@ -464,6 +464,9 @@ const commands: Command[] = [
       const db = getDatabase();
 
       // Parse options
+      const { configManager } = await import('@zotero-headless/core');
+      const configLimit = configManager.get('display')?.defaultLimit || 20;
+      
       const options: {
         type?: string;
         unsynced?: boolean;
@@ -474,7 +477,7 @@ const commands: Command[] = [
         order?: 'asc' | 'desc';
         limit: number;
         offset: number;
-      } = { limit: 20, offset: 0 };
+      } = { limit: configLimit, offset: 0 };
 
       const positionalArgs: string[] = [];
 
@@ -2503,8 +2506,9 @@ Notes:
             // Write current markdown to temp file
             writeFileSync(tmpFile.name, currentMarkdown || '', 'utf-8');
 
-            // Get editor from environment or use defaults
-            const editor = process.env.EDITOR || process.env.VISUAL || 'nano';
+            // Get editor from config, environment, or use default
+            const { configManager } = await import('@zotero-headless/core');
+            const editor = configManager.get('editor') || process.env.EDITOR || process.env.VISUAL || 'nano';
 
             console.log(`📝 Opening external editor: ${editor}`);
             console.log(`   File: ${tmpFile.name}`);
@@ -2822,6 +2826,62 @@ Notes:
         }
         console.log('🗑️  Removed');
       }
+    }
+  },
+
+  {
+    name: 'config',
+    aliases: ['cfg', 'conf'],
+    description: 'Configure zotero CLI settings',
+    execute: async (args) => {
+      const { configManager } = await import('@zotero-headless/core');
+      
+      if (args[0] === '--init') {
+        configManager.init();
+        console.log('✅ Config file created at ~/.zoterrc');
+        return;
+      }
+      
+      if (args[0] === '--show') {
+        console.log('Current config:');
+        console.log(JSON.stringify(configManager.getAll(), null, 2));
+        return;
+      }
+      
+      console.log('Usage:');
+      console.log('  zotero config --init   Create default config');
+      console.log('  zotero config --show    Show current config');
+    }
+  },
+
+  {
+    name: 'history',
+    aliases: ['hist', 'h', 'recent'],
+    description: 'Show recent items and commands',
+    execute: async (args) => {
+      const { historyManager } = await import('@zotero-headless/core');
+      
+      if (args.includes('--clear')) {
+        historyManager.clear();
+        console.log('🗑️  History cleared');
+        return;
+      }
+      
+      const limit = parseInt(args.find(a => !a.startsWith('-')) || '10');
+      const recent = historyManager.getRecent(limit);
+      
+      if (recent.length === 0) {
+        console.log('📭 No history found');
+        return;
+      }
+      
+      console.log(`\n📜 Recent history (${recent.length}):\n`);
+      recent.forEach((entry, i) => {
+        const date = new Date(entry.timestamp).toLocaleDateString();
+        const icon = entry.type === 'item' ? '📄' : entry.type === 'search' ? '🔍' : '⚡';
+        console.log(`  ${icon} [${entry.key || entry.query || entry.command}] (${date})`);
+      });
+      console.log();
     }
   },
 
