@@ -49,10 +49,10 @@ async function initModules() {
  */
 function formatDate(dateValue: any): string {
   if (!dateValue) return 'Unknown';
-  
+
   try {
     let timestamp: number;
-    
+
     // 如果是 Date 对象（Drizzle 转换后的）
     if (dateValue instanceof Date) {
       // Drizzle 的 mode: 'timestamp' 会返回 Date 对象
@@ -62,7 +62,7 @@ function formatDate(dateValue: any): string {
       }
       return dateValue.toISOString().split('T')[0];
     }
-    
+
     // 如果是数字（应该是秒级时间戳）
     if (typeof dateValue === 'number') {
       timestamp = dateValue * 1000;  // 秒 -> 毫秒
@@ -74,7 +74,7 @@ function formatDate(dateValue: any): string {
       }
       return 'Invalid date';
     }
-    
+
     const date = new Date(timestamp);
     if (isNaN(date.getTime())) {
       return 'Invalid date';
@@ -91,17 +91,17 @@ function formatDate(dateValue: any): string {
  */
 function formatDateTime(dateValue: any): string {
   if (!dateValue) return 'Unknown';
-  
+
   try {
     let timestamp: number;
-    
+
     if (dateValue instanceof Date) {
       if (isNaN(dateValue.getTime())) {
         return 'Invalid date';
       }
       return dateValue.toISOString();
     }
-    
+
     if (typeof dateValue === 'number') {
       timestamp = dateValue * 1000;  // 秒 -> 毫秒
     } else {
@@ -111,7 +111,7 @@ function formatDateTime(dateValue: any): string {
       }
       return 'Invalid date';
     }
-    
+
     const date = new Date(timestamp);
     if (isNaN(date.getTime())) {
       return 'Invalid date';
@@ -127,7 +127,7 @@ function formatDateTime(dateValue: any): string {
  * 8位大写字母和数字组合
  */
 function generateKey(): string {
-  return Array.from({ length: 8 }, () => 
+  return Array.from({ length: 8 }, () =>
     'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.charAt(
       Math.floor(Math.random() * 36)
     )
@@ -187,9 +187,9 @@ const commands: Command[] = [
       const syncGroups = args.includes('--groups') || args.includes('-g');
       const quiet = args.includes('--quiet') || args.includes('-q');
       const interactive = args.includes('--interactive') || args.includes('-i');
-      const groupArg = args.find(arg => arg.startsWith('--group='))?.split('=')[1] || 
+      const groupArg = args.find(arg => arg.startsWith('--group='))?.split('=')[1] ||
                        args.find(arg => arg.startsWith('-G'))?.substring(2);
-      
+
       if (!quiet) {
         console.log(t('commands.sync.starting'));
         if (fullSync) {
@@ -203,24 +203,24 @@ const commands: Command[] = [
         }
         console.log('');
       }
-      
+
       // Create progress bar if not quiet
       let progressBar: ProgressBar | null = null;
-      
-      const result = await syncManager.sync({ 
+
+      const result = await syncManager.sync({
         fullSync,
         syncAll: syncGroups,
         groupId: groupArg,
         onProgress: quiet ? undefined : (progress) => {
           if (progress.total > 0) {
             if (!progressBar) {
-              progressBar = new ProgressBar({ 
-                total: progress.total, 
-                label: progress.phase 
+              progressBar = new ProgressBar({
+                total: progress.total,
+                label: progress.phase
               });
             }
             progressBar.update(progress.current, progress.phase);
-            
+
             if (progress.phase === 'complete') {
               progressBar.complete();
               progressBar = null;
@@ -228,12 +228,12 @@ const commands: Command[] = [
           }
         }
       });
-      
+
       // Handle conflicts interactively if requested
       if (result.conflicts && result.conflicts.length > 0) {
         if (interactive && isInteractive()) {
           console.log(`\n⚠️  ${result.conflicts.length} ${t('conflict.title')}`);
-          
+
           // Get item details for conflicts
           const conflictItems: ConflictItem[] = [];
           for (const key of result.conflicts) {
@@ -250,10 +250,10 @@ const commands: Command[] = [
               });
             }
           }
-          
+
           // Interactive resolution
           const resolutions = await resolveConflictsInteractive(conflictItems);
-          
+
           // Apply resolutions
           let resolvedCount = 0;
           for (const [key, resolution] of resolutions) {
@@ -267,7 +267,7 @@ const commands: Command[] = [
               resolvedCount++;
             }
           }
-          
+
           console.log(`\n✅ ${t('common.success')}: ${resolvedCount}`);
         } else if (!quiet) {
           console.log(`\n⚠️  ${result.conflicts.length} conflicts detected.`);
@@ -275,7 +275,7 @@ const commands: Command[] = [
           console.log('   Or use --conflict-strategy=remote|local for auto-resolution');
         }
       }
-      
+
       if (result.success) {
         if (!quiet) {
           console.log(`\n✅ Sync completed successfully!`);
@@ -293,22 +293,22 @@ const commands: Command[] = [
       }
     }
   },
-  
+
   {
     name: 'groups',
     aliases: ['g', 'team', 'org'],
     description: 'List group libraries. Aliases: g, team, org',
     execute: async () => {
       await initModules();
-      
+
       console.log('📚 Fetching your groups...');
       const groups = await syncManager.getUserGroups();
-      
+
       if (groups.length === 0) {
         console.log('   No groups found.');
         return;
       }
-      
+
       console.log(`\n📚 Your Groups (${groups.length}):\n`);
       groups.forEach(group => {
         const accessIcon = group.accessLevel === 'write' ? '✏️' : '👁️';
@@ -318,7 +318,7 @@ const commands: Command[] = [
       });
     }
   },
-  
+
   {
     name: 'sync:upload',
     aliases: ['su'],
@@ -328,7 +328,7 @@ const commands: Command[] = [
       // Implementation for upload-only would go here
     }
   },
-  
+
   {
     name: 'list',
     aliases: ['ls', 'll'],
@@ -337,7 +337,7 @@ const commands: Command[] = [
       const isDetailed = process.argv.includes('ll');  // Check if invoked as 'll'
       await initModules();
       const db = getDatabase();
-      
+
       // Parse options
       const options: {
         type?: string;
@@ -350,9 +350,9 @@ const commands: Command[] = [
         limit: number;
         offset: number;
       } = { limit: 20, offset: 0 };
-      
+
       const positionalArgs: string[] = [];
-      
+
       for (let i = 0; i < args.length; i++) {
         const arg = args[i];
         if (arg === '--type' || arg === '-t') {
@@ -377,20 +377,20 @@ const commands: Command[] = [
           positionalArgs.push(arg);
         }
       }
-      
+
       // Backward compatibility: positional args as limit/offset
       if (positionalArgs.length > 0) options.limit = parseInt(positionalArgs[0]) || 20;
       if (positionalArgs.length > 1) options.offset = parseInt(positionalArgs[1]) || 0;
-      
+
       const library = await db.select().from(libraries).get();
       if (!library) {
         console.log('❌ No library found. Run "sync" first.');
         return;
       }
-      
+
       // Build where conditions
       let whereConditions: any = eq(items.libraryId, library.id);
-      
+
       if (options.type) {
         whereConditions = and(whereConditions, eq(items.itemType, options.type));
       }
@@ -415,23 +415,23 @@ const commands: Command[] = [
           whereConditions = and(whereConditions, desc(items.updatedAt) <= untilDate);
         }
       }
-      
+
       // Build order by
       let orderByColumn = items.updatedAt;
       if (options.sort === 'title') orderByColumn = items.title;
       else if (options.sort === 'date') orderByColumn = items.publicationDate;
       else if (options.sort === 'type') orderByColumn = items.itemType;
-      
+
       const orderDirection = options.order === 'asc' ? asc : desc;
-      
+
       // Build the query using sql`` for subquery
       const attachmentCountSubquery = sql<number>`(
-        SELECT COUNT(*) FROM ${attachments} 
-        WHERE ${attachments.parentItemKey} = ${items.key} 
+        SELECT COUNT(*) FROM ${attachments}
+        WHERE ${attachments.parentItemKey} = ${items.key}
         AND ${attachments.libraryId} = ${items.libraryId}
         AND (${attachments.deleted} IS NULL OR ${attachments.deleted} = 0)
       )`.as('attachmentCount');
-      
+
       const results = await db.select({
         key: items.key,
         title: items.title,
@@ -447,7 +447,7 @@ const commands: Command[] = [
         .limit(options.limit)
         .offset(options.offset)
         .all();
-      
+
       // Build filter description
       const filters: string[] = [];
       if (options.type) filters.push(`type:${options.type}`);
@@ -456,10 +456,10 @@ const commands: Command[] = [
       if (options.since) filters.push(`since:${options.since}`);
       if (options.until) filters.push(`until:${options.until}`);
       if (options.sort) filters.push(`sort:${options.sort}(${options.order || 'desc'})`);
-      
+
       const filterDesc = filters.length > 0 ? ` (filtered: ${filters.join(', ')})` : '';
       console.log(`\n📚 Items (${results.length} shown)${filterDesc}:\n`);
-      
+
       if (results.length === 0) {
         console.log('   No items match the criteria.');
       } else {
@@ -475,7 +475,7 @@ const commands: Command[] = [
       }
     }
   },
-  
+
   {
     name: 'list:unsynced',
     aliases: ['lsu'],
@@ -488,7 +488,7 @@ const commands: Command[] = [
         console.log('❌ No library found. Run "sync" first.');
         return;
       }
-      
+
       const results = await db.select()
         .from(items)
         .where(and(
@@ -496,7 +496,7 @@ const commands: Command[] = [
           eq(items.synced, false)
         ))
         .all();
-      
+
       console.log(`\n🔄 Unsynced items (${results.length}):\n`);
       if (results.length === 0) {
         console.log('   All items are synced!');
@@ -507,14 +507,14 @@ const commands: Command[] = [
       }
     }
   },
-  
+
   {
     name: 'search',
     aliases: ['find', 'grep', 'f'],
     description: 'Search items. Aliases: find, grep, f. Options: -f/--field, -s/--since, -u/--unsynced, -l/--limit',
     execute: async (args) => {
       await initModules();
-      
+
       // Parse options
       const options: {
         query: string;
@@ -526,9 +526,9 @@ const commands: Command[] = [
         field: 'title',
         limit: 20
       };
-      
+
       const queryParts: string[] = [];
-      
+
       for (let i = 0; i < args.length; i++) {
         const arg = args[i];
         if (arg === '--field' || arg === '-f') {
@@ -543,9 +543,9 @@ const commands: Command[] = [
           queryParts.push(arg);
         }
       }
-      
+
       options.query = queryParts.join(' ');
-      
+
       if (!options.query) {
         console.log('❌ Please provide a search query');
         console.log('   Usage: zotero search <query> [options]');
@@ -556,18 +556,18 @@ const commands: Command[] = [
         console.log('     --limit N');
         return;
       }
-      
+
       const db = getDatabase();
       const library = await db.select().from(libraries).get();
-      
+
       if (!library) {
         console.log('❌ No library found. Run "sync" first.');
         return;
       }
-      
+
       // Build search conditions
       let whereConditions: any = eq(items.libraryId, library.id);
-      
+
       // Field-specific search
       if (options.field === 'title' || options.field === 'all') {
         whereConditions = and(whereConditions, like(items.title, `%${options.query}%`));
@@ -576,7 +576,7 @@ const commands: Command[] = [
       } else if (options.field === 'tags') {
         whereConditions = and(whereConditions, like(items.tags, `%${options.query}%`));
       }
-      
+
       // Date filter
       if (options.since) {
         const sinceDate = new Date(options.since).getTime();
@@ -584,27 +584,27 @@ const commands: Command[] = [
           whereConditions = and(whereConditions, desc(items.updatedAt) >= sinceDate);
         }
       }
-      
+
       // Unsynced filter
       if (options.unsynced) {
         whereConditions = and(whereConditions, eq(items.synced, false));
       }
-      
+
       const results = await db.select()
         .from(items)
         .where(whereConditions)
         .limit(options.limit)
         .all();
-      
+
       // Build search description
       const filters: string[] = [];
       if (options.field !== 'title') filters.push(`field:${options.field}`);
       if (options.since) filters.push(`since:${options.since}`);
       if (options.unsynced) filters.push('unsynced');
-      
+
       const filterDesc = filters.length > 0 ? ` (${filters.join(', ')})` : '';
       console.log(`\n🔍 Search results for "${options.query}"${filterDesc} (${results.length}):\n`);
-      
+
       if (results.length === 0) {
         console.log('   No results found.');
       } else {
@@ -618,7 +618,7 @@ const commands: Command[] = [
       }
     }
   },
-  
+
   {
     name: 'get',
     aliases: ['show', 'cat', 'view'],
@@ -630,26 +630,26 @@ const commands: Command[] = [
         console.log('   Usage: zotero get <key>');
         return;
       }
-      
+
       const db = getDatabase();
       const key = args[0];
       const library = await db.select().from(libraries).get();
-      
+
       if (!library) {
         console.log('❌ No library found. Run "sync" first.');
         return;
       }
-      
+
       const item = await db.select()
         .from(items)
         .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
         .get();
-      
+
       if (!item) {
         console.log(`❌ Item ${key} not found.`);
         return;
       }
-      
+
       console.log(`\n📄 Item: ${key}\n`);
       console.log(`   Title: ${item.title || '(none)'}`);
       console.log(`   Type: ${item.itemType}`);
@@ -660,7 +660,7 @@ const commands: Command[] = [
       console.log(`   Updated: ${formatDateTime(item.updatedAt)}`);
       console.log(`   Synced: ${item.synced ? 'Yes' : 'No'}`);
       console.log(`   Deleted: ${item.deleted ? 'Yes' : 'No'}`);
-      
+
       const creators = JSON.parse(item.creators || '[]');
       if (creators.length > 0) {
         console.log(`\n   Creators:`);
@@ -670,7 +670,7 @@ const commands: Command[] = [
       }
     }
   },
-  
+
   {
     name: 'stats',
     aliases: ['st', 'info', 'status', 'df'],
@@ -678,28 +678,28 @@ const commands: Command[] = [
     execute: async () => {
       await initModules();
       const db = getDatabase();
-      
+
       const library = await db.select().from(libraries).get();
       if (!library) {
         console.log('❌ No library found. Run "sync" first.');
         return;
       }
-      
+
       const totalResult = await db.select({ count: count() })
         .from(items)
         .where(eq(items.libraryId, library.id))
         .get();
-      
+
       const deletedResult = await db.select({ count: count() })
         .from(items)
         .where(and(eq(items.libraryId, library.id), eq(items.deleted, true)))
         .get();
-      
+
       const unsyncedResult = await db.select({ count: count() })
         .from(items)
         .where(and(eq(items.libraryId, library.id), eq(items.synced, false)))
         .get();
-      
+
       console.log('\n📊 Library Statistics:\n');
       console.log(`   Library: ${library.name || 'My Library'}`);
       console.log(`   Zotero ID: ${library.zoteroId}`);
@@ -712,7 +712,7 @@ const commands: Command[] = [
       console.log();
     }
   },
-  
+
   {
     name: 'verify',
     aliases: ['v', 'check', 'test', 'ping'],
@@ -737,9 +737,9 @@ const commands: Command[] = [
       }
     }
   },
-  
+
   // ============ Attachment & WebDAV Commands ============
-  
+
   {
     name: 'attachments',
     aliases: ['att', 'files', 'docs'],
@@ -753,7 +753,7 @@ const commands: Command[] = [
       } = {
         limit: 50
       };
-      
+
       // Parse arguments
       for (let i = 0; i < args.length; i++) {
         const arg = args[i];
@@ -766,24 +766,24 @@ const commands: Command[] = [
           options.limit = parseInt(args[++i]) || 50;
         }
       }
-      
+
       const db = getDatabase();
       const library = await db.select().from(libraries).get();
-      
+
       if (!library) {
         console.log('❌ No library found. Run "sync" first.');
         return;
       }
-      
+
       const attachmentList = await attachmentManager.listAttachments({
         libraryId: library.id,
         itemKey: options.itemKey,
         webdavSynced: options.webdavSynced,
         limit: options.limit,
       });
-      
+
       console.log(`\n📎 Attachments (${attachmentList.length}):\n`);
-      
+
       if (attachmentList.length === 0) {
         console.log('   No attachments found.');
       } else {
@@ -801,7 +801,7 @@ const commands: Command[] = [
       }
     }
   },
-  
+
   {
     name: 'webdav:config',
     aliases: ['wdc'],
@@ -814,9 +814,9 @@ const commands: Command[] = [
         console.log('   Example: zotero webdav:config https://dav.jianguoyun.com/dav/zotero user pass /');
         return;
       }
-      
+
       const [url, username, password, basePath] = args;
-      
+
       console.log('🔧 Configuring WebDAV...\n');
       const result = await attachmentManager.configureWebDAV({
         url,
@@ -825,7 +825,7 @@ const commands: Command[] = [
         basePath: basePath || '/zotero',
         autoSync: false,
       });
-      
+
       if (result.success) {
         console.log('✅ WebDAV configured successfully!');
         console.log(`   URL: ${url}`);
@@ -838,7 +838,7 @@ const commands: Command[] = [
       }
     }
   },
-  
+
   {
     name: 'webdav:sync',
     aliases: ['wds'],
@@ -846,11 +846,11 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const quiet = args.includes('--quiet') || args.includes('-q');
-      
+
       if (!quiet) {
         console.log('☁️  Syncing attachments to WebDAV...\n');
       }
-      
+
       const result = await attachmentManager.syncAllToWebDAV({
         onProgress: !quiet ? (current, total, filename) => {
           const percent = Math.round((current / total) * 100);
@@ -858,11 +858,11 @@ const commands: Command[] = [
           process.stdout.write(`\r   [${bar}] ${percent}%`);
         } : undefined,
       });
-      
+
       if (!quiet) {
         process.stdout.write('\n');
       }
-      
+
       if (result.success) {
         console.log(`\n✅ WebDAV sync completed!`);
         console.log(`   Attachments synced: ${result.synced}`);
@@ -872,7 +872,7 @@ const commands: Command[] = [
       }
     }
   },
-  
+
   {
     name: 'webdav:status',
     aliases: ['wdst'],
@@ -881,13 +881,13 @@ const commands: Command[] = [
       await initModules();
       const db = getDatabase();
       const config = await db.select().from(webdavConfig).get();
-      
+
       if (!config) {
         console.log('❌ WebDAV not configured');
         console.log('   Use "zotero webdav:config" to configure');
         return;
       }
-      
+
       console.log('\n☁️  WebDAV Configuration:\n');
       console.log(`   URL: ${config.url}`);
       console.log(`   Username: ${config.username}`);
@@ -898,7 +898,7 @@ const commands: Command[] = [
       if (config.lastError) {
         console.log(`   Last Error: ${config.lastError}`);
       }
-      
+
       // Test connection
       console.log('\n🔍 Testing connection...');
       const init = await attachmentManager.initWebDAV();
@@ -910,7 +910,7 @@ const commands: Command[] = [
       console.log();
     }
   },
-  
+
   {
     name: 'webdav:scan',
     aliases: ['wdscan'],
@@ -918,47 +918,47 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const quiet = args.includes('--quiet') || args.includes('-q');
-      
+
       if (!quiet) {
         console.log('🔍 Scanning WebDAV for Zotero Desktop attachments...\n');
       }
-      
+
       const result = await attachmentManager.scanWebDAV();
-      
+
       if (!result.success) {
         console.log(`❌ Failed to scan WebDAV: ${result.error}`);
         return;
       }
-      
+
       if (result.items.length === 0) {
         console.log('ℹ️  No items found in WebDAV storage.');
         return;
       }
-      
+
       console.log(`📂 Found ${result.items.length} item(s) in WebDAV storage:\n`);
-      
+
       let totalFiles = 0;
       let withProp = 0;
       let withoutProp = 0;
-      
+
       for (const item of result.items.slice(0, 20)) { // Limit to first 20
         totalFiles += item.files.length;
         item.files.forEach(f => {
           if (f.hasProp) withProp++;
           else withoutProp++;
         });
-        
+
         const propIcon = item.files[0]?.hasProp ? '✅' : '⚠️ ';
         console.log(`   📁 ${item.itemKey}/`);
         item.files.forEach(f => {
           console.log(`      ${propIcon} ${f.filename} (${(f.size / 1024).toFixed(1)} KB)`);
         });
       }
-      
+
       if (result.items.length > 20) {
         console.log(`   ... and ${result.items.length - 20} more items`);
       }
-      
+
       console.log(`\n📊 Summary:`);
       console.log(`   Total files: ${totalFiles}`);
       console.log(`   With .prop: ${withProp}`);
@@ -967,7 +967,7 @@ const commands: Command[] = [
       console.log();
     }
   },
-  
+
   {
     name: 'add',
     aliases: ['a', 'new', 'touch', 'create'],
@@ -975,11 +975,11 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       console.log('📝 Adding new item to library...\n');
-      
+
       // Parse arguments: zotero add <type> <title> [authors...] [-a/--attachment path...]
       const attachmentPaths: string[] = [];
       const otherArgs: string[] = [];
-      
+
       for (let i = 0; i < args.length; i++) {
         const arg = args[i];
         if (arg === '-a' || arg === '--attachment') {
@@ -990,10 +990,10 @@ const commands: Command[] = [
           otherArgs.push(arg);
         }
       }
-      
+
       const itemType = otherArgs[0] || 'journalArticle';
       const title = otherArgs[1];
-      
+
       if (!title) {
         console.log('❌ Usage: zotero add <type> <title> [authors...] [-a/--attachment <path>...]');
         console.log('   Example: zotero add journalArticle "My Article" "John Doe"');
@@ -1002,7 +1002,7 @@ const commands: Command[] = [
         console.log('   journalArticle, book, bookSection, conferencePaper, thesis, report, webpage, document');
         process.exit(1);
       }
-      
+
       // Validate attachment paths
       const fs = await import('fs');
       const path = await import('path');
@@ -1014,7 +1014,7 @@ const commands: Command[] = [
           console.log(`⚠️  Attachment not found: ${attPath}`);
         }
       }
-      
+
       try {
         // Get library info
         const library = await getDatabase().select().from(libraries).get();
@@ -1022,11 +1022,11 @@ const commands: Command[] = [
           console.log('❌ No library found. Run "sync" first.');
           process.exit(1);
         }
-        
+
         // Create item data (for local database and future sync)
         const now = Math.floor(Date.now() / 1000);
         const itemKey = generateKey();
-        
+
         const itemData = {
           itemType,
           title,
@@ -1037,7 +1037,7 @@ const commands: Command[] = [
             return { firstName, lastName, creatorType: index === 0 ? 'author' : 'author' };
           })
         };
-        
+
         // Insert item to local database only (marked as unsynced)
         console.log(`   Creating ${itemType}: "${title}"`);
         await getDatabase().insert(items).values({
@@ -1053,19 +1053,19 @@ const commands: Command[] = [
           creators: JSON.stringify(itemData.creators),
           rawJson: JSON.stringify({ data: itemData }),
         }).run();
-        
+
         console.log(`✅ Item created successfully!`);
         console.log(`   Key: ${itemKey}`);
-        
+
         // Create attachments if provided (only in local database)
         if (validAttachments.length > 0) {
           console.log(`\n📎 Adding ${validAttachments.length} attachment(s) locally...`);
-          
+
           for (const attPath of validAttachments) {
             const filename = path.basename(attPath);
             const stats = fs.statSync(attPath);
             const attKey = generateKey();
-            
+
             // Create attachment data
             const attachmentData = {
               itemType: 'attachment',
@@ -1075,7 +1075,7 @@ const commands: Command[] = [
               parentItem: itemKey,
               linkMode: 'linked_file'
             };
-            
+
             // Insert attachment to local database only (marked as unsynced)
             await getDatabase().insert(attachments).values({
               key: attKey,
@@ -1093,11 +1093,11 @@ const commands: Command[] = [
               webdavSynced: false,
               rawJson: JSON.stringify({ data: attachmentData }),
             }).run();
-            
+
             console.log(`   ✅ Added locally: ${filename} (${(stats.size / 1024).toFixed(1)} KB)`);
           }
         }
-        
+
         console.log(`\n💡 Run "zotero sync" to upload to remote.`);
       } catch (error) {
         console.log(`❌ Failed to add item: ${error}`);
@@ -1105,7 +1105,7 @@ const commands: Command[] = [
       }
     }
   },
-  
+
   {
     name: 'update',
     aliases: ['u', 'edit', 'set', 'mod'],
@@ -1113,11 +1113,11 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       console.log('📝 Updating item locally...\n');
-      
+
       const key = args[0];
       const field = args[1];
       const value = args.slice(2).join(' ');
-      
+
       if (!key || !field || !value) {
         console.log('❌ Usage: zotero update <key> <field> <value>');
         console.log('   Example: zotero update ABCD123 title "New Title"');
@@ -1125,31 +1125,31 @@ const commands: Command[] = [
         console.log('   title, date, abstract, url, doi');
         process.exit(1);
       }
-      
+
       try {
         const db = getDatabase();
         const library = await db.select().from(libraries).get();
-        
+
         if (!library) {
           console.log('❌ No library found. Run "sync" first.');
           process.exit(1);
         }
-        
+
         // Get current item
         const item = await db.select()
           .from(items)
           .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
           .get();
-        
+
         if (!item) {
           console.log(`❌ Item ${key} not found.`);
           process.exit(1);
         }
-        
+
         // Parse the raw JSON and update the field
         const rawData = JSON.parse(item.rawJson || '{}');
         const data = rawData.data || rawData;
-        
+
         // Map CLI field names to Zotero API field names
         const fieldMap: Record<string, string> = {
           'title': 'title',
@@ -1158,20 +1158,20 @@ const commands: Command[] = [
           'url': 'url',
           'doi': 'DOI'
         };
-        
+
         const apiField = fieldMap[field.toLowerCase()] || field;
         const oldValue = data[apiField];
         data[apiField] = value;
-        
+
         // Update local database only (do not call API)
         console.log(`   Updating ${key}: ${field} = "${value}"`);
-        
+
         // Re-serialize the updated data
         const updatedRawJson = JSON.stringify({ ...rawData, data });
-        
+
         // Update local item: mark as unsynced and update rawJson
         await db.update(items)
-          .set({ 
+          .set({
             synced: false,
             updatedAt: Math.floor(Date.now() / 1000),  // 使用秒级时间戳
             rawJson: updatedRawJson,
@@ -1180,7 +1180,7 @@ const commands: Command[] = [
           })
           .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
           .run();
-        
+
         console.log(`✅ Item updated locally!`);
         console.log(`   Changed: ${field} "${oldValue}" → "${value}"`);
         console.log(`\n💡 Run "zotero sync" to upload changes to remote.`);
@@ -1190,7 +1190,7 @@ const commands: Command[] = [
       }
     }
   },
-  
+
   {
     name: 'delete',
     aliases: ['d', 'del', 'rm', 'trash'],
@@ -1198,71 +1198,71 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       console.log('🗑️  Deleting item locally...\n');
-      
+
       const key = args[0];
       const permanent = args.includes('--permanent') || args.includes('-p');
       const force = args.includes('--force') || args.includes('-f');
-      
+
       if (!key) {
         console.log('❌ Usage: zotero delete <key> [--permanent]');
         console.log('   Example: zotero delete ABCD123');
         console.log('   Example: zotero delete ABCD123 --permanent (permanent delete)');
         process.exit(1);
       }
-      
+
       try {
         const db = getDatabase();
         const library = await db.select().from(libraries).get();
-        
+
         if (!library) {
           console.log('❌ No library found. Run "sync" first.');
           process.exit(1);
         }
-        
+
         // Get current item
         const item = await db.select()
           .from(items)
           .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
           .get();
-        
+
         if (!item) {
           console.log(`❌ Item ${key} not found.`);
           process.exit(1);
         }
-        
+
         if (permanent) {
           // Permanent delete: remove from local DB immediately
           // Sync will detect it's gone and delete from remote
           console.log(`   Marking ${key} for permanent deletion...`);
-          
+
           await db.delete(items)
             .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
             .run();
-          
+
           console.log(`✅ Item marked for permanent deletion!`);
         } else {
           // Soft delete (move to trash): mark as deleted locally
           console.log(`   Moving ${key} to trash...`);
-          
+
           // Get current data and set deleted flag
           const rawData = JSON.parse(item.rawJson || '{}');
           const data = rawData.data || rawData;
           data.deleted = true;
-          
+
           // Update local item: mark as deleted and unsynced
           await db.update(items)
-            .set({ 
-              deleted: true, 
-              synced: false, 
+            .set({
+              deleted: true,
+              synced: false,
               updatedAt: Math.floor(Date.now() / 1000),  // 使用秒级时间戳
               rawJson: JSON.stringify({ ...rawData, data })
             })
             .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
             .run();
-          
+
           console.log(`✅ Item moved to trash locally!`);
         }
-        
+
         console.log(`\n💡 Run "zotero sync" to sync deletion to remote.`);
       } catch (error) {
         console.log(`❌ Failed to delete item: ${error}`);
@@ -1270,7 +1270,7 @@ const commands: Command[] = [
       }
     }
   },
-  
+
   {
     name: 'export',
     aliases: ['e', 'out', 'save'],
@@ -1278,28 +1278,28 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       console.log('📤 Exporting items...\n');
-      
+
       try {
         // Parse arguments
         const format = args[0]?.toLowerCase() || 'bibtex';
         const outputFile = args[1];
         const limit = args[2] ? parseInt(args[2]) : 100;
-        
+
         const validFormats = ['bibtex', 'ris', 'csv', 'json'];
         if (!validFormats.includes(format)) {
           console.log(`❌ Invalid format: ${format}`);
           console.log(`   Valid formats: ${validFormats.join(', ')}`);
           process.exit(1);
         }
-        
+
         const { Exporter } = await import('./export.js');
         const exporter = new Exporter();
-        
+
         const content = await exporter.exportItems({
           format: format as any,
           limit
         });
-        
+
         if (outputFile) {
           await exporter.exportToFile(content, outputFile);
           console.log(`✅ Exported ${limit} items to ${outputFile} (${format} format)`);
@@ -1323,7 +1323,7 @@ const commands: Command[] = [
       // Parse arguments for attachments
       const attachmentPaths: string[] = [];
       const otherArgs: string[] = [];
-      
+
       for (let i = 0; i < args.length; i++) {
         const arg = args[i];
         if (arg === '-a' || arg === '--attachment') {
@@ -1334,7 +1334,7 @@ const commands: Command[] = [
           otherArgs.push(arg);
         }
       }
-      
+
       if (otherArgs.length === 0) {
         console.log(`
 ❌ 请提供至少一个标识符
@@ -1362,7 +1362,7 @@ const commands: Command[] = [
 
       await initModules();
       const input = otherArgs.join(' ');
-      
+
       // Validate attachment paths
       const fs = await import('fs');
       const path = await import('path');
@@ -1374,22 +1374,22 @@ const commands: Command[] = [
           console.log(`⚠️  Attachment not found: ${attPath}`);
         }
       }
-      
+
       try {
         console.log('🔍 正在解析标识符...\n');
-        
+
         // 导入 identifier 模块
         const { IdentifierParser, MetadataFetcher } = await import('./identifier/index.js');
-        
+
         // 1. 解析标识符
         const identifiers = IdentifierParser.parse(input);
         console.log(`📝 找到 ${identifiers.length} 个标识符`);
-        
+
         // 2. 显示识别结果
         identifiers.forEach((id, index) => {
           console.log(`   ${index + 1}. ${id.type.toUpperCase()}: ${id.value}`);
         });
-        
+
         // 3. 配置获取器
         const fetcher = new MetadataFetcher({
           maxConcurrent: 3,
@@ -1398,33 +1398,33 @@ const commands: Command[] = [
           cacheTTL: 3600000,
           email: process.env.CROSSREF_EMAIL,
         });
-        
+
         // 4. 获取元数据
         console.log('\n📦 正在获取元数据...');
         const results = await fetcher.fetchBatch(identifiers);
-        
+
         // 5. 显示结果摘要
         const successCount = results.filter(r => !r.error).length;
         const failCount = results.filter(r => r.error).length;
-        
+
         console.log(`\n📊 结果摘要:`);
         console.log(`   ✅ 成功: ${successCount}`);
         console.log(`   ❌ 失败: ${failCount}`);
-        
+
         // 6. 写入数据库
         if (successCount > 0) {
           console.log('\n💾 写入本地数据库...');
           const db = getDatabase();
           const library = await db.select().from(libraries).get();
-          
+
           if (!library) {
             console.log('❌ 未找到文献库。请先运行 "zotero sync"');
             return;
           }
-          
+
           for (const result of results) {
             if (result.error || !result.item) continue;
-            
+
             const itemKey = generateKey();
             const item = {
               key: itemKey,
@@ -1437,19 +1437,19 @@ const commands: Command[] = [
               ...result.item,
               rawJson: JSON.stringify({ data: result.item }),
             };
-            
+
             await db.insert(items).values(item).run();
             console.log(`   📄 已添加: ${item.title?.substring(0, 50) || '(无标题)'}...`);
-            
+
             // Add attachments if provided
             if (validAttachments.length > 0) {
               console.log(`   📎 添加 ${validAttachments.length} 个附件...`);
-              
+
               for (const attPath of validAttachments) {
                 const filename = path.basename(attPath);
                 const stats = fs.statSync(attPath);
                 const attKey = generateKey();
-                
+
                 // Create attachment record
                 const now = Math.floor(Date.now() / 1000);
                 await db.insert(attachments).values({
@@ -1466,7 +1466,7 @@ const commands: Command[] = [
                   deleted: false,
                   size: stats.size,
                   webdavSynced: false,
-                  rawJson: JSON.stringify({ 
+                  rawJson: JSON.stringify({
                     data: {
                       itemType: 'attachment',
                       title: filename,
@@ -1474,22 +1474,22 @@ const commands: Command[] = [
                       contentType: getContentType(filename),
                       parentItem: itemKey,
                       linkMode: 'linked_file'
-                    } 
+                    }
                   }),
                 }).run();
-                
+
                 console.log(`      ✅ ${filename} (${(stats.size / 1024).toFixed(1)} KB)`);
               }
             }
           }
-          
+
           console.log(`\n🎉 成功添加 ${successCount} 个文献到本地数据库！`);
           if (validAttachments.length > 0) {
             console.log(`   📎 共添加 ${validAttachments.length} 个附件`);
           }
           console.log('💡 运行 "zotero sync" 上传到远程');
         }
-        
+
         // 7. 显示失败详情
         if (failCount > 0) {
           console.log('\n⚠️ 失败的标识符:');
@@ -1498,7 +1498,7 @@ const commands: Command[] = [
             console.log(`     原因: ${result.error}`);
           });
         }
-        
+
       } catch (error) {
         console.log(`\n❌ 添加失败: ${error}`);
         console.log('\n💡 请检查:');
@@ -1508,7 +1508,280 @@ const commands: Command[] = [
       }
     }
   },
-  
+
+  {
+    name: 'note',
+    aliases: ['n', 'notes'],
+    description: 'Note management. Subcommands: add, edit, show, list. Supports Markdown input/output',
+    execute: async (args) => {
+      await initModules();
+      
+      const subcommand = args[0];
+      const subArgs = args.slice(1);
+      
+      if (!subcommand || subcommand === '--help' || subcommand === '-h') {
+        console.log(`
+📝 Note Management
+
+Usage: zotero note <subcommand> [options]
+
+Subcommands:
+  add <parent-key> [content]     Add a note to an item (Markdown supported)
+  edit <note-key> [content]      Edit an existing note
+  show <note-key>                Show note content (as Markdown)
+  list <parent-key>              List all notes for an item
+
+Examples:
+  zotero note add ABCD1234 "This is a **note**"
+  zotero note edit NOTE5678 "Updated content"
+  zotero note show NOTE5678
+  zotero note list ABCD1234
+
+Notes:
+  - Content supports Markdown formatting
+  - All operations are local; use 'zotero sync' to upload
+  - If content is omitted, a default editor may be used (future feature)
+        `);
+        return;
+      }
+      
+      // Import note utilities
+      const { markdownToHtml, htmlToMarkdown, htmlToPlainText, ensureHtml } = await import('./note-utils.js');
+      
+      const db = getDatabase();
+      const library = await db.select().from(libraries).get();
+      
+      if (!library) {
+        console.log('❌ No library found. Run "sync" first.');
+        return;
+      }
+      
+      switch (subcommand) {
+        case 'add': {
+          const parentKey = subArgs[0];
+          const content = subArgs.slice(1).join(' ');
+          
+          if (!parentKey) {
+            console.log('❌ Usage: zotero note add <parent-key> [content]');
+            console.log('   Example: zotero note add ABCD1234 "This is a **note**"');
+            return;
+          }
+          
+          // Check if parent item exists
+          const parentItem = await db.select()
+            .from(items)
+            .where(and(eq(items.key, parentKey), eq(items.libraryId, library.id)))
+            .get();
+          
+          if (!parentItem) {
+            console.log(`❌ Parent item ${parentKey} not found.`);
+            return;
+          }
+          
+          const noteKey = generateKey();
+          const now = Math.floor(Date.now() / 1000);
+          
+          // Convert Markdown to HTML for storage
+          const htmlContent = ensureHtml(content || '<p></p>');
+          
+          // Create note data
+          const noteData = {
+            itemType: 'note',
+            note: htmlContent,
+            parentItem: parentKey,
+            tags: [],
+          };
+          
+          // Insert to local database
+          await db.insert(items).values({
+            key: noteKey,
+            libraryId: library.id,
+            version: 0,
+            synced: false,
+            deleted: false,
+            createdAt: now,
+            updatedAt: now,
+            itemType: 'note',
+            title: htmlToPlainText(htmlContent, 50) || '(empty note)',
+            rawJson: JSON.stringify({ data: noteData }),
+          }).run();
+          
+          console.log(`✅ Note added successfully!`);
+          console.log(`   Key: ${noteKey}`);
+          console.log(`   Parent: ${parentKey}`);
+          if (content) {
+            console.log(`   Preview: ${htmlToPlainText(htmlContent, 80)}`);
+          }
+          console.log(`\n💡 Run "zotero sync" to upload to remote.`);
+          break;
+        }
+        
+        case 'edit': {
+          const noteKey = subArgs[0];
+          const newContent = subArgs.slice(1).join(' ');
+          
+          if (!noteKey) {
+            console.log('❌ Usage: zotero note edit <note-key> [content]');
+            console.log('   Example: zotero note edit NOTE5678 "Updated **content**"');
+            return;
+          }
+          
+          // Get existing note
+          const note = await db.select()
+            .from(items)
+            .where(and(eq(items.key, noteKey), eq(items.libraryId, library.id)))
+            .get();
+          
+          if (!note) {
+            console.log(`❌ Note ${noteKey} not found.`);
+            return;
+          }
+          
+          if (note.itemType !== 'note') {
+            console.log(`❌ Item ${noteKey} is not a note.`);
+            return;
+          }
+          
+          // Parse existing data
+          const rawData = JSON.parse(note.rawJson || '{}');
+          const data = rawData.data || rawData;
+          
+          // If no new content provided, show current content
+          if (!newContent) {
+            const currentHtml = data.note || '';
+            const currentMarkdown = htmlToMarkdown(currentHtml);
+            console.log(`\n📝 Current content of note ${noteKey}:`);
+            console.log('─'.repeat(60));
+            console.log(currentMarkdown || '(empty)');
+            console.log('─'.repeat(60));
+            console.log('\n💡 To edit, provide new content:');
+            console.log(`   zotero note edit ${noteKey} "New content"`);
+            return;
+          }
+          
+          // Convert new content to HTML
+          const newHtmlContent = ensureHtml(newContent);
+          data.note = newHtmlContent;
+          
+          // Update local database
+          const now = Math.floor(Date.now() / 1000);
+          await db.update(items)
+            .set({
+              synced: false,
+              updatedAt: now,
+              title: htmlToPlainText(newHtmlContent, 50) || '(empty note)',
+              rawJson: JSON.stringify({ ...rawData, data }),
+            })
+            .where(and(eq(items.key, noteKey), eq(items.libraryId, library.id)))
+            .run();
+          
+          console.log(`✅ Note updated successfully!`);
+          console.log(`   Key: ${noteKey}`);
+          console.log(`   Preview: ${htmlToPlainText(newHtmlContent, 80)}`);
+          console.log(`\n💡 Run "zotero sync" to upload changes.`);
+          break;
+        }
+        
+        case 'show': {
+          const noteKey = subArgs[0];
+          
+          if (!noteKey) {
+            console.log('❌ Usage: zotero note show <note-key>');
+            console.log('   Example: zotero note show NOTE5678');
+            return;
+          }
+          
+          // Get note
+          const note = await db.select()
+            .from(items)
+            .where(and(eq(items.key, noteKey), eq(items.libraryId, library.id)))
+            .get();
+          
+          if (!note) {
+            console.log(`❌ Note ${noteKey} not found.`);
+            return;
+          }
+          
+          if (note.itemType !== 'note') {
+            console.log(`❌ Item ${noteKey} is not a note.`);
+            return;
+          }
+          
+          // Parse data
+          const rawData = JSON.parse(note.rawJson || '{}');
+          const data = rawData.data || rawData;
+          const htmlContent = data.note || '';
+          
+          // Convert to Markdown for display
+          const markdownContent = htmlToMarkdown(htmlContent);
+          
+          console.log(`\n📝 Note: ${noteKey}`);
+          console.log(`   Parent: ${data.parentItem || '(none)'}`);
+          console.log(`   Updated: ${formatDate(note.updatedAt)}`);
+          console.log(`   Synced: ${note.synced ? '✅' : '🔄'}`);
+          console.log('─'.repeat(60));
+          console.log(markdownContent || '(empty note)');
+          console.log('─'.repeat(60));
+          break;
+        }
+        
+        case 'list': {
+          const parentKey = subArgs[0];
+          
+          if (!parentKey) {
+            console.log('❌ Usage: zotero note list <parent-key>');
+            console.log('   Example: zotero note list ABCD1234');
+            return;
+          }
+          
+          // Get all notes for this parent
+          const notes = await db.select()
+            .from(items)
+            .where(and(
+              eq(items.libraryId, library.id),
+              eq(items.itemType, 'note'),
+              eq(items.deleted, false)
+            ))
+            .all();
+          
+          // Filter notes that belong to this parent
+          const parentNotes = notes.filter(note => {
+            try {
+              const rawData = JSON.parse(note.rawJson || '{}');
+              const data = rawData.data || rawData;
+              return data.parentItem === parentKey;
+            } catch {
+              return false;
+            }
+          });
+          
+          if (parentNotes.length === 0) {
+            console.log(`\n📝 No notes found for item ${parentKey}.`);
+            return;
+          }
+          
+          console.log(`\n📝 Notes for ${parentKey} (${parentNotes.length}):\n`);
+          
+          for (const note of parentNotes) {
+            const rawData = JSON.parse(note.rawJson || '{}');
+            const data = rawData.data || rawData;
+            const htmlContent = data.note || '';
+            const preview = htmlToPlainText(htmlContent, 60) || '(empty note)';
+            const syncStatus = note.synced ? '✅' : '🔄';
+            
+            console.log(`  ${syncStatus} [${note.key}] ${preview}`);
+          }
+          console.log();
+          break;
+        }
+        
+        default:
+          console.log(`❌ Unknown subcommand: ${subcommand}`);
+          console.log('   Run "zotero note --help" for usage.');
+      }
+    }
+  },
+
   {
     name: 'help',
     aliases: ['h', '?'],
@@ -1534,9 +1807,12 @@ Item Management:
   delete (rm, del, d, trash)   Delete/trash item
   export (e, out, save)        Export to bibtex/ris/csv/json
 
-Group & Attachments:
-  groups (g, team)             List group libraries
+Notes & Attachments:
+  note (n, notes)              Note management (Markdown support)
   attachments (att, files)     List attachments
+
+Group Libraries:
+  groups (g, team)             List group libraries
 
 WebDAV:
   webdav:config (wdc)          Configure WebDAV
@@ -1560,6 +1836,12 @@ With Attachments:
   zotero add-by-id "10.1000/xyz" -a supplement.pdf
   zotero ls                             # Shows 📎N count for each item
 
+With Notes (Markdown):
+  zotero note add ABCD1234 "Key findings: ..."
+  zotero note show NOTE5678             # View as Markdown
+  zotero note edit NOTE5678 "Updated: ..."
+  zotero note list ABCD1234             # List item's notes
+
 For more info: https://github.com/altairwei/Zotero-Headless
 `);
     }
@@ -1570,7 +1852,7 @@ For more info: https://github.com/altairwei/Zotero-Headless
 
 async function main() {
   const args = process.argv.slice(2);
-  
+
   // Check for --lang option before command parsing
   const langArg = args.find(arg => arg.startsWith('--lang='));
   if (langArg) {
@@ -1579,16 +1861,16 @@ async function main() {
       setLanguage(lang);
     }
   }
-  
+
   const commandName = args[0]?.toLowerCase() || 'help';
   const commandArgs = args.slice(1);
-  
+
   // Check for --help or -h flag
   if (commandArgs.includes('--help') || commandArgs.includes('-h') || commandName === 'help') {
     // Show help for specific command or general help
     if (commandName !== 'help') {
       // Try to find the command to show its specific help
-      const cmd = commands.find(c => 
+      const cmd = commands.find(c =>
         c.name === commandName || c.aliases?.includes(commandName)
       );
       if (cmd) {
@@ -1602,7 +1884,7 @@ async function main() {
         return;
       }
     }
-    
+
     // Show general help
     const helpCmd = commands.find(c => c.name === 'help');
     if (helpCmd) {
@@ -1610,17 +1892,17 @@ async function main() {
       return;
     }
   }
-  
-  const command = commands.find(c => 
+
+  const command = commands.find(c =>
     c.name === commandName || c.aliases?.includes(commandName)
   );
-  
+
   if (!command) {
     console.log(`❌ Unknown command: ${commandName}`);
     console.log(`   Run "zotero help" for usage.`);
     process.exit(1);
   }
-  
+
   try {
     await command.execute(commandArgs);
   } catch (error) {
