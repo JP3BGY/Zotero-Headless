@@ -2487,7 +2487,7 @@ Notes:
 
         case 'edit': {
           const noteKey = subArgs[0];
-          const newContent = subArgs.slice(1).join(' ');
+          let newContent = subArgs.slice(1).join(' ');
 
           if (!noteKey) {
             console.log('❌ Usage: zotero note edit <note-key> [content]');
