@@ -1,5 +1,5 @@
 {
-  "name": "@zotero-headless/api",
+  "name": "@zotero-headless/agent-api",
   "version": "1.0.0",
   "type": "module",
   "main": "./dist/index.js",

@@ -17,7 +17,6 @@ import { SyncError, ZoteroError } from './types.js';
 // 延迟加载模块
 let syncModule: any;
 let dbModule: any;
-let apiModule: any;
 
 async function initModules() {
   if (!syncModule) {
@@ -25,9 +24,6 @@ async function initModules() {
   }
   if (!dbModule) {
     dbModule = await import('@zotero-headless/database');
-  }
-  if (!apiModule) {
-    apiModule = await import('@zotero-headless/api');
   }
 }
 
