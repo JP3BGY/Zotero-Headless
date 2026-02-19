@@ -5,7 +5,8 @@
   "description": "Zotero Web API 同步客户端 - 无需桌面客户端即可实现文献库同步",
   "bin": {
     "zotero": "./bin/zotero.mjs",
-    "zotero.cmd": "./bin/zotero.cmd"
+    "zotero.cmd": "./bin/zotero.cmd",
+    "zotero-sh": "./bin/zotero-sh.mjs"
   },
   "files": [
     "bin/**/*",

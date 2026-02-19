@@ -1,0 +1,32 @@
+{
+  "name": "@zotero-headless/shell",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "zotero-sh": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'No lint configured'"
+  },
+  "dependencies": {
+    "@zotero-headless/api": "workspace:*",
+    "@zotero-headless/core": "workspace:*",
+    "@zotero-headless/database": "workspace:*",
+    "@zotero-headless/sync-engine": "workspace:*",
+    "@zotero-headless/types": "workspace:*",
+    "ink": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "ink-select-input": "^6.0.0",
+    "ink-spinner": "^5.0.0",
+    "react": "^18.2.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "typescript": "^5.3.0"
+  }
+}
