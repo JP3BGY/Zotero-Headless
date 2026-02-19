@@ -76,7 +76,8 @@ const packageJson = {
   version: version,
   description: 'Zotero Web API sync client - CLI tool for syncing Zotero libraries without desktop app',
   bin: {
-    zotero: './index.js'
+    zotero: './index.js',
+    'zotero-sh': './apps/shell/dist/index.js'
   },
   engines: {
     node: '>=18.0.0'
@@ -94,6 +95,21 @@ writeFileSync(
   join(distDir, 'package.json'),
   JSON.stringify(packageJson, null, 2)
 );
+
+// Copy shell dist files
+console.log('📦 Copying shell dist files...');
+const shellDistDir = join(rootDir, 'apps', 'shell', 'dist');
+const shellDistTarget = join(distDir, 'apps', 'shell', 'dist');
+if (existsSync(shellDistDir)) {
+  mkdirSync(shellDistTarget, { recursive: true });
+  execSync(`cp -r ${shellDistDir}/* ${shellDistTarget}/`, {
+    cwd: rootDir,
+    stdio: 'ignore'
+  });
+  console.log('✅ Shell dist files copied');
+} else {
+  console.log('⚠️ Shell dist not found, skipping');
+}
 
 // Create .npmignore
 console.log('📝 Creating .npmignore...');
