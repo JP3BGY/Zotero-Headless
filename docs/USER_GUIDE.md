@@ -10,8 +10,9 @@
 4. [快速开始](#快速开始)
 5. [配置说明](#配置说明)
 6. [命令参考](#命令参考)
-7. [故障排除](#故障排除)
-8. [高级用法](#高级用法)
+7. [笔记功能](#笔记功能)
+8. [故障排除](#故障排除)
+9. [高级用法](#高级用法)
 
 ---
 
@@ -45,6 +46,7 @@
 | **文献添加** | ✅ | 通过 DOI/arXiv/ISBN/PMID 自动获取元数据 |
 | **群组库** | ✅ | 支持同步 Zotero Groups |
 | **WebDAV** | ✅ | 附件文件同步到 WebDAV |
+| **笔记功能** | ✅ | Markdown 编辑、外部编辑器支持 |
 | **i18n** | ✅ | 中英文界面切换 |
 
 ---
@@ -514,6 +516,160 @@ zotero a <type>      # add
 zotero u <key>       # update
 zotero st             # stats
 zotero v              # verify
+```
+
+---
+
+## 笔记功能
+
+Zotero-Headless 支持完整的笔记管理功能，包括 Markdown 编辑、外部编辑器支持，以及与 Zotero ProseMirror 编辑器的兼容。
+
+### 笔记命令概览
+
+| 命令 | 说明 |
+|------|------|
+| `zotero note add <parent-key> [content]` | 为条目添加笔记 |
+| `zotero note edit <note-key> [content]` | 编辑笔记（支持外部编辑器） |
+| `zotero note show <note-key>` | 查看笔记（Markdown 格式） |
+| `zotero note list <parent-key>` | 列出条目的所有笔记 |
+
+### 添加笔记
+
+```bash
+# 直接添加 Markdown 内容
+zotero note add ABCD1234 "这是笔记内容，支持 **粗体** 和 *斜体*"
+
+# 多行内容
+zotero note add ABCD1234 "## 关键发现
+- 发现1
+- 发现2"
+
+# 查看添加的笔记 Key
+# 输出：✅ Note added successfully!
+#       Key: NOTE5678
+```
+
+### 编辑笔记
+
+#### 方式一：直接编辑
+```bash
+zotero note edit NOTE5678 "更新后的内容"
+```
+
+#### 方式二：外部编辑器（推荐）
+```bash
+# 不指定内容，自动打开 $EDITOR
+zotero note edit NOTE5678
+
+# 在编辑器中编辑，保存后关闭即更新
+```
+
+**自定义编辑器：**
+```bash
+# 临时指定编辑器
+EDITOR=vim zotero note edit NOTE5678
+EDITOR="code --wait" zotero note edit NOTE5678
+
+# 永久设置（添加到 ~/.bashrc 或 ~/.zshrc）
+export EDITOR=vim
+```
+
+**支持的编辑器：**
+- `vim`, `nvim`
+- `nano`
+- `emacs`
+- `code` / `code --wait` (VS Code)
+- `subl -w` (Sublime Text)
+- 任何支持命令行调用的编辑器
+
+### 查看笔记
+
+```bash
+# 以 Markdown 格式查看
+zotero note show NOTE5678
+
+# 输出示例：
+# 📝 Note: NOTE5678
+#    Parent: ABCD1234
+#    Updated: 2026-02-19
+#    Synced: ✅
+# ────────────────────────────────────────────────────────────
+# 这是笔记内容，支持 **粗体** 和 *斜体*
+# ────────────────────────────────────────────────────────────
+```
+
+### 列出笔记
+
+```bash
+# 查看某个条目的所有笔记
+zotero note list ABCD1234
+
+# 输出示例：
+# 📝 Notes for ABCD1234 (2):
+#
+#   ✅ [NOTE5678] 这是笔记预览...
+#   🔄 [NOTE9999] 另一个笔记...
+```
+
+### Markdown 支持
+
+笔记功能完整支持 Markdown 语法：
+
+| Markdown | 渲染效果 |
+|----------|----------|
+| `# 标题` | 一级标题 |
+| `## 标题` | 二级标题 |
+| `**粗体**` | **粗体** |
+| `*斜体*` | *斜体* |
+| `` `代码` `` | 行内代码 |
+| ```` ```代码块``` ```` | 代码块 |
+| `- 列表项` | 无序列表 |
+| `1. 列表项` | 有序列表 |
+| `> 引用` | 引用块 |
+| `[链接](url)` | 链接 |
+| `![图片](url)` | 图片 |
+| `~~删除线~~` | ~~删除线~~ |
+
+### 与 Zotero 桌面客户端兼容
+
+笔记内容使用 **ProseMirror 兼容的 HTML 格式**存储，确保与 Zotero 桌面客户端的笔记编辑器完全兼容。
+
+**ProseMirror Schema 支持：**
+- ✅ 段落、标题（h1-h6）
+- ✅ 粗体、斜体、下划线、删除线
+- ✅ 有序/无序列表
+- ✅ 代码块、行内代码
+- ✅ 引用块
+- ✅ 表格
+- ✅ 图片（支持附件关联）
+- ✅ 数学公式（$...$ 和 $$...$$）
+- ✅ Zotero 特有元素（引用、高亮、批注）
+
+### 同步说明
+
+笔记操作遵循与其他功能一致的同步策略：
+
+1. **本地操作**：所有笔记编辑都在本地数据库进行
+2. **标记 unsynced**：修改后自动标记为未同步
+3. **统一同步**：运行 `zotero sync` 上传到云端
+
+```bash
+# 添加/编辑笔记
+zotero note add ABCD1234 "新笔记"
+zotero note edit NOTE5678 "更新内容"
+
+# 同步到远程
+zotero sync
+```
+
+### 批量添加笔记与附件
+
+结合 `add` 命令的附件功能：
+
+```bash
+# 添加文献时同时添加附件和笔记
+zotero add book "书籍标题" "作者" -a /path/to/file.pdf
+zotero note add <new-item-key> "阅读笔记..."
 ```
 
 ---
