@@ -61,7 +61,7 @@ importers:
         specifier: ^1.2.0
         version: 1.6.1(@types/node@25.2.3)
 
-  apps/api:
+  apps/agent-api:
     dependencies:
       '@zotero-headless/core':
         specifier: workspace:*
