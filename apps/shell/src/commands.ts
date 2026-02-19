@@ -1,5 +1,5 @@
-// 命令执行模块 - 将 shell 命令转发到 zotero CLI
-import { execSync } from 'child_process';
+import { spawn } from 'child_process';
+import { Readable } from 'stream';
 
 // 命令映射表
 const COMMAND_ALIASES: Record<string, string> = {
@@ -45,33 +45,62 @@ const COMMAND_ALIASES: Record<string, string> = {
 };
 
 /**
- * 执行 zotero 命令
+ * 执行结果类型
  */
-export async function executeCommand(cmd: string, args: string[]): Promise<string> {
+export interface ExecuteResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+/**
+ * 异步执行 zotero 命令
+ */
+export async function executeCommand(
+  cmd: string, 
+  args: string[],
+  onOutput?: (data: string) => void
+): Promise<ExecuteResult> {
   // 转换命令别名
   const actualCmd = COMMAND_ALIASES[cmd] || cmd;
   
-  // 构建完整命令
-  const fullCommand = ['zotero', actualCmd, ...args].join(' ');
-  
-  try {
-    // 执行命令并捕获输出
-    const result = execSync(fullCommand, {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 60000, // 60秒超时
+  return new Promise((resolve, reject) => {
+    const child = spawn('zotero', [actualCmd, ...args], {
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
-    
-    return result.trim();
-  } catch (error: any) {
-    if (error.stdout) {
-      return error.stdout.toString().trim();
-    }
-    if (error.stderr) {
-      return `❌ ${error.stderr.toString().trim()}`;
-    }
-    return `❌ 命令执行失败: ${error.message}`;
-  }
+
+    let stdout = '';
+    let stderr = '';
+
+    // 实时输出
+    child.stdout?.on('data', (data) => {
+      const str = data.toString();
+      stdout += str;
+      if (onOutput) {
+        onOutput(str);
+      }
+    });
+
+    child.stderr?.on('data', (data) => {
+      const str = data.toString();
+      stderr += str;
+      if (onOutput) {
+        onOutput(str);
+      }
+    });
+
+    child.on('close', (code) => {
+      resolve({
+        stdout: stdout.trim(),
+        stderr: stderr.trim(),
+        exitCode: code ?? 0
+      });
+    });
+
+    child.on('error', (err) => {
+      reject(err);
+    });
+  });
 }
 
 /**
@@ -106,4 +135,24 @@ export function parseCommand(input: string): { cmd: string; args: string[] } {
     cmd: parts[0]?.toLowerCase() || '',
     args: parts.slice(1)
   };
+}
+
+/**
+ * 高亮搜索结果中的关键词
+ */
+export function highlightSearchResult(text: string, keywords: string[]): string {
+  if (!keywords.length) return text;
+  
+  let result = text;
+  for (const keyword of keywords) {
+    if (!keyword) continue;
+    // 使用 ANSI 转义序列高亮（在 Ink 中会显示为颜色）
+    const regex = new RegExp(`(${escapeRegex(keyword)})`, 'gi');
+    result = result.replace(regex, '\x1b[33m$1\x1b[0m'); // 黄色高亮
+  }
+  return result;
+}
+
+function escapeRegex(string: string): string {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
