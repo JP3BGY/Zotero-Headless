@@ -7,6 +7,7 @@ import { getDatabase, getRawSQLite, libraries, items, collections, itemTags, syn
 import { ZoteroAPIClient } from '@zotero-headless/api';
 import { appConfig } from '@zotero-headless/core';
 import { ConflictResolver, conflictResolver } from './conflict.js';
+import { PayloadBuilder } from './payload-builder.js';
 import type { SyncOptions, SyncResult, Library, Item } from '@zotero-headless/types';
 import { eq, gt, and, inArray, like, desc } from 'drizzle-orm';
 
@@ -448,9 +449,10 @@ export class SyncManager extends EventEmitter {
         const rawData = JSON.parse(item.rawJson);
         let data = rawData.data;
         
-        // Add key from item to data for new items
+        // Add key and version from item to data for new items
         if (item.version === 0 && item.key) {
           data.key = item.key;
+          data.version = item.version;  // CRITICAL: must include version for key-based writes
         }
 
         // Parse creators if it's a string
@@ -479,18 +481,46 @@ export class SyncManager extends EventEmitter {
 
         // Remove fields that Zotero API doesn't accept (custom fields should be in 'extra')
         // Include 'key' for client-generated keys
+        // CRITICAL: These fields must never be deleted for key-based writes
+        const CRITICAL_FIELDS = new Set(['key', 'version', 'itemType']);
         const zoteroItemFields = [
           'key', 'itemType', 'title', 'creators', 'abstractNote', 'date', 'url', 'DOI',
           'accessDate', 'libraryCatalog', 'callNumber', 'rights', 'placeholder',
-          'note', 'parentItem', 'tags', 'collections', 'relations'
+          'note', 'parentItem', 'tags', 'collections', 'relations', 'version'
         ];
         
-        // Remove any custom/unknown fields
+        // Remove any custom/unknown fields, but NEVER remove critical fields
         const knownFields = new Set(zoteroItemFields);
         for (const field of Object.keys(data)) {
+          // CRITICAL: Never delete key fields - they are required for API
+          if (CRITICAL_FIELDS.has(field)) {
+            continue;
+          }
           if (!knownFields.has(field)) {
             delete data[field];
           }
+        }
+        
+        // Runtime validation: Ensure critical fields are present
+        const missingCriticalFields: string[] = [];
+        for (const field of CRITICAL_FIELDS) {
+          if (!(field in data) || data[field] === undefined || data[field] === null) {
+            missingCriticalFields.push(field);
+          }
+        }
+        
+        if (missingCriticalFields.length > 0) {
+          console.error(`🚨 CRITICAL VALIDATION ERROR: Missing required fields: ${missingCriticalFields.join(', ')}`);
+          console.error(`   Item key: ${item.key}`);
+          console.error(`   Available fields: ${Object.keys(data).join(', ')}`);
+          throw new Error(`BUG: Cannot sync item without required fields: ${missingCriticalFields.join(', ')}`);
+        }
+        
+        // Validate key format
+        const keyPattern = /^[23456789ABCDEFGHIJKLMNPQRSTUVWXYZ]{8}$/;
+        if (!keyPattern.test(data.key)) {
+          console.warn(`⚠️  WARNING: Key format may be invalid: ${data.key}`);
+          console.warn(`   Expected format: 8 chars from [23456789ABCDEFGHIJKLMNPQRSTUVWXYZ]`);
         }
 
         if (item.deleted) {

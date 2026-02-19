@@ -259,6 +259,30 @@ export class ZoteroAPIClient {
     items: Array<Record<string, unknown>>,
     libraryType: 'user' | 'group' = 'user'
   ): Promise<WriteResponse> {
+    // Pre-flight validation: Ensure all items have required fields
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (!item.key) {
+        console.error(`🚨 API VALIDATION ERROR: Item at index ${i} is missing 'key' field`);
+        console.error(`   Item data:`, JSON.stringify(item, null, 2));
+        throw new Error(`BUG: Cannot create item without 'key' field. Index: ${i}`);
+      }
+      if (item.version === undefined || item.version === null) {
+        console.error(`🚨 API VALIDATION ERROR: Item at index ${i} is missing 'version' field`);
+        console.error(`   This is required for 'key'-based writes to work correctly`);
+        throw new Error(`BUG: Cannot create item without 'version' field. Index: ${i}`);
+      }
+      if (!item.itemType) {
+        console.error(`🚨 API VALIDATION ERROR: Item at index ${i} is missing 'itemType' field`);
+        throw new Error(`BUG: Cannot create item without 'itemType' field. Index: ${i}`);
+      }
+    }
+    
+    console.log(`   📤 Sending ${items.length} item(s) to API`);
+    items.forEach((item, i) => {
+      console.log(`      [${i}] key=${item.key}, type=${item.itemType}, version=${item.version}`);
+    });
+    
     const response = await this.request<WriteResponse>(
       'POST',
       `${this.getLibraryPath(libraryId, libraryType)}/items`,
