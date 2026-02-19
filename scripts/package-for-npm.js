@@ -75,7 +75,6 @@ const packageJson = {
   name: 'zotero-headless',
   version: version,
   description: 'Zotero Web API sync client - CLI tool for syncing Zotero libraries without desktop app',
-  type: 'module',
   bin: {
     zotero: './index.js'
   },

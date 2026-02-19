@@ -99,7 +99,7 @@ await esbuild.build({
   platform: 'node',
   target: 'node18',
   outfile: join(outputDir, 'zotero.js'),
-  format: 'esm',
+  format: 'cjs',
   external: [
     // Native modules that can't be bundled
     'better-sqlite3',
@@ -109,7 +109,7 @@ await esbuild.build({
     'process.env.BUNDLED': '"true"',
   },
   plugins: [workspacePlugin],
-  minify: true,
+  minify: false,
   sourcemap: false,
 });
 
