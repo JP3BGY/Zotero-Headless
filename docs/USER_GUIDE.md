@@ -47,6 +47,9 @@
 | **群组库** | ✅ | 支持同步 Zotero Groups |
 | **WebDAV** | ✅ | 附件文件同步到 WebDAV |
 | **笔记功能** | ✅ | Markdown 编辑、外部编辑器支持 |
+| **配置文件** | ✅ | `~/.zoterrc` 用户偏好设置 |
+| **历史记录** | ✅ | 追踪最近使用的条目和命令 |
+| **自动补全** | ✅ | bash/zsh 命令补全支持 |
 | **i18n** | ✅ | 中英文界面切换 |
 
 ---
@@ -297,6 +300,146 @@ LOG_LEVEL=info
 | **相对路径** | `DATABASE_PATH=./data/db.sqlite` | 相对于当前工作目录 |
 
 > 💡 **提示**：使用默认路径，数据库会自动存放在配置目录下，便于管理和备份。
+
+---
+
+## 用户配置文件 (~/.zoterrc)
+
+Zotero-Headless 支持通过 `~/.zoterrc` 文件配置用户偏好设置。
+
+### 初始化配置文件
+
+```bash
+# 创建默认配置文件
+zotero config --init
+
+# 查看当前配置
+zotero config --show
+```
+
+### 配置示例
+
+编辑 `~/.zoterrc`：
+
+```yaml
+# 默认编辑器（用于 note edit）
+editor: vim
+
+# 默认语言
+language: zh
+
+# 同步设置
+sync:
+  autoSync: false       # 启动时自动同步
+  syncInterval: 30      # 自动同步间隔（分钟）
+
+# 显示设置
+display:
+  defaultLimit: 20      # 列表默认显示数量
+  showAttachments: true # 显示附件数量
+
+# 下载设置
+download:
+  defaultDir: ~/Downloads/zotero  # 附件下载目录
+
+# 快捷方式
+shortcuts:
+  papers: "journalArticle tag:paper"
+  unread: "itemType:book tag:unread"
+```
+
+### 配置项说明
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `editor` | string | `nano` | 外部编辑器（vim/nano/code等） |
+| `language` | string | `zh` | 界面语言（zh/en） |
+| `sync.autoSync` | boolean | `false` | 启动时自动同步 |
+| `sync.syncInterval` | number | `30` | 自动同步间隔（分钟） |
+| `display.defaultLimit` | number | `20` | 列表默认显示条目数 |
+| `display.showAttachments` | boolean | `true` | 显示附件数量 |
+| `download.defaultDir` | string | `~/.local/share/...` | 附件下载目录 |
+| `shortcuts` | object | `{}` | 自定义快捷查询 |
+
+---
+
+## 历史记录功能
+
+Zotero-Headless 自动追踪最近使用的条目和命令。
+
+### 查看历史
+
+```bash
+# 显示最近 10 条历史
+zotero history
+
+# 显示最近 20 条历史
+zotero history 20
+
+# 显示别名
+zotero hist
+zotero recent
+```
+
+输出示例：
+```
+📜 Recent history (5):
+
+  📄 [ABC123] (2024-01-15)
+  📄 [DEF456] (2024-01-14)
+  🔍 [machine learning] (2024-01-14)
+  ⚡ [sync] (2024-01-13)
+```
+
+### 清除历史
+
+```bash
+zotero history --clear
+```
+
+历史记录存储在：`~/.local/share/zotero-headless/history.json`
+
+---
+
+## 自动补全
+
+### Bash 补全
+
+安装 bash 补全脚本：
+
+```bash
+# 方式 1：临时启用（当前会话）
+source completions/zotero-completion.bash
+
+# 方式 2：永久启用
+# 将补全脚本复制到系统目录
+sudo cp completions/zotero-completion.bash /etc/bash_completion.d/
+
+# 或添加到 ~/.bashrc
+echo 'source ~/.openclaw/workspace/zotero-headless/completions/zotero-completion.bash' >> ~/.bashrc
+```
+
+补全功能支持：
+- 主命令补全（sync, list, search...）
+- 子命令补全（note add/edit/show...）
+- 选项补全（--type, --limit...）
+- 历史记录中的条目 key 补全
+
+### 使用示例
+
+```bash
+zotero <Tab><Tab>
+# 显示所有可用命令
+
+zotero note <Tab><Tab>
+# 显示子命令：add, edit, show, list
+
+zotero show <Tab><Tab>
+# 从历史记录补全条目 key
+
+zotero list -<Tab><Tab>
+# 显示可用选项：--type, --limit, --unsynced...
+```
 
 ---
 
