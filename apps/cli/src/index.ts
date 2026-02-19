@@ -2993,26 +2993,47 @@ For more info: https://github.com/altairwei/Zotero-Headless
 
         // Find shell path - try multiple locations
         let shellPath: string | null = null;
+        let triedPaths: string[] = [];
         
         try {
+          // Try 1: npm global install structure
+          // __dirname is the directory containing index.js (the CLI entry point)
+          // In npm global install: <prefix>/lib/node_modules/zotero-headless/index.js
+          // So we need: <prefix>/lib/node_modules/zotero-headless/apps/shell/dist/index.js
           const __dirname = dirname(fileURLToPath(import.meta.url));
-          // Try relative to current file (development)
-          const devPath = join(__dirname, '..', '..', '..', 'shell', 'dist', 'index.js');
-          if (existsSync(devPath)) {
-            shellPath = devPath;
-          } else {
-            // Try relative to package root (installed package)
-            const pkgPath = join(__dirname, '..', '..', 'apps', 'shell', 'dist', 'index.js');
-            if (existsSync(pkgPath)) {
-              shellPath = pkgPath;
+          const globalPath = join(__dirname, 'apps', 'shell', 'dist', 'index.js');
+          triedPaths.push(globalPath);
+          if (existsSync(globalPath)) {
+            shellPath = globalPath;
+          }
+          
+          // Try 2: Relative to current working directory (development)
+          if (!shellPath) {
+            const devPath = join(process.cwd(), 'apps', 'shell', 'dist', 'index.js');
+            triedPaths.push(devPath);
+            if (existsSync(devPath)) {
+              shellPath = devPath;
             }
           }
-        } catch {
-          // ignore
+          
+          // Try 3: Check if there's a bundled version
+          if (!shellPath) {
+            const bundlePath = join(__dirname, 'shell.js');
+            triedPaths.push(bundlePath);
+            if (existsSync(bundlePath)) {
+              shellPath = bundlePath;
+            }
+          }
+        } catch (e) {
+          // ignore path resolution errors
         }
 
         if (!shellPath) {
-          console.error('❌ Cannot find shell. Make sure zotero-headless is properly installed.');
+          console.error('❌ Cannot find shell. Tried paths:');
+          for (const p of triedPaths) {
+            console.error(`   - ${p}`);
+          }
+          console.log('');
           console.log('💡 Try: npm install -g zotero-headless');
           return;
         }
