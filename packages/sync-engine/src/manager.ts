@@ -3,7 +3,7 @@
 // See Zotero-Headless-Complete-Design.md Section 5
 
 import { EventEmitter } from 'events';
-import { getDatabase, getRawSQLite, libraries, items, collections, itemTags, syncLogs, type Database } from '@zotero-headless/database';
+import { getDatabase, getRawSQLite, libraries, items, collections, itemTags, syncLogs, attachments, type Database } from '@zotero-headless/database';
 import { ZoteroAPIClient } from '@zotero-headless/api';
 import { appConfig } from '@zotero-headless/core';
 import { ConflictResolver, conflictResolver } from './conflict.js';
@@ -447,6 +447,11 @@ export class SyncManager extends EventEmitter {
       try {
         const rawData = JSON.parse(item.rawJson);
         let data = rawData.data;
+        
+        // Add key from item to data for new items
+        if (item.version === 0 && item.key) {
+          data.key = item.key;
+        }
 
         // Parse creators if it's a string
         if (typeof data.creators === 'string') {
@@ -458,8 +463,13 @@ export class SyncManager extends EventEmitter {
         }
 
         // Remove metadata fields that shouldn't be sent
-        delete data.key;
-        delete data.version;
+        // For 'key'-based writes, we must include 'version' property
+        const isNewItem = item.version === 0;
+        if (!isNewItem) {
+          delete data.key;  // Only delete key for existing items
+        }
+        // Keep version for key-based writes
+        // delete data.version;
 
         // Fix: Zotero API uses 'date' not 'publicationDate'
         if (data.publicationDate) {
@@ -468,8 +478,9 @@ export class SyncManager extends EventEmitter {
         }
 
         // Remove fields that Zotero API doesn't accept (custom fields should be in 'extra')
+        // Include 'key' for client-generated keys
         const zoteroItemFields = [
-          'itemType', 'title', 'creators', 'abstractNote', 'date', 'url', 'DOI',
+          'key', 'itemType', 'title', 'creators', 'abstractNote', 'date', 'url', 'DOI',
           'accessDate', 'libraryCatalog', 'callNumber', 'rights', 'placeholder',
           'note', 'parentItem', 'tags', 'collections', 'relations'
         ];
@@ -502,6 +513,7 @@ export class SyncManager extends EventEmitter {
           deleted++;
         } else if (item.version === 0) {
           // Create new item
+          console.log(`   📤 Uploading new item with key: ${data.key || '(none)'}`);
           const result = await this.apiClient.createItems(zoteroId, [data], libraryType);
           if (result.successful && result.successful['0']) {
             const newKey = result.successful['0'].key || result.successful['0'];
@@ -511,10 +523,60 @@ export class SyncManager extends EventEmitter {
             if (newKey !== item.key) {
               console.warn(`   ⚠️  WARNING: Server reassigned key for item ${item.key} -> ${newKey}`);
               console.warn(`      This may indicate key collision or invalid key format.`);
-              await this.db.update(items)
-                .set({ key: newKey })
-                .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
-                .run();
+              
+              // 使用事务确保一致性
+              await this.db.transaction(async (tx) => {
+                // 1. 更新 items 表
+                await tx.update(items)
+                  .set({ key: newKey })
+                  .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
+                  .run();
+                
+                // 2. 更新 attachments 表的 parentItemKey
+                const attachmentCount = await tx.update(attachments)
+                  .set({ parentItemKey: newKey })
+                  .where(and(
+                    eq(attachments.parentItemKey, item.key),
+                    eq(attachments.libraryId, libraryId)
+                  ))
+                  .run();
+                
+                if (attachmentCount?.rowsAffected > 0) {
+                  console.log(`   📝 Updated ${attachmentCount.rowsAffected} attachment(s) parent reference`);
+                }
+                
+                // 3. 更新作为 parent 的 notes 的 rawJson 中的 parentItem
+                // Notes 存储在 items 表中，parentItem 在 rawJson.data.parentItem 中
+                const childNotes = await tx.select()
+                  .from(items)
+                  .where(and(
+                    eq(items.itemType, 'note'),
+                    eq(items.libraryId, libraryId),
+                    like(items.rawJson, `%"parentItem":"${item.key}"%`)
+                  ))
+                  .all();
+                
+                for (const note of childNotes) {
+                  try {
+                    const rawData = JSON.parse(note.rawJson || '{}');
+                    if (rawData.data?.parentItem === item.key) {
+                      rawData.data.parentItem = newKey;
+                      rawData.key = newKey; // 同时更新 key 字段
+                      await tx.update(items)
+                        .set({ rawJson: JSON.stringify(rawData) })
+                        .where(and(eq(items.key, note.key), eq(items.libraryId, libraryId)))
+                        .run();
+                    }
+                  } catch (e) {
+                    console.warn(`      Failed to update note ${note.key} parent reference: ${e}`);
+                  }
+                }
+                
+                if (childNotes.length > 0) {
+                  console.log(`   📝 Updated ${childNotes.length} note(s) parent reference`);
+                }
+              });
+              
               console.log(`   📝 Updated local key: ${item.key} -> ${newKey}`);
             }
             

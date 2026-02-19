@@ -6,10 +6,12 @@
 
 1. [云端操作统一通过 sync 命令](#决策-1-云端操作统一通过-sync-命令)
 2. [Markdown ↔ HTML 双向转换](#决策-2-markdown--html-双向转换)
-3. [ProseMirror Schema 兼容性](#决策-3-prosemirror-schema-兼容性)
-4. [外部编辑器支持](#决策-4-外部编辑器支持)
-5. [本地优先架构](#决策-5-本地优先架构)
-6. [附件与主条目分离存储](#决策-6-附件与主条目分离存储)
+4. [ProseMirror Schema 兼容性](#决策-3-prosemirror-schema-兼容性)
+5. [外部编辑器支持](#决策-4-外部编辑器支持)
+6. [本地优先架构](#决策-5-本地优先架构)
+7. [附件与主条目分离存储](#决策-6-附件与主条目分离存储)
+8. [Zotero API Key 处理](#决策-7-zotero-api-key-处理长期调查)
+9. [Key 映射与关联更新](#决策-8-key-映射与关联更新)
 
 ---
 
@@ -143,7 +145,6 @@ Zotero 使用 ProseMirror 作为笔记编辑器引擎。如果不遵循其 Schem
 // 移除不支持的元素
 function cleanNode(node: Node): void {
   if (!isSupportedElement(child)) {
-    // 用子元素替换
     replaceWithChildren(child);
   }
 }
@@ -324,6 +325,124 @@ zotero list
 2. **可扩展性**: 未来可支持更多存储方式（S3、Google Drive等）
 3. **性能**: 附件元数据查询快速，文件按需加载
 4. **兼容性**: 与 Zotero 桌面客户端的附件模型一致
+
+---
+
+## 决策 7: Zotero API Key 处理（长期调查）
+
+**日期**: 2026-02-19
+
+**状态**: ✅ 已解决
+
+**问题**: 
+同步时 Zotero API 总是重新分配 key，即使我们使用了正确的字符集。
+
+**调查过程**:
+1. 最初假设是 key 格式问题
+2. 发现 Zotero 的 key 生成字符集: `23456789ABCDEFGHIJKLMNPQRSTUVWXYZ`
+3. 发现 API 错误: `Either If-Unmodified-Since-Version or 'version' property must be provided for 'key'-based writes`
+
+**根本原因**:
+当发送 `key` 字段时，API 要求同时提供 `version` 属性。我们之前删除了 `version` 字段，导致 API 不接受我们发送的 key。
+
+**解决方案**:
+```typescript
+// 1. 添加 'key' 到允许的字段列表
+const zoteroItemFields = [
+  'key', 'itemType', 'title', 'creators', ...
+];
+
+// 2. 保留 version 字段用于 key-based writes
+// 不要删除 version: delete data.version; // ← 这行删除了
+if (!isNewItem) {
+  delete data.key;  // 只删除已有条目的 key
+}
+```
+
+**测试结果**:
+| 条目 | 本地 Key | 同步后 Key | 状态 |
+|------|---------|-----------|------|
+| Final Key Test | K2ULAZ8V | K2ULAZ8V | ✅ 保留 |
+| Version Test | RATPVZJQ | RATPVZJQ | ✅ 保留 |
+
+**架构层级**:
+1. **方案A（首选）**: 使用正确的 API 调用方式，保留本地 key
+   - 发送 `key` + `version=0`
+   - 云端接受我们的 key，不重新分配
+
+2. **方案B（备份）**: 如果云端仍然重新分配，自动更新本地映射
+   - 同步引擎检测 key 变化
+   - 更新本地数据库中的 key
+   - 更新关联表中的 parentItemKey
+   - 更新 notes rawJson 中的 parentItem 引用
+
+---
+
+## 决策 8: Key 映射与关联更新
+
+**日期**: 2026-02-19
+
+**状态**: ✅ 已采纳
+
+**背景**: 
+当云端重新分配 key 时（即使现在很少发生），需要正确更新所有关联数据。
+
+**决策**: 
+实现完整的 key 映射更新机制，包括：
+1. 更新 items 表的主键
+2. 更新 attachments 表的 parentItemKey
+3. 更新 notes rawJson 中的 parentItem 引用
+
+**实现代码**:
+```typescript
+await this.db.transaction(async (tx) => {
+  // 1. 更新 items 表
+  await tx.update(items)
+    .set({ key: newKey })
+    .where(and(eq(items.key, oldKey), eq(items.libraryId, libraryId)))
+    .run();
+  
+  // 2. 更新 attachments 表的 parentItemKey
+  const attachmentCount = await tx.update(attachments)
+    .set({ parentItemKey: newKey })
+    .where(and(
+      eq(attachments.parentItemKey, oldKey),
+      eq(attachments.libraryId, libraryId)
+    ))
+    .run();
+  
+  // 3. 更新作为 parent 的 notes 的 rawJson 中的 parentItem
+  const childNotes = await tx.select()
+    .from(items)
+    .where(and(
+      eq(items.itemType, 'note'),
+      eq(items.libraryId, libraryId),
+      like(items.rawJson, `%"parentItem":"${oldKey}"%`)
+    ))
+    .all();
+  
+  for (const note of childNotes) {
+    const rawData = JSON.parse(note.rawJson);
+    if (rawData.data?.parentItem === oldKey) {
+      rawData.data.parentItem = newKey;
+      rawData.key = newKey;
+      await tx.update(items)
+        .set({ rawJson: JSON.stringify(rawData) })
+        .where(and(eq(items.key, note.key), eq(items.libraryId, libraryId)))
+        .run();
+    }
+  }
+});
+```
+
+**测试验证**:
+```
+✅ 创建带附件和笔记的条目
+✅ 同步时 key 被重新分配 (PRXC5ZMT → B9DMPWKX)
+✅ Attachment 的 parentItemKey 正确更新
+✅ Note 的 parentItem 正确更新
+✅ 条目和笔记可以通过新 key 访问
+```
 
 ---
 
