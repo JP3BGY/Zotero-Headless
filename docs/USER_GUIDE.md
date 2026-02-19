@@ -817,6 +817,124 @@ zotero note add <new-item-key> "阅读笔记..."
 
 ---
 
+## 附件管理
+
+Zotero-Headless 支持完整的附件管理功能，包括 WebDAV 同步、本地下载、重复检测等。
+
+### 附件命令概览
+
+| 命令 | 说明 |
+|------|------|
+| `zotero attachments list` | 列出附件 |
+| `zotero attachment-download <key>` | 从 WebDAV 下载附件 |
+| `zotero attachment-open <key>` | 用系统默认程序打开附件 |
+| `zotero attachment-dedup` | 检测并删除重复附件 |
+
+### 列出附件
+
+```bash
+# 列出所有附件
+zotero attachments list
+
+# 列出特定条目的附件
+zotero attachments list --item ABC123
+
+# 限制数量
+zotero attachments list --limit 10
+```
+
+输出示例：
+```
+📎 Attachments (3):
+
+  ☁️ 📄 [XYZ789] paper.pdf
+      Title: Research Paper
+      Size: 1.5 MB
+      WebDAV: /zotero/XYZ789.zip
+
+  📁 📄 [ABC456] data.xlsx
+      Title: Dataset
+      Size: 256 KB
+      Local: /home/user/.local/...
+```
+
+### 下载附件
+
+从 WebDAV 下载附件到本地：
+
+```bash
+# 下载单个附件
+zotero attachment-download XYZ789
+
+# 输出：
+# 📥 Downloading attachment XYZ789...
+# ✅ Downloaded to /home/user/.local/share/zotero-headless/attachments/paper.pdf
+```
+
+下载的附件默认保存到：`~/.local/share/zotero-headless/attachments/`
+
+### 打开附件
+
+用系统默认程序打开附件：
+
+```bash
+# 打开 PDF（使用系统默认的 PDF 阅读器）
+zotero attachment-open XYZ789
+
+# 输出：
+# 📂 Opening attachment XYZ789...
+# ✅ Opened with default application
+```
+
+支持的文件类型：
+- PDF → 默认 PDF 阅读器
+- 图片 → 默认图片查看器
+- 文档 → 默认办公软件
+- 其他 → 系统默认关联程序
+
+### 检测重复附件
+
+扫描并清理重复附件：
+
+```bash
+# 扫描重复
+zotero attachment-dedup
+
+# 输出示例：
+# 🔍 Scanning for duplicate attachments...
+# Found 2 duplicate groups:
+#
+#   📦 Hash: A1B2C3D4... (1024 KB)
+#      ✅ [KEY1] file1.pdf
+#      ❌ [KEY2] file2.pdf
+#
+# 💡 Use --delete to remove duplicates
+
+# 删除重复（保留第一个）
+zotero attachment-dedup --delete
+
+# 输出：
+# 🗑️  Removing duplicates...
+# 🎉 Removed 1 duplicate attachments
+```
+
+### WebDAV 配置
+
+附件下载需要配置 WebDAV：
+
+```bash
+# 配置 WebDAV
+zotero webdav:config https://dav.example.com/dav user password
+
+# 测试连接
+zotero webdav:status
+
+# 同步所有附件到本地
+zotero webdav:sync
+```
+
+---
+
 ## 故障排除
 
 ### 常见错误
