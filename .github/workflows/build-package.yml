@@ -219,15 +219,10 @@ jobs:
     strategy:
       matrix:
         include:
+          # Only test binaries that can run on the available runners
           - os: ubuntu-latest
             name: Linux x64
             binary: zotero-linux-x64
-          - os: ubuntu-latest
-            name: Linux ARM64
-            binary: zotero-linux-arm64
-          - os: macos-latest
-            name: macOS x64
-            binary: zotero-macos-x64
           - os: macos-latest
             name: macOS ARM64
             binary: zotero-macos-arm64
