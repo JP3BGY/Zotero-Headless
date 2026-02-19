@@ -516,14 +516,14 @@ const commands: Command[] = [
   {
     name: 'search',
     aliases: ['find', 'grep', 'f'],
-    description: 'Search items. Aliases: find, grep, f. Options: -f/--field, -s/--since, -u/--unsynced, -l/--limit',
+    description: 'Search items. Aliases: find, grep, f. Options: -f/--field (title|author|tags|note|all), -s/--since, -u/--unsynced, -l/--limit. Use --field note to search in note content.',
     execute: async (args) => {
       await initModules();
 
       // Parse options
       const options: {
         query: string;
-        field: 'title' | 'author' | 'tags' | 'all';
+        field: 'title' | 'author' | 'tags' | 'note' | 'all';
         since?: string;
         unsynced?: boolean;
         limit: number;
@@ -555,10 +555,16 @@ const commands: Command[] = [
         console.log('❌ Please provide a search query');
         console.log('   Usage: zotero search <query> [options]');
         console.log('   Options:');
-        console.log('     --field title|author|tags|all  (default: title)');
+        console.log('     --field title|author|tags|note|all  (default: title)');
+        console.log('       note: search in note content (Markdown/HTML)');
         console.log('     --since YYYY-MM-DD');
         console.log('     --unsynced');
         console.log('     --limit N');
+        console.log('');
+        console.log('   Examples:');
+        console.log('     zotero search "machine learning"');
+        console.log('     zotero search "findings" --field note');
+        console.log('     zotero search "Smith" --field author');
         return;
       }
 
@@ -570,36 +576,82 @@ const commands: Command[] = [
         return;
       }
 
-      // Build search conditions
-      let whereConditions: any = eq(items.libraryId, library.id);
+      let results: any[] = [];
 
-      // Field-specific search
-      if (options.field === 'title' || options.field === 'all') {
-        whereConditions = and(whereConditions, like(items.title, `%${options.query}%`));
-      } else if (options.field === 'author') {
-        whereConditions = and(whereConditions, like(items.creators, `%${options.query}%`));
-      } else if (options.field === 'tags') {
-        whereConditions = and(whereConditions, like(items.tags, `%${options.query}%`));
-      }
+      // Note content search (special handling)
+      if (options.field === 'note') {
+        // Search in notes' rawJson for the query
+        const noteResults = await db.select()
+          .from(items)
+          .where(and(
+            eq(items.libraryId, library.id),
+            eq(items.itemType, 'note'),
+            like(items.rawJson, `%${options.query}%`)
+          ))
+          .limit(options.limit)
+          .all();
 
-      // Date filter
-      if (options.since) {
-        const sinceDate = new Date(options.since).getTime();
-        if (!isNaN(sinceDate)) {
-          whereConditions = and(whereConditions, desc(items.updatedAt) >= sinceDate);
+        // Also get parent items
+        const parentKeys = new Set<string>();
+        for (const note of noteResults) {
+          try {
+            const rawData = JSON.parse(note.rawJson || '{}');
+            const data = rawData.data || rawData;
+            if (data.parentItem) {
+              parentKeys.add(data.parentItem);
+            }
+          } catch {
+            // ignore
+          }
         }
-      }
 
-      // Unsynced filter
-      if (options.unsynced) {
-        whereConditions = and(whereConditions, eq(items.synced, false));
-      }
+        // Get parent items
+        if (parentKeys.size > 0) {
+          const parentItems = await db.select()
+            .from(items)
+            .where(and(
+              eq(items.libraryId, library.id),
+              sql`${items.key} IN (${Array.from(parentKeys).map(k => `'${k}'`).join(',')})`
+            ))
+            .all();
 
-      const results = await db.select()
-        .from(items)
-        .where(whereConditions)
-        .limit(options.limit)
-        .all();
+          // Merge with notes
+          results = [...parentItems, ...noteResults];
+        } else {
+          results = noteResults;
+        }
+      } else {
+        // Build search conditions for regular fields
+        let whereConditions: any = eq(items.libraryId, library.id);
+
+        // Field-specific search
+        if (options.field === 'title' || options.field === 'all') {
+          whereConditions = and(whereConditions, like(items.title, `%${options.query}%`));
+        } else if (options.field === 'author') {
+          whereConditions = and(whereConditions, like(items.creators, `%${options.query}%`));
+        } else if (options.field === 'tags') {
+          whereConditions = and(whereConditions, like(items.tags, `%${options.query}%`));
+        }
+
+        // Date filter
+        if (options.since) {
+          const sinceDate = new Date(options.since).getTime();
+          if (!isNaN(sinceDate)) {
+            whereConditions = and(whereConditions, desc(items.updatedAt) >= sinceDate);
+          }
+        }
+
+        // Unsynced filter
+        if (options.unsynced) {
+          whereConditions = and(whereConditions, eq(items.synced, false));
+        }
+
+        results = await db.select()
+          .from(items)
+          .where(whereConditions)
+          .limit(options.limit)
+          .all();
+      }
 
       // Build search description
       const filters: string[] = [];
@@ -615,9 +667,25 @@ const commands: Command[] = [
       } else {
         results.forEach(item => {
           const syncStatus = item.synced ? '✅' : '🔄';
-          console.log(`  ${syncStatus} [${item.key}] ${item.title?.substring(0, 70) || '(no title)'}`);
+          const itemType = item.itemType === 'note' ? '📝' : '📄';
+          console.log(`  ${itemType} ${syncStatus} [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}`);
           if (options.field === 'author' && item.creators) {
             console.log(`      Authors: ${item.creators.substring(0, 50)}`);
+          }
+          if (options.field === 'note' && item.itemType === 'note') {
+            // Show a snippet of the note content
+            try {
+              const { htmlToPlainText } = require('./note-utils.js');
+              const rawData = JSON.parse(item.rawJson || '{}');
+              const data = rawData.data || rawData;
+              const content = data.note || '';
+              const snippet = htmlToPlainText(content, 60);
+              if (snippet) {
+                console.log(`      Note: ${snippet}`);
+              }
+            } catch {
+              // ignore
+            }
           }
         });
       }
@@ -1520,10 +1588,10 @@ const commands: Command[] = [
     description: 'Note management. Subcommands: add, edit, show, list. Supports Markdown input/output',
     execute: async (args) => {
       await initModules();
-      
+
       const subcommand = args[0];
       const subArgs = args.slice(1);
-      
+
       if (!subcommand || subcommand === '--help' || subcommand === '-h') {
         console.log(`
 📝 Note Management
@@ -1535,6 +1603,8 @@ Subcommands:
   edit <note-key> [content]      Edit an existing note (opens $EDITOR if no content)
   show <note-key>                Show note content (as Markdown)
   list <parent-key>              List all notes for an item
+  export <note-key> [path]       Export note(s) to Markdown file(s)
+                                 Use --all to export all notes
 
 Examples:
   zotero note add ABCD1234 "This is a **note**"
@@ -1542,6 +1612,8 @@ Examples:
   zotero note edit NOTE5678 "New text"   # Direct update
   zotero note show NOTE5678
   zotero note list ABCD1234
+  zotero note export NOTE5678 ./notes/   # Export to file
+  zotero note export --all ./exported/   # Export all notes
 
 Notes:
   - Content supports Markdown formatting
@@ -1550,46 +1622,46 @@ Notes:
         `);
         return;
       }
-      
+
       // Import note utilities
       const { markdownToHtml, htmlToMarkdown, htmlToPlainText, ensureHtml } = await import('./note-utils.js');
-      
+
       const db = getDatabase();
       const library = await db.select().from(libraries).get();
-      
+
       if (!library) {
         console.log('❌ No library found. Run "sync" first.');
         return;
       }
-      
+
       switch (subcommand) {
         case 'add': {
           const parentKey = subArgs[0];
           const content = subArgs.slice(1).join(' ');
-          
+
           if (!parentKey) {
             console.log('❌ Usage: zotero note add <parent-key> [content]');
             console.log('   Example: zotero note add ABCD1234 "This is a **note**"');
             return;
           }
-          
+
           // Check if parent item exists
           const parentItem = await db.select()
             .from(items)
             .where(and(eq(items.key, parentKey), eq(items.libraryId, library.id)))
             .get();
-          
+
           if (!parentItem) {
             console.log(`❌ Parent item ${parentKey} not found.`);
             return;
           }
-          
+
           const noteKey = generateKey();
           const now = Math.floor(Date.now() / 1000);
-          
+
           // Convert Markdown to HTML for storage
           const htmlContent = ensureHtml(content || '<p></p>');
-          
+
           // Create note data
           const noteData = {
             itemType: 'note',
@@ -1597,7 +1669,7 @@ Notes:
             parentItem: parentKey,
             tags: [],
           };
-          
+
           // Insert to local database
           await db.insert(items).values({
             key: noteKey,
@@ -1611,7 +1683,7 @@ Notes:
             title: htmlToPlainText(htmlContent, 50) || '(empty note)',
             rawJson: JSON.stringify({ data: noteData }),
           }).run();
-          
+
           console.log(`✅ Note added successfully!`);
           console.log(`   Key: ${noteKey}`);
           console.log(`   Parent: ${parentKey}`);
@@ -1621,71 +1693,71 @@ Notes:
           console.log(`\n💡 Run "zotero sync" to upload to remote.`);
           break;
         }
-        
+
         case 'edit': {
           const noteKey = subArgs[0];
           const newContent = subArgs.slice(1).join(' ');
-          
+
           if (!noteKey) {
             console.log('❌ Usage: zotero note edit <note-key> [content]');
             console.log('   Example: zotero note edit NOTE5678 "Updated **content**"');
             return;
           }
-          
+
           // Get existing note
           const note = await db.select()
             .from(items)
             .where(and(eq(items.key, noteKey), eq(items.libraryId, library.id)))
             .get();
-          
+
           if (!note) {
             console.log(`❌ Note ${noteKey} not found.`);
             return;
           }
-          
+
           if (note.itemType !== 'note') {
             console.log(`❌ Item ${noteKey} is not a note.`);
             return;
           }
-          
+
           // Parse existing data
           const rawData = JSON.parse(note.rawJson || '{}');
           const data = rawData.data || rawData;
-          
+
           // If no new content provided, open external editor
           if (!newContent) {
             const currentHtml = data.note || '';
             const currentMarkdown = htmlToMarkdown(currentHtml);
-            
+
             // Import required modules for external editor
             const { fileSync } = await import('tmp');
             const { writeFileSync, readFileSync } = await import('fs');
             const { spawn } = await import('child_process');
-            
+
             // Create temporary file with current content
-            const tmpFile = fileSync({ 
+            const tmpFile = fileSync({
               postfix: '.md',
               prefix: 'zotero-note-'
             });
-            
+
             // Write current markdown to temp file
             writeFileSync(tmpFile.name, currentMarkdown || '', 'utf-8');
-            
+
             // Get editor from environment or use defaults
             const editor = process.env.EDITOR || process.env.VISUAL || 'nano';
-            
+
             console.log(`📝 Opening external editor: ${editor}`);
             console.log(`   File: ${tmpFile.name}`);
             console.log(`   Edit and save the file, then close the editor to apply changes.`);
             console.log('');
-            
+
             // Wait for editor to close
             await new Promise<void>((resolve, reject) => {
               const child = spawn(editor, [tmpFile.name], {
                 stdio: 'inherit',
                 detached: false
               });
-              
+
               child.on('close', (code) => {
                 if (code === 0 || code === null) {
                   resolve();
@@ -1693,32 +1765,32 @@ Notes:
                   reject(new Error(`Editor exited with code ${code}`));
                 }
               });
-              
+
               child.on('error', (err) => {
                 reject(err);
               });
             });
-            
+
             // Read edited content
             const editedContent = readFileSync(tmpFile.name, 'utf-8');
-            
+
             // Clean up temp file
             tmpFile.removeCallback();
-            
+
             // Check if content changed
             if (editedContent === currentMarkdown) {
               console.log('\n📋 No changes detected. Note not updated.');
               return;
             }
-            
+
             // Use edited content
             newContent = editedContent;
           }
-          
+
           // Convert new content to HTML
           const newHtmlContent = ensureHtml(newContent);
           data.note = newHtmlContent;
-          
+
           // Update local database
           const now = Math.floor(Date.now() / 1000);
           await db.update(items)
@@ -1730,47 +1802,47 @@ Notes:
             })
             .where(and(eq(items.key, noteKey), eq(items.libraryId, library.id)))
             .run();
-          
+
           console.log(`✅ Note updated successfully!`);
           console.log(`   Key: ${noteKey}`);
           console.log(`   Preview: ${htmlToPlainText(newHtmlContent, 80)}`);
           console.log(`\n💡 Run "zotero sync" to upload changes.`);
           break;
         }
-        
+
         case 'show': {
           const noteKey = subArgs[0];
-          
+
           if (!noteKey) {
             console.log('❌ Usage: zotero note show <note-key>');
             console.log('   Example: zotero note show NOTE5678');
             return;
           }
-          
+
           // Get note
           const note = await db.select()
             .from(items)
             .where(and(eq(items.key, noteKey), eq(items.libraryId, library.id)))
             .get();
-          
+
           if (!note) {
             console.log(`❌ Note ${noteKey} not found.`);
             return;
           }
-          
+
           if (note.itemType !== 'note') {
             console.log(`❌ Item ${noteKey} is not a note.`);
             return;
           }
-          
+
           // Parse data
           const rawData = JSON.parse(note.rawJson || '{}');
           const data = rawData.data || rawData;
           const htmlContent = data.note || '';
-          
+
           // Convert to Markdown for display
           const markdownContent = htmlToMarkdown(htmlContent);
-          
+
           console.log(`\n📝 Note: ${noteKey}`);
           console.log(`   Parent: ${data.parentItem || '(none)'}`);
           console.log(`   Updated: ${formatDate(note.updatedAt)}`);
@@ -1780,16 +1852,16 @@ Notes:
           console.log('─'.repeat(60));
           break;
         }
-        
+
         case 'list': {
           const parentKey = subArgs[0];
-          
+
           if (!parentKey) {
             console.log('❌ Usage: zotero note list <parent-key>');
             console.log('   Example: zotero note list ABCD1234');
             return;
           }
-          
+
           // Get all notes for this parent
           const notes = await db.select()
             .from(items)
@@ -1799,7 +1871,7 @@ Notes:
               eq(items.deleted, false)
             ))
             .all();
-          
+
           // Filter notes that belong to this parent
           const parentNotes = notes.filter(note => {
             try {
@@ -1810,27 +1882,142 @@ Notes:
               return false;
             }
           });
-          
+
           if (parentNotes.length === 0) {
             console.log(`\n📝 No notes found for item ${parentKey}.`);
             return;
           }
-          
+
           console.log(`\n📝 Notes for ${parentKey} (${parentNotes.length}):\n`);
-          
+
           for (const note of parentNotes) {
             const rawData = JSON.parse(note.rawJson || '{}');
             const data = rawData.data || rawData;
             const htmlContent = data.note || '';
             const preview = htmlToPlainText(htmlContent, 60) || '(empty note)';
             const syncStatus = note.synced ? '✅' : '🔄';
-            
+
             console.log(`  ${syncStatus} [${note.key}] ${preview}`);
           }
           console.log();
           break;
         }
-        
+
+        case 'export': {
+          const target = subArgs[0];
+          const outputPath = subArgs[1] || '.';
+
+          if (!target) {
+            console.log('❌ Usage: zotero note export <note-key> [output-path]');
+            console.log('   Example: zotero note export NOTE1234 ./my-notes/');
+            console.log('   Example: zotero note export --all ./exported-notes/');
+            return;
+          }
+
+          // Check if exporting all notes
+          if (target === '--all') {
+            const allNotes = await db.select()
+              .from(items)
+              .where(and(
+                eq(items.libraryId, library.id),
+                eq(items.itemType, 'note')
+              ))
+              .all();
+
+            if (allNotes.length === 0) {
+              console.log('📝 No notes found to export.');
+              return;
+            }
+
+            // Create output directory if not exists
+            const fs = await import('fs');
+            const path = await import('path');
+            const outputDir = outputPath || './zotero-notes-export';
+            
+            if (!fs.existsSync(outputDir)) {
+              fs.mkdirSync(outputDir, { recursive: true });
+            }
+
+            console.log(`📤 Exporting ${allNotes.length} notes to ${outputDir}...\n`);
+
+            let exported = 0;
+            for (const note of allNotes) {
+              try {
+                const rawData = JSON.parse(note.rawJson || '{}');
+                const data = rawData.data || rawData;
+                const htmlContent = data.note || '';
+                
+                // Convert to Markdown
+                const { htmlToMarkdown } = await import('./note-utils.js');
+                const markdown = htmlToMarkdown(htmlContent);
+                
+                // Create filename from key and title
+                const title = note.title?.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30) || 'untitled';
+                const filename = `${note.key}_${title}.md`;
+                const filepath = path.join(outputDir, filename);
+                
+                // Write file
+                fs.writeFileSync(filepath, markdown, 'utf-8');
+                exported++;
+                console.log(`  ✅ ${filename}`);
+              } catch (e) {
+                console.warn(`  ⚠️  Failed to export note ${note.key}: ${e}`);
+              }
+            }
+
+            console.log(`\n🎉 Exported ${exported}/${allNotes.length} notes to ${outputDir}/`);
+            return;
+          }
+
+          // Export single note
+          const note = await db.select()
+            .from(items)
+            .where(and(eq(items.key, target), eq(items.libraryId, library.id)))
+            .get();
+
+          if (!note) {
+            console.log(`❌ Note ${target} not found.`);
+            return;
+          }
+
+          if (note.itemType !== 'note') {
+            console.log(`❌ Item ${target} is not a note.`);
+            return;
+          }
+
+          try {
+            const rawData = JSON.parse(note.rawJson || '{}');
+            const data = rawData.data || rawData;
+            const htmlContent = data.note || '';
+            
+            // Convert to Markdown
+            const { htmlToMarkdown } = await import('./note-utils.js');
+            const markdown = htmlToMarkdown(htmlContent);
+            
+            // Write to file or stdout
+            const fs = await import('fs');
+            const path = await import('path');
+            
+            if (outputPath && outputPath !== '-') {
+              // Determine if outputPath is a file or directory
+              let filepath = outputPath;
+              if (fs.existsSync(outputPath) && fs.statSync(outputPath).isDirectory()) {
+                const title = note.title?.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30) || 'untitled';
+                filepath = path.join(outputPath, `${note.key}_${title}.md`);
+              }
+              
+              fs.writeFileSync(filepath, markdown, 'utf-8');
+              console.log(`✅ Exported note to ${filepath}`);
+            } else {
+              // Output to stdout
+              console.log(markdown);
+            }
+          } catch (e) {
+            console.error(`❌ Failed to export note: ${e}`);
+          }
+          break;
+        }
+
         default:
           console.log(`❌ Unknown subcommand: ${subcommand}`);
           console.log('   Run "zotero note --help" for usage.');
