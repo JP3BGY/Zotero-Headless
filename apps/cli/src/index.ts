@@ -1527,20 +1527,21 @@ Usage: zotero note <subcommand> [options]
 
 Subcommands:
   add <parent-key> [content]     Add a note to an item (Markdown supported)
-  edit <note-key> [content]      Edit an existing note
+  edit <note-key> [content]      Edit an existing note (opens $EDITOR if no content)
   show <note-key>                Show note content (as Markdown)
   list <parent-key>              List all notes for an item
 
 Examples:
   zotero note add ABCD1234 "This is a **note**"
-  zotero note edit NOTE5678 "Updated content"
+  zotero note edit NOTE5678              # Opens $EDITOR (vim/nano)
+  zotero note edit NOTE5678 "New text"   # Direct update
   zotero note show NOTE5678
   zotero note list ABCD1234
 
 Notes:
   - Content supports Markdown formatting
   - All operations are local; use 'zotero sync' to upload
-  - If content is omitted, a default editor may be used (future feature)
+  - Set $EDITOR env var to customize editor (default: nano)
         `);
         return;
       }
@@ -1646,17 +1647,67 @@ Notes:
           const rawData = JSON.parse(note.rawJson || '{}');
           const data = rawData.data || rawData;
           
-          // If no new content provided, show current content
+          // If no new content provided, open external editor
           if (!newContent) {
             const currentHtml = data.note || '';
             const currentMarkdown = htmlToMarkdown(currentHtml);
-            console.log(`\n📝 Current content of note ${noteKey}:`);
-            console.log('─'.repeat(60));
-            console.log(currentMarkdown || '(empty)');
-            console.log('─'.repeat(60));
-            console.log('\n💡 To edit, provide new content:');
-            console.log(`   zotero note edit ${noteKey} "New content"`);
-            return;
+            
+            // Import required modules for external editor
+            const { fileSync } = await import('tmp');
+            const { writeFileSync, readFileSync } = await import('fs');
+            const { spawn } = await import('child_process');
+            
+            // Create temporary file with current content
+            const tmpFile = fileSync({ 
+              postfix: '.md',
+              prefix: 'zotero-note-'
+            });
+            
+            // Write current markdown to temp file
+            writeFileSync(tmpFile.name, currentMarkdown || '', 'utf-8');
+            
+            // Get editor from environment or use defaults
+            const editor = process.env.EDITOR || process.env.VISUAL || 'nano';
+            
+            console.log(`📝 Opening external editor: ${editor}`);
+            console.log(`   File: ${tmpFile.name}`);
+            console.log(`   Edit and save the file, then close the editor to apply changes.`);
+            console.log('');
+            
+            // Wait for editor to close
+            await new Promise<void>((resolve, reject) => {
+              const child = spawn(editor, [tmpFile.name], {
+                stdio: 'inherit',
+                detached: false
+              });
+              
+              child.on('close', (code) => {
+                if (code === 0 || code === null) {
+                  resolve();
+                } else {
+                  reject(new Error(`Editor exited with code ${code}`));
+                }
+              });
+              
+              child.on('error', (err) => {
+                reject(err);
+              });
+            });
+            
+            // Read edited content
+            const editedContent = readFileSync(tmpFile.name, 'utf-8');
+            
+            // Clean up temp file
+            tmpFile.removeCallback();
+            
+            // Check if content changed
+            if (editedContent === currentMarkdown) {
+              console.log('\n📋 No changes detected. Note not updated.');
+              return;
+            }
+            
+            // Use edited content
+            newContent = editedContent;
           }
           
           // Convert new content to HTML
