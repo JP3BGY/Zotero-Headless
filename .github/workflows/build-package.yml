@@ -17,6 +17,8 @@ on:
 jobs:
   build-and-package:
     runs-on: ubuntu-latest
+    outputs:
+      VERSION: ${{ steps.get_version.outputs.VERSION }}
     
     steps:
       - name: Checkout repository
@@ -116,3 +118,73 @@ jobs:
           name: ${{ matrix.output }}
           path: apps/cli-bundle/dist/${{ matrix.output }}*
           retention-days: 30
+
+  test-npm-package:
+    needs: build-and-package
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: Linux x64
+          - os: macos-latest
+            name: macOS x64
+          - os: windows-latest
+            name: Windows x64
+    runs-on: ${{ matrix.os }}
+    name: Test npm package on ${{ matrix.name }}
+    
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Download npm package
+        uses: actions/download-artifact@v4
+        with:
+          path: ./download
+          pattern: zotero-headless-*
+
+      - name: List downloaded files
+        shell: bash
+        run: |
+          echo "Downloaded files:"
+          find ./download -type f -name "*.tgz"
+
+      - name: Install and test (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          TGZ_FILE=$(find ./download -name "zotero-headless-*.tgz" | head -1)
+          if [ -z "$TGZ_FILE" ]; then
+            echo "Error: No .tgz file found"
+            exit 1
+          fi
+          echo "Installing: $TGZ_FILE"
+          npm install -g "$TGZ_FILE"
+          echo "Testing zotero --version..."
+          zotero --version
+          echo "Testing zotero help..."
+          zotero help
+          echo "Testing zotero config --init..."
+          zotero config --init
+          echo "All tests passed!"
+
+      - name: Install and test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $TGZ_FILE = Get-ChildItem -Path ./download -Recurse -Filter "zotero-headless-*.tgz" | Select-Object -First 1
+          if (-not $TGZ_FILE) {
+            Write-Error "Error: No .tgz file found"
+            exit 1
+          }
+          Write-Host "Installing: $($TGZ_FILE.FullName)"
+          npm install -g $TGZ_FILE.FullName
+          Write-Host "Testing zotero --version..."
+          zotero --version
+          Write-Host "Testing zotero help..."
+          zotero help
+          Write-Host "Testing zotero config --init..."
+          zotero config --init
+          Write-Host "All tests passed!"
