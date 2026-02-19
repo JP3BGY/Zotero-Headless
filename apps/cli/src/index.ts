@@ -2987,11 +2987,33 @@ For more info: https://github.com/altairwei/Zotero-Headless
     execute: async () => {
       try {
         const { spawn } = await import('child_process');
-        const { fileURLToPath } = await import('url');
-        const { dirname, join } = await import('path');
+        const { join, dirname } = await import('path');
+        const { createRequire } = await import('module');
 
-        const __dirname = dirname(fileURLToPath(import.meta.url));
-        const shellPath = join(__dirname, '..', '..', '..', 'shell', 'dist', 'index.js');
+        // 使用多种方法尝试找到 shell 路径
+        let shellPath: string | null = null;
+
+        // 方法1: 尝试从 package 入口解析
+        try {
+          const require = createRequire(import.meta.url || 'file://' + process.cwd() + '/');
+          const pkgPath = require.resolve('zotero-headless/package.json');
+          shellPath = join(dirname(pkgPath), 'apps', 'shell', 'dist', 'index.js');
+        } catch {
+          // 方法2: 从当前文件位置推导（开发环境）
+          try {
+            const { fileURLToPath } = await import('url');
+            if (import.meta.url) {
+              const __dirname = dirname(fileURLToPath(import.meta.url));
+              shellPath = join(__dirname, '..', '..', '..', 'shell', 'dist', 'index.js');
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        if (!shellPath) {
+          throw new Error('Cannot find shell path. Is zotero-headless properly installed?');
+        }
 
         const child = spawn('node', [shellPath], {
           stdio: 'inherit',
