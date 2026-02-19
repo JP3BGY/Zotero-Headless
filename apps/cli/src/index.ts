@@ -5,7 +5,7 @@
 // See Zotero-Headless-Complete-Design.md Section 7
 
 import { appConfig } from '@zotero-headless/core';
-import { eq, like, desc, asc, count, and, isNull } from 'drizzle-orm';
+import { eq, like, desc, asc, count, and, isNull, sql } from 'drizzle-orm';
 import { ProgressBar } from './progress-bar.js';
 import { resolveConflictsInteractive, isInteractive, ConflictItem } from './conflict-resolver.js';
 import { t, setLanguage, formatItemType, formatField, type Language } from './i18n.js';
@@ -132,6 +132,39 @@ function generateKey(): string {
       Math.floor(Math.random() * 36)
     )
   ).join('');
+}
+
+/**
+ * Get MIME content type from filename
+ */
+function getContentType(filename: string): string {
+  const ext = filename.toLowerCase().split('.').pop() || '';
+  const mimeTypes: Record<string, string> = {
+    'pdf': 'application/pdf',
+    'doc': 'application/msword',
+    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'xls': 'application/vnd.ms-excel',
+    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'ppt': 'application/vnd.ms-powerpoint',
+    'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'txt': 'text/plain',
+    'rtf': 'application/rtf',
+    'html': 'text/html',
+    'htm': 'text/html',
+    'epub': 'application/epub+zip',
+    'mobi': 'application/x-mobipocket-ebook',
+    'zip': 'application/zip',
+    'png': 'image/png',
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'gif': 'image/gif',
+    'svg': 'image/svg+xml',
+    'mp4': 'video/mp4',
+    'mp3': 'audio/mpeg',
+    'json': 'application/json',
+    'xml': 'application/xml',
+  };
+  return mimeTypes[ext] || 'application/octet-stream';
 }
 
 // ============ CLI Commands ============
@@ -391,7 +424,23 @@ const commands: Command[] = [
       
       const orderDirection = options.order === 'asc' ? asc : desc;
       
-      const results = await db.select()
+      // Build the query using sql`` for subquery
+      const attachmentCountSubquery = sql<number>`(
+        SELECT COUNT(*) FROM ${attachments} 
+        WHERE ${attachments.parentItemKey} = ${items.key} 
+        AND ${attachments.libraryId} = ${items.libraryId}
+        AND (${attachments.deleted} IS NULL OR ${attachments.deleted} = 0)
+      )`.as('attachmentCount');
+      
+      const results = await db.select({
+        key: items.key,
+        title: items.title,
+        itemType: items.itemType,
+        updatedAt: items.updatedAt,
+        synced: items.synced,
+        deleted: items.deleted,
+        attachmentCount: attachmentCountSubquery,
+      })
         .from(items)
         .where(whereConditions)
         .orderBy(orderDirection(orderByColumn))
@@ -417,7 +466,9 @@ const commands: Command[] = [
         results.forEach(item => {
           const syncStatus = item.synced ? '✅' : '🔄';
           const delStatus = item.deleted ? ' (deleted)' : '';
-          console.log(`  ${syncStatus} [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}${delStatus}`);
+          const attCount = Number(item.attachmentCount) || 0;
+          const attIcon = attCount > 0 ? ` 📎${attCount}` : '';
+          console.log(`  ${syncStatus} [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}${delStatus}${attIcon}`);
           console.log(`      Type: ${item.itemType} | Updated: ${formatDate(item.updatedAt)}`);
           console.log();
         });
@@ -920,21 +971,48 @@ const commands: Command[] = [
   {
     name: 'add',
     aliases: ['a', 'new', 'touch', 'create'],
-    description: 'Add a new item. Aliases: a, new, touch, create',
+    description: 'Add a new item. Aliases: a, new, touch, create. Options: -a/--attachment <path> (multiple allowed)',
     execute: async (args) => {
       await initModules();
       console.log('📝 Adding new item to library...\n');
       
-      // Parse arguments: zotero add <type> <title> [authors...]
-      const itemType = args[0] || 'journalArticle';
-      const title = args[1];
+      // Parse arguments: zotero add <type> <title> [authors...] [-a/--attachment path...]
+      const attachmentPaths: string[] = [];
+      const otherArgs: string[] = [];
+      
+      for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        if (arg === '-a' || arg === '--attachment') {
+          if (i + 1 < args.length) {
+            attachmentPaths.push(args[++i]);
+          }
+        } else {
+          otherArgs.push(arg);
+        }
+      }
+      
+      const itemType = otherArgs[0] || 'journalArticle';
+      const title = otherArgs[1];
       
       if (!title) {
-        console.log('❌ Usage: zotero add <type> <title> [authors...]');
+        console.log('❌ Usage: zotero add <type> <title> [authors...] [-a/--attachment <path>...]');
         console.log('   Example: zotero add journalArticle "My Article" "John Doe"');
+        console.log('   Example with attachments: zotero add book "My Book" "John Doe" -a /path/to/file1.pdf -a /path/to/file2.pdf');
         console.log('\n   Supported types:');
         console.log('   journalArticle, book, bookSection, conferencePaper, thesis, report, webpage, document');
         process.exit(1);
+      }
+      
+      // Validate attachment paths
+      const fs = await import('fs');
+      const path = await import('path');
+      const validAttachments: string[] = [];
+      for (const attPath of attachmentPaths) {
+        if (fs.existsSync(attPath)) {
+          validAttachments.push(attPath);
+        } else {
+          console.log(`⚠️  Attachment not found: ${attPath}`);
+        }
       }
       
       try {
@@ -949,7 +1027,7 @@ const commands: Command[] = [
         const itemData = {
           itemType,
           title,
-          creators: args.slice(2).map((author, index) => {
+          creators: otherArgs.slice(2).map((author, index) => {
             const parts = author.split(' ');
             const lastName = parts.pop() || '';
             const firstName = parts.join(' ') || '';
@@ -965,6 +1043,60 @@ const commands: Command[] = [
           const newKey = result.successful['0'];
           console.log(`✅ Item created successfully!`);
           console.log(`   Key: ${newKey}`);
+          
+          // Create attachments if provided
+          if (validAttachments.length > 0) {
+            console.log(`\n📎 Adding ${validAttachments.length} attachment(s)...`);
+            
+            for (const attPath of validAttachments) {
+              const filename = path.basename(attPath);
+              const stats = fs.statSync(attPath);
+              
+              // Create attachment item data
+              const attachmentData = {
+                itemType: 'attachment',
+                title: filename,
+                filename: filename,
+                contentType: getContentType(filename),
+                parentItem: newKey,
+                linkMode: 'linked_file'
+              };
+              
+              try {
+                const attResult = await zoteroApi.createItems(String(library.zoteroId), [attachmentData]);
+                if (attResult.successful && attResult.successful['0']) {
+                  const attKey = attResult.successful['0'];
+                  console.log(`   ✅ Added: ${filename} (${(stats.size / 1024).toFixed(1)} KB)`);
+                  
+                  // Also add to local database
+                  const now = Math.floor(Date.now() / 1000);
+                  await getDatabase().insert(attachments).values({
+                    key: attKey,
+                    parentItemKey: newKey,
+                    libraryId: library.id,
+                    filename: filename,
+                    contentType: getContentType(filename),
+                    fileType: path.extname(filename).toLowerCase(),
+                    localPath: attPath,
+                    version: 0,
+                    createdAt: now,
+                    updatedAt: now,
+                    deleted: false,
+                    size: stats.size,
+                    webdavSynced: false,
+                    rawJson: JSON.stringify({ data: attachmentData }),
+                  }).run();
+                } else if (attResult.failed) {
+                  console.log(`   ❌ Failed to add ${filename}:`);
+                  Object.values(attResult.failed).forEach((err: any) => {
+                    console.log(`      ${err.code}: ${err.message}`);
+                  });
+                }
+              } catch (attError) {
+                console.log(`   ❌ Failed to add ${filename}: ${attError}`);
+              }
+            }
+          }
           
           // Update local version to trigger re-sync
           await getDatabase().update(libraries)
@@ -1199,13 +1331,28 @@ const commands: Command[] = [
   {
     name: 'add-by-id',
     aliases: ['add'],
-    description: 'Add item(s) by identifier (DOI, ISBN, PMID, arXiv)',
+    description: 'Add item(s) by identifier (DOI, ISBN, PMID, arXiv). Options: -a/--attachment <path> (multiple allowed)',
     execute: async (args) => {
-      if (args.length === 0) {
+      // Parse arguments for attachments
+      const attachmentPaths: string[] = [];
+      const otherArgs: string[] = [];
+      
+      for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        if (arg === '-a' || arg === '--attachment') {
+          if (i + 1 < args.length) {
+            attachmentPaths.push(args[++i]);
+          }
+        } else {
+          otherArgs.push(arg);
+        }
+      }
+      
+      if (otherArgs.length === 0) {
         console.log(`
 ❌ 请提供至少一个标识符
 
-用法: zotero add-by-id <identifier> [identifier2 ...]
+用法: zotero add-by-id <identifier> [identifier2 ...] [-a/--attachment <path>...]
 
 支持的标识符类型:
   • DOI    - 如 10.1007/s11263-019-01228-7
@@ -1213,17 +1360,33 @@ const commands: Command[] = [
   • PMID   - 如 1234567
   • arXiv  - 如 2001.12345
 
+选项:
+  -a, --attachment <path>  添加附件文件（可多次使用）
+
 示例:
   zotero add-by-id "10.1007/s11263-019-01228-7"
   zotero add-by-id "978-3-642-15515-4"
   zotero add-by-id "1234567"
-  zotero add-by-id "10.1007/xyz, 978-3-642-15515-4"  # 批量
+  zotero add-by-id "10.1007/xyz" -a /path/to/supplemental.pdf
+  zotero add-by-id "10.1007/xyz" -a file1.pdf -a file2.pdf
         `);
         return;
       }
 
       await initModules();
-      const input = args.join(' ');
+      const input = otherArgs.join(' ');
+      
+      // Validate attachment paths
+      const fs = await import('fs');
+      const path = await import('path');
+      const validAttachments: string[] = [];
+      for (const attPath of attachmentPaths) {
+        if (fs.existsSync(attPath)) {
+          validAttachments.push(attPath);
+        } else {
+          console.log(`⚠️  Attachment not found: ${attPath}`);
+        }
+      }
       
       try {
         console.log('🔍 正在解析标识符...\n');
@@ -1275,8 +1438,9 @@ const commands: Command[] = [
           for (const result of results) {
             if (result.error || !result.item) continue;
             
+            const itemKey = generateKey();
             const item = {
-              key: generateKey(),
+              key: itemKey,
               libraryId: library.id,
               version: 0,
               synced: false,
@@ -1289,9 +1453,53 @@ const commands: Command[] = [
             
             await db.insert(items).values(item).run();
             console.log(`   📄 已添加: ${item.title?.substring(0, 50) || '(无标题)'}...`);
+            
+            // Add attachments if provided
+            if (validAttachments.length > 0) {
+              console.log(`   📎 添加 ${validAttachments.length} 个附件...`);
+              
+              for (const attPath of validAttachments) {
+                const filename = path.basename(attPath);
+                const stats = fs.statSync(attPath);
+                const attKey = generateKey();
+                
+                // Create attachment record
+                const now = Math.floor(Date.now() / 1000);
+                await db.insert(attachments).values({
+                  key: attKey,
+                  parentItemKey: itemKey,
+                  libraryId: library.id,
+                  filename: filename,
+                  contentType: getContentType(filename),
+                  fileType: path.extname(filename).toLowerCase(),
+                  localPath: attPath,
+                  version: 0,
+                  createdAt: now,
+                  updatedAt: now,
+                  deleted: false,
+                  size: stats.size,
+                  webdavSynced: false,
+                  rawJson: JSON.stringify({ 
+                    data: {
+                      itemType: 'attachment',
+                      title: filename,
+                      filename: filename,
+                      contentType: getContentType(filename),
+                      parentItem: itemKey,
+                      linkMode: 'linked_file'
+                    } 
+                  }),
+                }).run();
+                
+                console.log(`      ✅ ${filename} (${(stats.size / 1024).toFixed(1)} KB)`);
+              }
+            }
           }
           
           console.log(`\n🎉 成功添加 ${successCount} 个文献到本地数据库！`);
+          if (validAttachments.length > 0) {
+            console.log(`   📎 共添加 ${validAttachments.length} 个附件`);
+          }
           console.log('💡 运行 "zotero sync" 上传到远程');
         }
         
@@ -1326,15 +1534,15 @@ Usage: zotero <command> [options]
 
 Core Commands:
   sync (s, pull, fetch)        Synchronize library
-  list (ls, ll)                List items with filters
+  list (ls, ll)                List items with filters (shows 📎N for attachment count)
   search (find, grep, f)       Search by title/author/tags
   get (show, cat, view)        Show item details
   stats (st, info, df)         Show statistics
   verify (v, check, ping)      Verify API key
 
 Item Management:
-  add (a, new, touch)          Add new item
-  add-by-id (add)              Add by DOI/ISBN/PMID/arXiv
+  add (a, new, touch)          Add new item with optional attachments
+  add-by-id (add)              Add by DOI/ISBN/PMID/arXiv with optional attachments
   update (u, edit, set)        Update item field
   delete (rm, del, d, trash)   Delete/trash item
   export (e, out, save)        Export to bibtex/ris/csv/json
@@ -1359,6 +1567,11 @@ Quick Examples:
   zotero cat ABCD1234                   # View item
   zotero rm ABCD1234 -f                 # Force delete
   zotero touch journalArticle "Title"   # Add item
+
+With Attachments:
+  zotero add book "Title" "Author" -a file1.pdf -a file2.pdf
+  zotero add-by-id "10.1000/xyz" -a supplement.pdf
+  zotero ls                             # Shows 📎N count for each item
 
 For more info: https://github.com/altairwei/Zotero-Headless
 `);
