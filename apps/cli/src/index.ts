@@ -267,12 +267,19 @@ const commands: Command[] = [
           let resolvedCount = 0;
           for (const [key, resolution] of resolutions) {
             if (resolution === 'remote') {
-              // Re-fetch and apply remote version
+              // Use remote: clear deleted flag, reset version to re-download on next sync
               console.log(`   ${t('conflict.remote')}: ${key}`);
-              // Note: Would need to re-fetch from API here
+              await db.update(items)
+                .set({ deleted: 0, version: 0, synced: 0 })
+                .where(eq(items.key, key))
+                .run();
               resolvedCount++;
             } else if (resolution === 'local') {
+              // Use local: remove from DB (will be recreated if needed)
               console.log(`   ${t('conflict.local')}: ${key}`);
+              await db.delete(items)
+                .where(eq(items.key, key))
+                .run();
               resolvedCount++;
             }
           }
