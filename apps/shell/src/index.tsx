@@ -325,3 +325,6 @@ export function ZoteroShell() {
     </Box>
   );
 }
+
+// 启动 shell
+render(<ZoteroShell />);
