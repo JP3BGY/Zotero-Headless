@@ -360,14 +360,14 @@ export function ZoteroShell() {
     }
   });
 
-  // 计算可见行（排除固定高度的补全区域和输入行）
+  // 计算可见行（补全列表现在在输出区域内，不影响输入行位置）
   const visibleHeight = containerRef.current.height;
   const welcomeHeight = 2; // 欢迎消息占 2 行
   const shortcutHeight = 1; // 快捷键提示占 1 行
   const dividerHeight = lines.length > 0 ? 1 : 0; // 分隔线
-  const completionHeight = (suggestions.length > 0 || itemKeySuggestions.length > 0) ? 3 : 0; // 补全区域固定3行
   const inputHeight = 1; // 输入行固定1行
-  const outputHeight = Math.max(1, visibleHeight - welcomeHeight - shortcutHeight - dividerHeight - completionHeight - inputHeight);
+  // 补全列表在输出区域内显示，不占用额外空间
+  const outputHeight = Math.max(1, visibleHeight - welcomeHeight - shortcutHeight - dividerHeight - inputHeight);
 
   const visibleLines = lines.slice(
     Math.max(0, lines.length - outputHeight - scrollOffset),
@@ -394,8 +394,9 @@ export function ZoteroShell() {
         </Box>
       )}
 
-      {/* 历史输出区域 - 占据剩余空间（减去固定的补全区域） */}
+      {/* 历史输出区域 - 占据剩余空间，补全列表作为内容的一部分显示在底部 */}
       <Box flexDirection="column" flexGrow={1} overflow="hidden">
+        {/* 历史输出 */}
         {visibleLines.map((item) => (
           <Box key={item.id}>
             {item.type === 'input' ? (
@@ -412,48 +413,48 @@ export function ZoteroShell() {
         {scrollOffset > 0 && (
           <Text color="gray">... 按 PageDown 滚动 ...</Text>
         )}
+        
+        {/* 【在输出区域内】命令建议列表 */}
+        {suggestions.length > 0 && !isExecuting && (
+          <Box flexDirection="column" marginTop={1}>
+            {suggestions.slice(0, 3).map((suggestion) => (
+              <Box key={suggestion.name}>
+                <Text color="gray">  </Text>
+                <Text color="green" bold>{suggestion.name.padEnd(12)}</Text>
+                <Text color="gray">{suggestion.description.substring(0, 50)}</Text>
+                {suggestion.description.length > 50 && <Text color="gray">...</Text>}
+              </Box>
+            ))}
+            {suggestions.length > 3 && (
+              <Box>
+                <Text color="gray">  ... 还有 {suggestions.length - 3} 个匹配</Text>
+              </Box>
+            )}
+          </Box>
+        )}
+        
+        {/* 【在输出区域内】Item Key 建议列表 */}
+        {itemKeySuggestions.length > 0 && !isExecuting && (
+          <Box flexDirection="column" marginTop={1}>
+            {itemKeySuggestions.slice(0, 3).map((item) => (
+              <Box key={item.key}>
+                <Text color="gray">  </Text>
+                <Text color="cyan" bold>{item.key.padEnd(12)}</Text>
+                <Text color="white">{item.title.substring(0, 40)}</Text>
+                {item.title.length > 40 && <Text color="gray">...</Text>}
+                <Text color="gray"> ({item.itemType})</Text>
+              </Box>
+            ))}
+            {itemKeySuggestions.length > 3 && (
+              <Box>
+                <Text color="gray">  ... 还有 {itemKeySuggestions.length - 3} 个匹配</Text>
+              </Box>
+            )}
+          </Box>
+        )}
       </Box>
 
-      {/* 【固定位置】命令建议列表 - 最多3行 */}
-      {suggestions.length > 0 && !isExecuting && (
-        <Box flexDirection="column" height={3} overflow="hidden">
-          {suggestions.slice(0, 3).map((suggestion) => (
-            <Box key={suggestion.name}>
-              <Text color="gray">  </Text>
-              <Text color="green" bold>{suggestion.name.padEnd(12)}</Text>
-              <Text color="gray">{suggestion.description.substring(0, 50)}</Text>
-              {suggestion.description.length > 50 && <Text color="gray">...</Text>}
-            </Box>
-          ))}
-          {suggestions.length > 3 && (
-            <Box>
-              <Text color="gray">  ... 还有 {suggestions.length - 3} 个匹配</Text>
-            </Box>
-          )}
-        </Box>
-      )}
-
-      {/* 【固定位置】Item Key 建议列表 - 最多3行 */}
-      {itemKeySuggestions.length > 0 && !isExecuting && (
-        <Box flexDirection="column" height={3} overflow="hidden">
-          {itemKeySuggestions.slice(0, 3).map((item) => (
-            <Box key={item.key}>
-              <Text color="gray">  </Text>
-              <Text color="cyan" bold>{item.key.padEnd(12)}</Text>
-              <Text color="white">{item.title.substring(0, 40)}</Text>
-              {item.title.length > 40 && <Text color="gray">...</Text>}
-              <Text color="gray"> ({item.itemType})</Text>
-            </Box>
-          ))}
-          {itemKeySuggestions.length > 3 && (
-            <Box>
-              <Text color="gray">  ... 还有 {itemKeySuggestions.length - 3} 个匹配</Text>
-            </Box>
-          )}
-        </Box>
-      )}
-
-      {/* 输入框 - 固定在底部 */}
+      {/* 输入框 - 绝对固定在底部 */}
       <Box>
         <Text color={isExecuting ? "gray" : "cyan"}>
           {isExecuting ? "⏳ " : "> "}
