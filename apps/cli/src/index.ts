@@ -240,6 +240,9 @@ const commands: Command[] = [
         if (interactive && isInteractive()) {
           console.log(`\n⚠️  ${result.conflicts.length} ${t('conflict.title')}`);
 
+          // Get database connection
+          const db = getDatabase();
+
           // Get item details for conflicts
           const conflictItems: ConflictItem[] = [];
           for (const key of result.conflicts) {
