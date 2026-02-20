@@ -2280,9 +2280,8 @@ const commands: Command[] = [
               const now = Math.floor(Date.now() / 1000);
               
               // 获取保存路径
-              const { getConfig } = await import('@zotero-headless/core');
-              const config = getConfig();
-              const saveDir = path.join(config.dataDir, 'downloads');
+              const { appConfig } = await import('@zotero-headless/core');
+              const saveDir = path.join(appConfig.dataDir, 'downloads');
               if (!fs.existsSync(saveDir)) {
                 fs.mkdirSync(saveDir, { recursive: true });
               }
