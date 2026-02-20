@@ -6,6 +6,10 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
+    "@zotero-headless/shell#build": {
+      "dependsOn": ["@zotero-headless/cli#build", "^build"],
+      "outputs": ["dist/**"]
+    },
     "dev": {
       "cache": false,
       "persistent": true
