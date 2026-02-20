@@ -278382,6 +278382,12 @@ var require_tmp = __commonJS({
 });
 
 // ../cli/src/index.ts
+var src_exports = {};
+__export(src_exports, {
+  commands: () => commands,
+  main: () => main
+});
+module.exports = __toCommonJS(src_exports);
 init_drizzle_orm();
 
 // ../cli/src/progress-bar.ts
@@ -281647,7 +281653,14 @@ Run "zotero help" for all commands.`);
     process.exit(1);
   }
 }
-main();
+if (require.main === module) {
+  main();
+}
+// Annotate the CommonJS export names for ESM import in node:
+0 && (module.exports = {
+  commands,
+  main
+});
 /*! Bundled license information:
 
 js-yaml/dist/js-yaml.mjs:

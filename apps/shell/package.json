@@ -14,7 +14,6 @@
   },
   "dependencies": {
     "@zotero-headless/api": "workspace:*",
-    "@zotero-headless/cli": "workspace:*",
     "@zotero-headless/core": "workspace:*",
     "@zotero-headless/database": "workspace:*",
     "@zotero-headless/sync-engine": "workspace:*",

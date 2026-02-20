@@ -1,6 +1,6 @@
 {
   "name": "zotero-headless",
-  "version": "shell-test",
+  "version": "fix-import",
   "description": "Zotero Web API sync client - CLI tool for syncing Zotero libraries without desktop app",
   "bin": {
     "zotero": "./index.js",

@@ -1,0 +1,41 @@
+{
+  "name": "@zotero-headless/cli",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "zotero": "./dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'No lint configured'"
+  },
+  "dependencies": {
+    "@types/jsdom": "^27.0.0",
+    "@types/marked": "^6.0.0",
+    "@types/tmp": "^0.2.6",
+    "@zotero-headless/api": "workspace:*",
+    "@zotero-headless/attachment-manager": "file:../../packages/attachment-manager",
+    "@zotero-headless/core": "workspace:*",
+    "@zotero-headless/database": "workspace:*",
+    "@zotero-headless/sync-engine": "workspace:*",
+    "@zotero-headless/types": "workspace:*",
+    "@zotero-headless/webdav-client": "file:../../packages/webdav-client",
+    "commander": "^14.0.3",
+    "jsdom": "^28.1.0",
+    "marked": "^17.0.3",
+    "tmp": "^0.2.5",
+    "turndown": "^7.2.2"
+  },
+  "devDependencies": {
+    "@types/turndown": "^5.0.6",
+    "typescript": "^5.3.0"
+  }
+}

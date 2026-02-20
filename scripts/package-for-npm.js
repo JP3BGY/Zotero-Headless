@@ -107,6 +107,44 @@ if (existsSync(shellSrcDir)) {
   console.log('⚠️ Shell source not found, skipping');
 }
 
+// Copy CLI dist files (needed for shell imports)
+console.log('📦 Copying CLI dist files...');
+const cliSrcDir = join(rootDir, 'apps', 'cli');
+const cliDistDir = join(distDir, 'apps', 'cli');
+
+if (existsSync(cliSrcDir)) {
+  mkdirSync(cliDistDir, { recursive: true });
+  
+  // Copy package.json
+  copyFileSync(
+    join(cliSrcDir, 'package.json'),
+    join(cliDistDir, 'package.json')
+  );
+  
+  // Copy dist files
+  const cliDistSrc = join(cliSrcDir, 'dist');
+  const cliDistTarget = join(cliDistDir, 'dist');
+  if (existsSync(cliDistSrc)) {
+    mkdirSync(cliDistTarget, { recursive: true });
+    cpSync(cliDistSrc, cliDistTarget, { recursive: true });
+    console.log('✅ CLI files copied');
+  } else {
+    console.log('⚠️ CLI dist not found, trying to build...');
+    try {
+      execSync('pnpm build', { cwd: cliSrcDir, stdio: 'inherit' });
+      if (existsSync(cliDistSrc)) {
+        mkdirSync(cliDistTarget, { recursive: true });
+        cpSync(cliDistSrc, cliDistTarget, { recursive: true });
+        console.log('✅ CLI files copied after build');
+      }
+    } catch (e) {
+      console.error('❌ Failed to build CLI:', e.message);
+    }
+  }
+} else {
+  console.log('⚠️ CLI source not found, skipping');
+}
+
 // Create package.json
 console.log('📝 Creating package.json...');
 const packageJson = {
