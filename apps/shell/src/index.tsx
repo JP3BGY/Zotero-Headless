@@ -125,23 +125,34 @@ class ZoteroExecutor {
     try {
       const result = await executeCommand(cmd, args, onOutput);
       
+      // 检查是否有错误输出
+      if (result.exitCode !== 0 && result.stderr) {
+        return { 
+          type: 'error', 
+          content: result.stderr 
+        };
+      }
+      
       // 如果是 search 命令，高亮关键词
       if ((cmd === 'search' || cmd === 'f' || cmd === 'find') && args.length > 0) {
         const highlighted = highlightSearchResult(result.stdout, args);
         return { 
           type: result.exitCode === 0 ? 'success' : 'error', 
-          content: highlighted || result.stderr 
+          content: highlighted || result.stderr || '无结果'
         };
       }
 
       return { 
         type: result.exitCode === 0 ? 'success' : 'error', 
-        content: result.stdout || result.stderr 
+        content: result.stdout || result.stderr || '命令执行完成'
       };
     } catch (error) {
+      // 捕获所有未处理的错误（网络错误、超时等）
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error('Command execution error:', error); // 调试日志
       return { 
         type: 'error', 
-        content: `❌ 执行错误: ${error instanceof Error ? error.message : String(error)}` 
+        content: `⚠️ 网络错误: ${errorMsg}\n请检查网络连接后重试。`
       };
     }
   }
@@ -318,57 +329,24 @@ export function ZoteroShell() {
   return (
     <Box flexDirection="column" height="100%">
       {/* 欢迎消息 - 固定在顶部 */}
-      <Box flexDirection="column" marginBottom={0}>
+      <Box flexDirection="column">
         <Text color="yellow">📚 Zotero Shell v1.0.0</Text>
         <Text color="gray">输入 "help" 查看可用命令，或 "exit" 退出</Text>
       </Box>
 
       {/* 快捷键提示 */}
-      <Box marginBottom={0}>
+      <Box>
         <Text color="gray">Tab to autocomplete, ↑/↓ for history, Ctrl+C to quit</Text>
       </Box>
 
-      {/* 输入框 */}
-      <Box>
-        <Text color={isExecuting ? "gray" : "cyan"}>
-          {isExecuting ? "⏳ " : "> "}
-        </Text>
-        {!isExecuting && (
-          <TextInput value={input} onChange={(value) => {
-            setInput(value);
-            // 实时更新建议
-            if (value) {
-              const comps = executor.current.getCompletions(value);
-              setSuggestions(comps.slice(0, 8));
-            } else {
-              setSuggestions([]);
-            }
-          }} />
-        )}
-        {isExecuting && <Text color="gray">执行中...</Text>}
-      </Box>
-
-      {/* 命令建议列表 */}
-      {suggestions.length > 0 && !isExecuting && (
-        <Box flexDirection="column" marginTop={0} marginBottom={1}>
-          {suggestions.map((suggestion, index) => (
-            <Box key={suggestion.name}>
-              <Text color="gray">  </Text>
-              <Text color="green" bold>{suggestion.name.padEnd(maxCommandLength + 2)}</Text>
-              <Text color="gray">{suggestion.description}</Text>
-            </Box>
-          ))}
-        </Box>
-      )}
-
       {/* 分隔线 */}
-      {lines.length > 2 && (
-        <Box marginY={0}>
+      {lines.length > 0 && (
+        <Box>
           <Text color="gray">{''.padEnd(60, '─')}</Text>
         </Box>
       )}
 
-      {/* 历史输出区域 */}
+      {/* 历史输出区域 - 占据剩余空间 */}
       <Box flexDirection="column" flexGrow={1} overflow="hidden">
         {visibleLines.map((item) => (
           <Box key={item.id}>
@@ -387,6 +365,38 @@ export function ZoteroShell() {
           <Text color="gray">... 按 PageDown 滚动 ...</Text>
         )}
       </Box>
+
+      {/* 输入框 - 固定在底部 */}
+      <Box>
+        <Text color={isExecuting ? "gray" : "cyan"}>
+          {isExecuting ? "⏳ " : "> "}
+        </Text>
+        {!isExecuting && (
+          <TextInput value={input} onChange={(value) => {
+            setInput(value);
+            if (value) {
+              const comps = executor.current.getCompletions(value);
+              setSuggestions(comps.slice(0, 8));
+            } else {
+              setSuggestions([]);
+            }
+          }} />
+        )}
+        {isExecuting && <Text color="gray">执行中...</Text>}
+      </Box>
+
+      {/* 命令建议列表 - 在输入框上方显示 */}
+      {suggestions.length > 0 && !isExecuting && (
+        <Box flexDirection="column">
+          {suggestions.map((suggestion) => (
+            <Box key={suggestion.name}>
+              <Text color="gray">  </Text>
+              <Text color="green" bold>{suggestion.name.padEnd(maxCommandLength + 2)}</Text>
+              <Text color="gray">{suggestion.description}</Text>
+            </Box>
+          ))}
+        </Box>
+      )}
     </Box>
   );
 }

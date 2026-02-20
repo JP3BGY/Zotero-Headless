@@ -119,10 +119,19 @@ export async function executeCommand(
     };
   }
 
-  // 执行命令并捕获输出（实时输出通过 onOutput）
-  const result = await captureConsoleOutput(() => command.execute(args), onOutput);
-  
-  return result;
+  try {
+    // 执行命令并捕获输出（实时输出通过 onOutput）
+    const result = await captureConsoleOutput(() => command.execute(args), onOutput);
+    return result;
+  } catch (error) {
+    // 捕获所有未处理的错误（包括网络错误）
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    return {
+      stdout: '',
+      stderr: `⚠️ 命令执行失败: ${errorMsg}`,
+      exitCode: 1
+    };
+  }
 }
 
 /**
