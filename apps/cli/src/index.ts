@@ -2171,6 +2171,7 @@ const commands: Command[] = [
   • ISBN   - 如 978-3-642-15515-4
   • PMID   - 如 1234567
   • arXiv  - 如 2001.12345
+  • 微信文章 URL - 如 https://mp.weixin.qq.com/s/...
 
 选项:
   -a, --attachment <path>  添加附件文件（可多次使用）
@@ -2179,6 +2180,7 @@ const commands: Command[] = [
   zotero add-by-id "10.1007/s11263-019-01228-7"
   zotero add-by-id "978-3-642-15515-4"
   zotero add-by-id "1234567"
+  zotero add-by-id "https://mp.weixin.qq.com/s/xxxxx"
   zotero add-by-id "10.1007/xyz" -a /path/to/supplemental.pdf
   zotero add-by-id "10.1007/xyz" -a file1.pdf -a file2.pdf
         `);
@@ -2265,6 +2267,59 @@ const commands: Command[] = [
 
             await db.insert(items).values(item).run();
             console.log(`   📄 已添加: ${item.title?.substring(0, 50) || '(无标题)'}...`);
+
+            // 处理微信文章的 snapshot 附件（iOS 兼容性）
+            if (result.extra?.isWeChatArticle && result.extra?.processedHtml) {
+              console.log(`   📎 创建微信文章 snapshot...`);
+              
+              const crypto = await import('crypto');
+              const contentHash = result.extra.contentHash || 
+                crypto.createHash('md5').update(result.extra.processedHtml).digest('hex').substring(0, 16);
+              const uniqueFilename = `${contentHash}.html`;
+              const attKey = generateKey();
+              const now = Math.floor(Date.now() / 1000);
+              
+              // 获取保存路径
+              const { getConfig } = await import('@zotero-headless/core');
+              const config = getConfig();
+              const saveDir = path.join(config.dataDir, 'downloads');
+              if (!fs.existsSync(saveDir)) {
+                fs.mkdirSync(saveDir, { recursive: true });
+              }
+              
+              const htmlPath = path.join(saveDir, `${attKey}.html`);
+              fs.writeFileSync(htmlPath, result.extra.processedHtml);
+              
+              // 创建 attachment 记录
+              await db.insert(attachments).values({
+                key: attKey,
+                parentItemKey: itemKey,
+                libraryId: library.id,
+                filename: uniqueFilename,  // iOS 兼容：使用内容哈希，不等于 attachment key
+                contentType: 'text/html',
+                fileType: '.html',
+                localPath: htmlPath,
+                version: 0,
+                createdAt: now,
+                updatedAt: now,
+                deleted: false,
+                size: result.extra.processedHtml.length,
+                webdavSynced: false,
+                rawJson: JSON.stringify({
+                  data: {
+                    itemType: 'attachment',
+                    title: 'Snapshot',
+                    filename: uniqueFilename,
+                    contentType: 'text/html',
+                    parentItem: itemKey,
+                    linkMode: 'imported_url'
+                  }
+                }),
+              }).run();
+              
+              console.log(`      ✅ Snapshot: ${uniqueFilename} (${(result.extra.processedHtml.length / 1024).toFixed(1)} KB)`);
+              console.log(`      💡 运行 "zotero sync" 上传 WebDAV`);
+            }
 
             // Add attachments if provided
             if (validAttachments.length > 0) {

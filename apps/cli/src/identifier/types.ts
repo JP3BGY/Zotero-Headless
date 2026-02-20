@@ -24,6 +24,7 @@ export interface MetadataResult {
   source: string;      // 数据来源（如 'crossref', 'worldcat'）
   timestamp: number;   // 获取时间戳
   error?: string;      // 错误信息（如有）
+  extra?: any;         // 额外数据（如 WeChat 的 processedHtml）
 }
 
 /**

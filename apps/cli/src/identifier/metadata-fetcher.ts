@@ -4,6 +4,7 @@ import { DOIFetcher } from './fetchers/doi-fetcher.js';
 import { ISBNFetcher } from './fetchers/isbn-fetcher.js';
 import { PMIDFetcher } from './fetchers/pmid-fetcher.js';
 import { ArXivFetcher } from './fetchers/arxiv-fetcher.js';
+import { WeChatFetcher } from './fetchers/wechat-fetcher.js';
 
 /**
  * 元数据获取器主类
@@ -15,6 +16,7 @@ export class MetadataFetcher {
   private isbnFetcher: ISBNFetcher;
   private pmidFetcher: PMIDFetcher;
   private arxivFetcher: ArXivFetcher;
+  private wechatFetcher: WeChatFetcher;
 
   constructor(config: FetcherConfig) {
     this.config = config;
@@ -22,12 +24,18 @@ export class MetadataFetcher {
     this.isbnFetcher = new ISBNFetcher(config);
     this.pmidFetcher = new PMIDFetcher(config);
     this.arxivFetcher = new ArXivFetcher(config);
+    this.wechatFetcher = new WeChatFetcher(config);
   }
 
   /**
    * 获取单个标识符的元数据
    */
   async fetch(identifier: Identifier): Promise<MetadataResult> {
+    // 微信文章 URL 特殊处理
+    if (identifier.type === 'url' && WeChatFetcher.isWeChatURL(identifier.value)) {
+      return this.wechatFetcher.fetchMetadata(identifier);
+    }
+
     switch (identifier.type) {
       case 'doi':
         return this.doiFetcher.fetchMetadata(identifier);
@@ -40,7 +48,7 @@ export class MetadataFetcher {
       case 'ads':
         throw new Error('ADS Bibcode 暂不支持');
       case 'url':
-        throw new Error('URL 解析暂不支持');
+        throw new Error('URL 解析暂不支持（仅支持微信文章）');
       default:
         throw new Error(`不支持的标识符类型: ${identifier.type}`);
     }
