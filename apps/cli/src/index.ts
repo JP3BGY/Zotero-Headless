@@ -2984,12 +2984,19 @@ For more info: https://github.com/altairwei/Zotero-Headless
   {
     name: 'shell',
     aliases: ['sh', 'repl', 'interactive', 'i'],
-    description: 'Start interactive shell. Aliases: sh, repl, interactive, i',
-    execute: async () => {
+    description: 'Start interactive shell. Use --lang=en or --lang=zh to set language.',
+    execute: async (args: string[]) => {
       const { spawn } = await import('child_process');
       const { fileURLToPath } = await import('url');
       const { dirname, join } = await import('path');
       const { existsSync } = await import('fs');
+
+      // Parse --lang argument
+      let lang: string | undefined;
+      const langArg = args.find(arg => arg.startsWith('--lang='));
+      if (langArg) {
+        lang = langArg.split('=')[1];
+      }
 
       // Find shell path - try multiple locations
       let shellPath: string | null = null;
@@ -3050,7 +3057,11 @@ For more info: https://github.com/altairwei/Zotero-Headless
       try {
         const child = spawn('node', [shellPath], {
           stdio: 'inherit',
-          shell: false
+          shell: false,
+          env: {
+            ...process.env,
+            ZOTERO_LANG: lang || getLanguage()
+          }
         });
 
         child.on('exit', (code) => {

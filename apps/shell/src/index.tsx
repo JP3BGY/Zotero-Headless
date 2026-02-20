@@ -15,6 +15,74 @@ import {
   type ItemInfo
 } from './commands.js';
 
+// i18n support - read language from environment
+const lang = process.env.ZOTERO_LANG || 'zh';
+const isEnglish = lang === 'en';
+
+// Translations
+const t = {
+  welcome: isEnglish ? '📚 Zotero Shell v1.0.0' : '📚 Zotero Shell v1.0.0',
+  subtitle: isEnglish ? 'Type "help" for commands, or "exit" to quit' : '输入 "help" 查看可用命令，或 "exit" 退出',
+  shortcuts: isEnglish ? 'Tab to autocomplete, ↑/↓ for history, Ctrl+C to quit' : 'Tab to autocomplete, ↑/↓ for history, Ctrl+C to quit',
+  scrollHint: isEnglish ? '... Press PageDown to scroll ...' : '... 按 PageDown 滚动 ...',
+  executing: isEnglish ? 'Executing...' : '执行中...',
+  moreMatches: (n: number) => isEnglish ? `... ${n} more matches` : `... 还有 ${n} 个匹配`,
+  goodbye: isEnglish ? '👋 Goodbye!' : '👋 再见!',
+  help: isEnglish ? `
+📚 Zotero Shell Help
+
+Item Management:
+  ls, list                List items
+  search <keywords>       Search items
+  add                     Add new item
+  rm <key>                Delete item
+  show <key>              Show details
+  update <key>            Update item
+
+Sync & Storage:
+  sync, s                 Sync data
+  webdav                  WebDAV management
+
+Others:
+  stats                   Statistics
+  verify                  Verify API key
+  config                  Configuration
+  help                    Show help
+  exit, quit              Exit shell
+
+Shortcuts:
+  ↑/↓                     Browse history
+  Tab                     Autocomplete
+  Ctrl+C                  Exit
+      `.trim() : `
+📚 Zotero Shell 帮助
+
+文献管理:
+  ls, list                列出文献
+  search <关键词>          搜索文献
+  add                     添加新文献
+  rm <key>                删除文献
+  show <key>              查看详情
+  update <key>            更新文献
+
+同步与存储:
+  sync, s                 同步数据
+  webdav                  WebDAV 管理
+
+其他:
+  stats                   统计信息
+  verify                  验证 API 密钥
+  config                  配置管理
+  help                    显示帮助
+  exit, quit              退出 shell
+
+快捷键:
+  ↑/↓                     浏览历史命令
+  Tab                     自动补全
+  Ctrl+C                  退出
+      `.trim(),
+};
+
 // 历史管理类
 class HistoryManager {
   private history: string[] = [];
@@ -87,33 +155,7 @@ class ZoteroExecutor {
     this.builtinCommands.set('q', async () => 'EXIT');
 
     this.builtinCommands.set('help', async () => {
-      return `
-📚 Zotero Shell 帮助
-
-文献管理:
-  ls, list                列出文献
-  search <关键词>          搜索文献
-  add                     添加新文献
-  rm <key>                删除文献
-  show <key>              查看详情
-  update <key>            更新文献
-
-同步与存储:
-  sync, s                 同步数据
-  webdav                  WebDAV 管理
-
-其他:
-  stats                   统计信息
-  verify                  验证 API 密钥
-  config                  配置管理
-  help                    显示帮助
-  exit, quit              退出 shell
-
-快捷键:
-  ↑/↓                     浏览历史命令
-  Tab                     自动补全
-  Ctrl+C                  退出
-      `.trim();
+      return t.help;
     });
   }
 
@@ -239,7 +281,7 @@ export function ZoteroShell() {
       });
 
       if (result.content === 'EXIT') {
-        addLine('info', '👋 再见!');
+        addLine('info', t.goodbye);
         setTimeout(() => exit(), 500);
         setIsExecuting(false);
         return;
@@ -379,13 +421,13 @@ export function ZoteroShell() {
     <Box flexDirection="column" height="100%">
       {/* 1. 欢迎消息 - 固定在顶部 */}
       <Box flexDirection="column">
-        <Text color="yellow">📚 Zotero Shell v1.0.0</Text>
-        <Text color="gray">输入 "help" 查看可用命令，或 "exit" 退出</Text>
+        <Text color="yellow">{t.welcome}</Text>
+        <Text color="gray">{t.subtitle}</Text>
       </Box>
 
       {/* 2. 快捷键提示 */}
       <Box>
-        <Text color="gray">Tab to autocomplete, ↑/↓ for history, Ctrl+C to quit</Text>
+        <Text color="gray">{t.shortcuts}</Text>
       </Box>
 
       {/* 3. 分隔线 */}
@@ -411,7 +453,7 @@ export function ZoteroShell() {
           </Box>
         ))}
         {scrollOffset > 0 && (
-          <Text color="gray">... 按 PageDown 滚动 ...</Text>
+          <Text color="gray">{t.scrollHint}</Text>
         )}
       </Box>
 
@@ -446,7 +488,7 @@ export function ZoteroShell() {
             }
           }} />
         )}
-        {isExecuting && <Text color="gray">执行中...</Text>}
+        {isExecuting && <Text color="gray">{t.executing}</Text>}
       </Box>
 
       {/* 6. 补全列表 - 固定3行在最底部 */}
@@ -463,7 +505,7 @@ export function ZoteroShell() {
             ))}
             {suggestions.length > 3 && (
               <Box>
-                <Text color="gray">  ... 还有 {suggestions.length - 3} 个匹配</Text>
+                <Text color="gray">  {t.moreMatches(suggestions.length - 3)}</Text>
               </Box>
             )}
           </>
@@ -481,7 +523,7 @@ export function ZoteroShell() {
             ))}
             {itemKeySuggestions.length > 3 && (
               <Box>
-                <Text color="gray">  ... 还有 {itemKeySuggestions.length - 3} 个匹配</Text>
+                <Text color="gray">  {t.moreMatches(itemKeySuggestions.length - 3)}</Text>
               </Box>
             )}
           </>
