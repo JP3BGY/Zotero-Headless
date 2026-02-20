@@ -471,6 +471,19 @@ export class SyncManager extends EventEmitter {
           }
         }
 
+        // Parse tags if it's a string (stored as JSON in DB, needs to be array for API)
+        if (typeof data.tags === 'string') {
+          try {
+            data.tags = JSON.parse(data.tags);
+          } catch (e) {
+            data.tags = [];
+          }
+        }
+        // Ensure tags is always an array
+        if (!Array.isArray(data.tags)) {
+          data.tags = [];
+        }
+
         // Remove metadata fields that shouldn't be sent
         // For 'key'-based writes, we must include 'version' property
         // CRITICAL: Never delete key for deleted items - they need it for the delete API call

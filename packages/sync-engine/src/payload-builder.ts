@@ -61,6 +61,19 @@ export class PayloadBuilder {
       }
     }
     
+    // Parse tags if needed (stored as JSON string in DB, needs to be array for API)
+    if (typeof data.tags === 'string') {
+      try {
+        data.tags = JSON.parse(data.tags);
+      } catch {
+        data.tags = [];
+      }
+    }
+    // Ensure tags is always an array
+    if (!Array.isArray(data.tags)) {
+      data.tags = [];
+    }
+    
     // Map publicationDate to date (Zotero API uses 'date')
     if (data.publicationDate) {
       data.date = data.publicationDate;
