@@ -546,22 +546,37 @@ export class SyncManager extends EventEmitter {
 
         if (item.deleted) {
           // Delete from remote
+          let deletedFromRemote = false;
           try {
             await this.apiClient.deleteItem(zoteroId, item.key, item.version, libraryType);
             console.log(`   🗑️  Deleted ${item.key} from remote`);
+            deletedFromRemote = true;
           } catch (e: any) {
             if (e.message?.includes('404')) {
               // Item already deleted on remote, treat as success
               console.log(`   🗑️  Item ${item.key} already deleted on remote (404)`);
+              deletedFromRemote = true;
+            } else if (e.message?.includes('412') || e.statusCode === 412) {
+              // Version conflict - remote has been modified
+              console.log(`   ⚠️  Conflict: ${item.key} (remote modified, cannot delete)`);
+              conflicts.push({
+                itemKey: item.key,
+                localVersion: item.version,
+                remoteVersion: item.version + 1, // Assume remote is newer
+                localItem: item,
+                remoteItem: null,
+              });
             } else {
               throw e; // Re-throw other errors
             }
           }
           // Also delete from local DB after successful remote deletion
-          await this.db.delete(items)
-            .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
-            .run();
-          deleted++;
+          if (deletedFromRemote) {
+            await this.db.delete(items)
+              .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
+              .run();
+            deleted++;
+          }
         } else if (item.version === 0) {
           // Create new item
           console.log(`   📤 Uploading new item with key: ${data.key || '(none)'}`);
