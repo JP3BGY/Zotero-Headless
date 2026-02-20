@@ -559,13 +559,7 @@ export class SyncManager extends EventEmitter {
             } else if (e.message?.includes('412') || e.statusCode === 412) {
               // Version conflict - remote has been modified
               console.log(`   ⚠️  Conflict: ${item.key} (remote modified, cannot delete)`);
-              conflicts.push({
-                itemKey: item.key,
-                localVersion: item.version,
-                remoteVersion: item.version + 1, // Assume remote is newer
-                localItem: item,
-                remoteItem: null,
-              });
+              conflicts.push(item.key);
             } else {
               throw e; // Re-throw other errors
             }
