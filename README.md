@@ -17,6 +17,28 @@ pnpm build
 
 # 首次同步
 pnpm start sync
+
+# 启动交互式 shell（推荐日常使用）
+pnpm start shell
+```
+
+## 常用命令
+
+```bash
+# 交互式 Shell（带命令补全）
+zotero shell
+
+# 同步
+zotero sync
+
+# 列出文献
+zotero list
+
+# 搜索
+zotero search "关键词"
+
+# 添加文献
+zotero add-by-id "10.1038/nature23477"
 ```
 
 ## 文档导航
@@ -36,7 +58,9 @@ pnpm start sync
 
 ```
 zotero-headless/
-├── apps/cli/              # CLI 入口
+├── apps/
+│   ├── cli/              # CLI 入口
+│   └── shell/            # 交互式 Shell (REPL)
 ├── packages/
 │   ├── api/              # Zotero API 客户端
 │   ├── core/             # 核心配置
@@ -50,6 +74,7 @@ zotero-headless/
 ## 核心功能
 
 - **双向同步** - 本地 SQLite 与 Zotero 云端自动同步
+- **交互式 Shell** - REPL 模式，支持命令补全和历史记录
 - **群组库支持** - 同步 Zotero Groups
 - **附件同步** - WebDAV 文件同步
 - **多语言** - 中英文界面切换

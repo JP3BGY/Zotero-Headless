@@ -50,6 +50,7 @@
 | **配置文件** | ✅ | `~/.zoterrc` 用户偏好设置 |
 | **历史记录** | ✅ | 追踪最近使用的条目和命令 |
 | **自动补全** | ✅ | bash/zsh 命令补全支持 |
+| **交互式 Shell** | ✅ | REPL 模式，支持命令补全和历史记录 |
 | **i18n** | ✅ | 中英文界面切换 |
 
 ---
@@ -628,6 +629,72 @@ zotero sync
 ```
 
 > ⚠️ **重要**：`update` 和 `delete` 命令只修改本地数据库，需要运行 `zotero sync` 才能将更改同步到远程。这样可以避免直接操作远程导致的版本冲突。
+
+---
+
+## 交互式 Shell
+
+Zotero-Headless 提供交互式 REPL Shell 模式，提供更流畅的操作体验。
+
+### 启动 Shell
+
+```bash
+# 启动交互式 shell
+zotero shell
+zotero sh
+zotero i
+
+# 设置语言
+zotero shell --lang=en    # 英文界面
+zotero shell --lang=zh    # 中文界面（默认）
+```
+
+### Shell 特性
+
+| 特性 | 说明 |
+|------|------|
+| **命令补全** | Tab 键自动补全命令和 Item Key |
+| **Item Key 补全** | 输入 `rm `、`get ` 等命令后自动补全文献 Key |
+| **历史记录** | ↑/↓ 键浏览历史命令 |
+| **实时输出** | 同步进度实时显示 |
+| **错误处理** | 网络错误友好提示，不中断会话 |
+
+### Shell 快捷键
+
+| 快捷键 | 功能 |
+|--------|------|
+| `Tab` | 自动补全命令或 Item Key |
+| `↑` / `↓` | 浏览历史命令 |
+| `Ctrl+C` | 退出 shell |
+| `PageUp` / `PageDown` | 滚动查看历史输出 |
+
+### Shell 命令示例
+
+```bash
+# 进入 shell
+$ zotero shell
+📚 Zotero Shell v1.0.0
+输入 "help" 查看可用命令，或 "exit" 退出
+Tab to autocomplete, ↑/↓ for history, Ctrl+C to quit
+
+# 在 shell 中执行命令
+> ls                    # 列出文献
+> search 深度学习        # 搜索文献
+> get ABCD1234          # 查看详情
+> rm ABCD<Tab>          # 自动补全 Item Key
+> sync                  # 同步数据
+> help                  # 显示帮助
+> exit                  # 退出 shell
+```
+
+### Shell vs CLI 模式对比
+
+| 场景 | 推荐模式 | 原因 |
+|------|----------|------|
+| 批量操作 | CLI | 脚本化，可自动化 |
+| 探索/查询 | Shell | 交互式补全，更流畅 |
+| 日常管理 | Shell | 减少输入，有历史记录 |
+| CI/CD 集成 | CLI | 非交互式，便于集成 |
 
 ---
 
