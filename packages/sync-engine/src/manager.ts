@@ -559,7 +559,38 @@ export class SyncManager extends EventEmitter {
             } else if (e.message?.includes('412') || e.statusCode === 412) {
               // Version conflict - remote has been modified
               console.log(`   ⚠️  Conflict: ${item.key} (remote modified, cannot delete)`);
-              conflicts.push(item.key);
+              
+              if (this.config.conflictStrategy === 'remote') {
+                // Cancel local delete, will re-fetch on next sync
+                try {
+                  await this.db.update(items)
+                    .set({ deleted: 0, synced: 0 })
+                    .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
+                    .run();
+                  console.log(`   ✅ Cancelled delete for ${item.key}, will re-fetch remote version`);
+                } catch (cancelError) {
+                  console.error(`   ❌ Failed to cancel delete for ${item.key}:`, cancelError);
+                  conflicts.push(item.key);
+                }
+              } else if (this.config.conflictStrategy === 'local') {
+                // Try to delete with latest version
+                try {
+                  const remoteItem = await this.apiClient.getItem(zoteroId, item.key, libraryType);
+                  const remoteVersion = remoteItem?.data?.version || item.version;
+                  await this.apiClient.deleteItem(zoteroId, item.key, remoteVersion, libraryType);
+                  await this.db.delete(items)
+                    .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
+                    .run();
+                  console.log(`   🗑️  Force deleted ${item.key} from remote`);
+                  deleted++;
+                } catch (forceError) {
+                  console.error(`   ❌ Failed to force delete ${item.key}:`, forceError);
+                  conflicts.push(item.key);
+                }
+              } else {
+                // Manual mode
+                conflicts.push(item.key);
+              }
             } else {
               throw e; // Re-throw other errors
             }
@@ -658,8 +689,37 @@ export class SyncManager extends EventEmitter {
       } catch (e: any) {
         if (e.message?.includes('412')) {
           // Conflict - remote was modified
-          conflicts.push(item.key);
           console.log(`   ⚠️  Conflict for ${item.key} (remote modified)`);
+          
+          if (this.config.conflictStrategy === 'remote') {
+            // Fetch remote version and apply to local
+            try {
+              const remoteItem = await this.apiClient.getItem(zoteroId, item.key, libraryType);
+              if (remoteItem) {
+                await this.upsertItem(remoteItem, libraryId);
+                console.log(`   ✅ Applied remote version for ${item.key}`);
+              }
+            } catch (fetchError) {
+              console.error(`   ❌ Failed to fetch remote version for ${item.key}:`, fetchError);
+              conflicts.push(item.key);
+            }
+          } else if (this.config.conflictStrategy === 'local') {
+            // Force update with latest version from server
+            try {
+              const remoteItem = await this.apiClient.getItem(zoteroId, item.key, libraryType);
+              const remoteVersion = remoteItem?.data?.version || item.version;
+              await this.apiClient.updateItem(zoteroId, item.key, data, remoteVersion, libraryType);
+              await this.markAsSynced(item.key, libraryId);
+              console.log(`   ✅ Force updated ${item.key} with local changes`);
+              updated++;
+            } catch (forceError) {
+              console.error(`   ❌ Failed to force update ${item.key}:`, forceError);
+              conflicts.push(item.key);
+            }
+          } else {
+            // Manual mode - record conflict for interactive resolution
+            conflicts.push(item.key);
+          }
         } else {
           errors.push(`Upload ${item.key} failed: ${e}`);
         }
