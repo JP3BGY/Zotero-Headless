@@ -155,6 +155,14 @@ await esbuild.build({
   jsx: 'transform',
   jsxFactory: 'React.createElement',
   jsxFragment: 'React.Fragment',
+  banner: {
+    js: [
+      // Inject CJS compatibility for ESM bundle: create a require() function
+      // so that bundled CJS code (and dynamic require calls) work correctly
+      "import { createRequire as __bundleCreateRequire } from 'module';",
+      "const require = __bundleCreateRequire(import.meta.url);",
+    ].join('\n'),
+  },
   minify: false,
   sourcemap: false,
 });
@@ -163,12 +171,17 @@ await esbuild.build({
 const { readFileSync: readFS, writeFileSync: writeFS } = await import('fs');
 const outputFile = join(outputDir, 'shell.mjs');
 let content = readFS(outputFile, 'utf-8');
-// Remove any existing shebangs
-content = content.replace(/^(#!.*\n)*/g, '');
-// Fix CJS `require.main === module` checks that don't work in ESM
-// These come from CLI code that checks if it's run directly vs imported
+
+// 1. Remove any shebangs from source files (esbuild may preserve them)
+//    But keep the banner lines (import createRequire, const require)
+const lines = content.split('\n');
+const cleanedLines = lines.filter(line => !line.startsWith('#!'));
+content = cleanedLines.join('\n');
+
+// 2. Fix CJS `require.main === module` checks that don't work in ESM
 content = content.replace(/if\s*\(__require\.main\s*===\s*module\)\s*\{[^}]*\}/g, '/* require.main check removed for ESM bundle */');
-// Add single shebang
+
+// 3. Add single shebang at the very top
 content = '#!/usr/bin/env node\n' + content;
 writeFS(outputFile, content);
 
