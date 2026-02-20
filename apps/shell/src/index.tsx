@@ -360,13 +360,14 @@ export function ZoteroShell() {
     }
   });
 
-  // 计算可见行（排除输入区域占用的空间）
+  // 计算可见行（排除固定高度的补全区域和输入行）
   const visibleHeight = containerRef.current.height;
   const welcomeHeight = 2; // 欢迎消息占 2 行
-  // 补全区域：命令补全1行，item key补全最多2行
-  const completionHeight = suggestions.length > 0 ? 1 : (itemKeySuggestions.length > 0 ? 2 : 0);
-  const inputAreaHeight = 2 + completionHeight; // 提示行 + 输入行 + 补全区域
-  const outputHeight = Math.max(1, visibleHeight - inputAreaHeight - welcomeHeight);
+  const shortcutHeight = 1; // 快捷键提示占 1 行
+  const dividerHeight = lines.length > 0 ? 1 : 0; // 分隔线
+  const completionHeight = (suggestions.length > 0 || itemKeySuggestions.length > 0) ? 3 : 0; // 补全区域固定3行
+  const inputHeight = 1; // 输入行固定1行
+  const outputHeight = Math.max(1, visibleHeight - welcomeHeight - shortcutHeight - dividerHeight - completionHeight - inputHeight);
 
   const visibleLines = lines.slice(
     Math.max(0, lines.length - outputHeight - scrollOffset),
@@ -393,7 +394,7 @@ export function ZoteroShell() {
         </Box>
       )}
 
-      {/* 历史输出区域 - 占据剩余空间 */}
+      {/* 历史输出区域 - 占据剩余空间（减去固定的补全区域） */}
       <Box flexDirection="column" flexGrow={1} overflow="hidden">
         {visibleLines.map((item) => (
           <Box key={item.id}>
@@ -412,6 +413,45 @@ export function ZoteroShell() {
           <Text color="gray">... 按 PageDown 滚动 ...</Text>
         )}
       </Box>
+
+      {/* 【固定位置】命令建议列表 - 最多3行 */}
+      {suggestions.length > 0 && !isExecuting && (
+        <Box flexDirection="column" height={3} overflow="hidden">
+          {suggestions.slice(0, 3).map((suggestion) => (
+            <Box key={suggestion.name}>
+              <Text color="gray">  </Text>
+              <Text color="green" bold>{suggestion.name.padEnd(12)}</Text>
+              <Text color="gray">{suggestion.description.substring(0, 50)}</Text>
+              {suggestion.description.length > 50 && <Text color="gray">...</Text>}
+            </Box>
+          ))}
+          {suggestions.length > 3 && (
+            <Box>
+              <Text color="gray">  ... 还有 {suggestions.length - 3} 个匹配</Text>
+            </Box>
+          )}
+        </Box>
+      )}
+
+      {/* 【固定位置】Item Key 建议列表 - 最多3行 */}
+      {itemKeySuggestions.length > 0 && !isExecuting && (
+        <Box flexDirection="column" height={3} overflow="hidden">
+          {itemKeySuggestions.slice(0, 3).map((item) => (
+            <Box key={item.key}>
+              <Text color="gray">  </Text>
+              <Text color="cyan" bold>{item.key.padEnd(12)}</Text>
+              <Text color="white">{item.title.substring(0, 40)}</Text>
+              {item.title.length > 40 && <Text color="gray">...</Text>}
+              <Text color="gray"> ({item.itemType})</Text>
+            </Box>
+          ))}
+          {itemKeySuggestions.length > 3 && (
+            <Box>
+              <Text color="gray">  ... 还有 {itemKeySuggestions.length - 3} 个匹配</Text>
+            </Box>
+          )}
+        </Box>
+      )}
 
       {/* 输入框 - 固定在底部 */}
       <Box>
@@ -446,59 +486,6 @@ export function ZoteroShell() {
         )}
         {isExecuting && <Text color="gray">执行中...</Text>}
       </Box>
-
-      {/* 命令建议列表 - 单行横向显示 */}
-      {suggestions.length > 0 && !isExecuting && (
-        <Box>
-          <Text color="gray">  </Text>
-          {suggestions.map((suggestion, index) => (
-            <Text key={suggestion.name}>
-              <Text color={index === 0 ? "green" : "gray"} bold={index === 0}>
-                {suggestion.name}
-              </Text>
-              {index < suggestions.length - 1 && (
-                <Text color="gray">  </Text>
-              )}
-            </Text>
-          ))}
-          {suggestions.length >= 8 && (
-            <Text color="gray"> ...</Text>
-          )}
-        </Box>
-      )}
-
-      {/* Item Key 建议列表 - 单行横向显示 */}
-      {itemKeySuggestions.length > 0 && !isExecuting && (
-        <Box flexDirection="column">
-          {/* 第一行：keys */}
-          <Box>
-            <Text color="gray">  </Text>
-            {itemKeySuggestions.slice(0, 5).map((item, index) => (
-              <Text key={item.key}>
-                <Text color={index === 0 ? "cyan" : "gray"} bold={index === 0}>
-                  {item.key}
-                </Text>
-                {index < Math.min(itemKeySuggestions.length, 5) - 1 && (
-                  <Text color="gray">  </Text>
-                )}
-              </Text>
-            ))}
-            {itemKeySuggestions.length > 5 && (
-              <Text color="gray"> ...</Text>
-            )}
-          </Box>
-          {/* 第二行：当前选中项的详细信息 */}
-          {itemKeySuggestions.length > 0 && (
-            <Box>
-              <Text color="gray">  </Text>
-              <Text color="gray" dimColor>
-                {itemKeySuggestions[0].title.substring(0, 50)}
-                {itemKeySuggestions[0].title.length > 50 ? '...' : ''}
-              </Text>
-            </Box>
-          )}
-        </Box>
-      )}
     </Box>
   );
 }
