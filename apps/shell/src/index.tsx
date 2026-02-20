@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { render, Box, Text, useApp, useInput, useStdout } from 'ink';
+import { render, Box, Text, useApp, useInput, useStdout, Spacer } from 'ink';
 import TextInput from 'ink-text-input';
 import { 
   executeCommand, 
   getAvailableCommands, 
+  getCommandDescriptions,
   parseCommand,
   highlightSearchResult,
   type ExecuteResult 
@@ -51,11 +52,19 @@ type OutputLine = {
   id: number;
 };
 
+// 命令补全项
+type CommandSuggestion = {
+  name: string;
+  description: string;
+};
+
 // Zotero 命令执行器
 class ZoteroExecutor {
   private builtinCommands: Map<string, (args: string[]) => Promise<string>> = new Map();
+  private commandDescriptions: Map<string, string>;
 
   constructor() {
+    this.commandDescriptions = getCommandDescriptions();
     this.registerBuiltinCommands();
   }
 
@@ -137,8 +146,14 @@ class ZoteroExecutor {
     }
   }
 
-  getCompletions(partial: string): string[] {
-    return getAvailableCommands().filter(c => c.startsWith(partial.toLowerCase()));
+  getCompletions(partial: string): CommandSuggestion[] {
+    const allCommands = getAvailableCommands();
+    const matches = allCommands.filter(c => c.startsWith(partial.toLowerCase()));
+    
+    return matches.map(name => ({
+      name,
+      description: this.commandDescriptions.get(name) || ''
+    }));
   }
 }
 
@@ -147,17 +162,14 @@ export function ZoteroShell() {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [input, setInput] = useState('');
-  const [lines, setLines] = useState<OutputLine[]>([
-    { type: 'info', content: '📚 Zotero Shell v1.0.0', id: 0 },
-    { type: 'info', content: '输入 "help" 查看可用命令，或 "exit" 退出\n', id: 1 }
-  ]);
-  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [lines, setLines] = useState<OutputLine[]>([]);
+  const [suggestions, setSuggestions] = useState<CommandSuggestion[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
   const [scrollOffset, setScrollOffset] = useState(0);
   
   const historyManager = useRef(new HistoryManager());
   const executor = useRef(new ZoteroExecutor());
-  const lineIdCounter = useRef(2);
+  const lineIdCounter = useRef(0);
   const containerRef = useRef<{ height: number }>({ height: 20 });
 
   // 获取终端高度
@@ -184,40 +196,49 @@ export function ZoteroShell() {
 
     setIsExecuting(true);
     historyManager.current.add(cmd);
-    addLine('input', `zotero> ${cmd}`);
+    addLine('input', `> ${cmd}`);
 
-    const result = await executor.current.execute(cmd, (chunk) => {
-      // 实时输出
-      addLine('output', chunk);
-    });
+    // 用于追踪是否有实时输出
+    let hasRealtimeOutput = false;
 
-    if (result.content === 'EXIT') {
-      addLine('info', '👋 再见!');
-      setTimeout(() => exit(), 500);
-      setIsExecuting(false);
-      return;
-    }
+    try {
+      const result = await executor.current.execute(cmd, (chunk) => {
+        // 实时输出
+        if (chunk && chunk.trim()) {
+          hasRealtimeOutput = true;
+          addLine('output', chunk);
+        }
+      });
 
-    if (result.content === 'CLEAR') {
-      setLines([
-        { type: 'info', content: '📚 Zotero Shell v1.0.0', id: lineIdCounter.current++ },
-        { type: 'info', content: '屏幕已清除\n', id: lineIdCounter.current++ }
-      ]);
+      if (result.content === 'EXIT') {
+        addLine('info', '👋 再见!');
+        setTimeout(() => exit(), 500);
+        setIsExecuting(false);
+        return;
+      }
+
+      if (result.content === 'CLEAR') {
+        setLines([]);
+        setInput('');
+        setSuggestions([]);
+        setIsExecuting(false);
+        return;
+      }
+
+      // 只有在没有实时输出时才显示结果内容
+      if (result.content && !hasRealtimeOutput) {
+        const lineType: OutputLine['type'] = result.type === 'success' ? 'output' : 
+                                            result.type === 'builtin' ? 'info' : 'error';
+        addLine(lineType, result.content);
+      }
+    } catch (error) {
+      addLine('error', `❌ 执行错误: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      // 确保状态总是重置
       setInput('');
       setSuggestions([]);
       setIsExecuting(false);
-      return;
     }
-
-    if (result.content) {
-      const lineType: OutputLine['type'] = result.type === 'success' ? 'output' : 
-                                          result.type === 'builtin' ? 'info' : 'error';
-      addLine(lineType, result.content);
-    }
-
-    setInput('');
-    setSuggestions([]);
-    setIsExecuting(false);
   }, [exit, isExecuting, addLine]);
 
   useInput((value, key) => {
@@ -260,33 +281,94 @@ export function ZoteroShell() {
     if (key.tab) {
       const comps = executor.current.getCompletions(input);
       if (comps.length === 1) {
-        setInput(comps[0] + ' ');
+        setInput(comps[0].name + ' ');
         setSuggestions([]);
-      } else if (comps.length > 1) {
+      } else if (comps.length > 0) {
         setSuggestions(comps);
       }
       return;
     }
 
     // 更新自动补全建议
-    if (value && !key.tab) {
-      const comps = executor.current.getCompletions(input + value);
-      setSuggestions(comps.slice(0, 5));
-    } else if (!input && !value) {
+    const newInput = input + value;
+    if (newInput && !key.tab && !key.return) {
+      const comps = executor.current.getCompletions(newInput);
+      setSuggestions(comps.slice(0, 8)); // 最多显示 8 个建议
+    } else if (!newInput) {
       setSuggestions([]);
     }
   });
 
-  // 计算可见行
+  // 计算可见行（排除输入区域占用的空间）
   const visibleHeight = containerRef.current.height;
+  const welcomeHeight = 2; // 欢迎消息占 2 行
+  const inputAreaHeight = 2 + (suggestions.length > 0 ? Math.min(suggestions.length, 8) + 1 : 0); // 提示行 + 输入行 + 建议列表
+  const outputHeight = Math.max(1, visibleHeight - inputAreaHeight - welcomeHeight);
+  
   const visibleLines = lines.slice(
-    Math.max(0, lines.length - visibleHeight - scrollOffset),
+    Math.max(0, lines.length - outputHeight - scrollOffset),
     lines.length - scrollOffset
   );
 
+  // 计算最长命令名长度，用于对齐
+  const maxCommandLength = suggestions.length > 0 
+    ? Math.max(...suggestions.map(s => s.name.length))
+    : 0;
+
   return (
     <Box flexDirection="column" height="100%">
-      {/* 历史输出区域 - 可滚动 */}
+      {/* 欢迎消息 - 固定在顶部 */}
+      <Box flexDirection="column" marginBottom={0}>
+        <Text color="yellow">📚 Zotero Shell v1.0.0</Text>
+        <Text color="gray">输入 "help" 查看可用命令，或 "exit" 退出</Text>
+      </Box>
+
+      {/* 快捷键提示 */}
+      <Box marginBottom={0}>
+        <Text color="gray">Tab to autocomplete, ↑/↓ for history, Ctrl+C to quit</Text>
+      </Box>
+
+      {/* 输入框 */}
+      <Box>
+        <Text color={isExecuting ? "gray" : "cyan"}>
+          {isExecuting ? "⏳ " : "> "}
+        </Text>
+        {!isExecuting && (
+          <TextInput value={input} onChange={(value) => {
+            setInput(value);
+            // 实时更新建议
+            if (value) {
+              const comps = executor.current.getCompletions(value);
+              setSuggestions(comps.slice(0, 8));
+            } else {
+              setSuggestions([]);
+            }
+          }} />
+        )}
+        {isExecuting && <Text color="gray">执行中...</Text>}
+      </Box>
+
+      {/* 命令建议列表 */}
+      {suggestions.length > 0 && !isExecuting && (
+        <Box flexDirection="column" marginTop={0} marginBottom={1}>
+          {suggestions.map((suggestion, index) => (
+            <Box key={suggestion.name}>
+              <Text color="gray">  </Text>
+              <Text color="green" bold>{suggestion.name.padEnd(maxCommandLength + 2)}</Text>
+              <Text color="gray">{suggestion.description}</Text>
+            </Box>
+          ))}
+        </Box>
+      )}
+
+      {/* 分隔线 */}
+      {lines.length > 2 && (
+        <Box marginY={0}>
+          <Text color="gray">{''.padEnd(60, '─')}</Text>
+        </Box>
+      )}
+
+      {/* 历史输出区域 */}
       <Box flexDirection="column" flexGrow={1} overflow="hidden">
         {visibleLines.map((item) => (
           <Box key={item.id}>
@@ -303,23 +385,6 @@ export function ZoteroShell() {
         ))}
         {scrollOffset > 0 && (
           <Text color="gray">... 按 PageDown 滚动 ...</Text>
-        )}
-      </Box>
-
-      {/* 建议区域 */}
-      {suggestions.length > 0 && !isExecuting && (
-        <Box flexDirection="column" marginBottom={1}>
-          <Text color="gray">建议: {suggestions.join(', ')}</Text>
-        </Box>
-      )}
-
-      {/* 输入区域 */}
-      <Box>
-        <Text color={isExecuting ? "gray" : "cyan"}>
-          {isExecuting ? "⏳ 执行中..." : "zotero> "}
-        </Text>
-        {!isExecuting && (
-          <TextInput value={input} onChange={setInput} />
         )}
       </Box>
     </Box>

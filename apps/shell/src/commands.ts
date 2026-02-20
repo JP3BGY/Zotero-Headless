@@ -56,20 +56,30 @@ export interface ExecuteResult {
 }
 
 // 捕获 console 输出
-function captureConsoleOutput(fn: () => Promise<void>): Promise<ExecuteResult> {
+function captureConsoleOutput(fn: () => Promise<void>, onOutput?: (data: string) => void): Promise<ExecuteResult> {
   const originalLog = console.log;
   const originalError = console.error;
   let stdout = '';
   let stderr = '';
 
   console.log = (...args: any[]) => {
-    stdout += args.map(a => String(a)).join(' ') + '\n';
+    const line = args.map(a => String(a)).join(' ') + '\n';
+    stdout += line;
     originalLog.apply(console, args);
+    // 实时输出
+    if (onOutput) {
+      onOutput(line);
+    }
   };
 
   console.error = (...args: any[]) => {
-    stderr += args.map(a => String(a)).join(' ') + '\n';
+    const line = args.map(a => String(a)).join(' ') + '\n';
+    stderr += line;
     originalError.apply(console, args);
+    // 实时输出错误
+    if (onOutput) {
+      onOutput(line);
+    }
   };
 
   return fn()
@@ -109,15 +119,41 @@ export async function executeCommand(
     };
   }
 
-  // 执行命令并捕获输出
-  const result = await captureConsoleOutput(() => command.execute(args));
-  
-  // 如果有实时输出回调，发送 stdout
-  if (onOutput && result.stdout) {
-    onOutput(result.stdout);
-  }
+  // 执行命令并捕获输出（实时输出通过 onOutput）
+  const result = await captureConsoleOutput(() => command.execute(args), onOutput);
   
   return result;
+}
+
+/**
+ * 获取命令描述信息（用于自动补全显示）
+ */
+export function getCommandDescriptions(): Map<string, string> {
+  const descriptions = new Map<string, string>();
+  
+  // 内置命令
+  descriptions.set('help', '显示帮助信息');
+  descriptions.set('exit', '退出 shell');
+  descriptions.set('quit', '退出 shell');
+  descriptions.set('q', '退出 shell');
+  descriptions.set('clear', '清除屏幕');
+  descriptions.set('cls', '清除屏幕');
+  
+  // 从 CLI 命令中提取描述
+  commands.forEach((cmd: Command) => {
+    // 提取简短描述（第一句）
+    const shortDesc = cmd.description.split('.')[0];
+    descriptions.set(cmd.name, shortDesc);
+    
+    // 为别名添加相同的描述
+    cmd.aliases?.forEach((alias: string) => {
+      if (!descriptions.has(alias)) {
+        descriptions.set(alias, shortDesc);
+      }
+    });
+  });
+  
+  return descriptions;
 }
 
 /**
