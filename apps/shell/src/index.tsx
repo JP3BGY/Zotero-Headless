@@ -2,9 +2,9 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { render, Box, Text, useApp, useInput, useStdout, Spacer } from 'ink';
 import TextInput from 'ink-text-input';
-import {
-  executeCommand,
-  getAvailableCommands,
+import { 
+  executeCommand, 
+  getAvailableCommands, 
   getCommandDescriptions,
   parseCommand,
   highlightSearchResult,
@@ -118,7 +118,7 @@ class ZoteroExecutor {
   }
 
   async execute(
-    input: string,
+    input: string, 
     onOutput?: (data: string) => void
   ): Promise<{ type: 'success' | 'error' | 'builtin'; content: string }> {
     const trimmed = input.trim();
@@ -135,34 +135,34 @@ class ZoteroExecutor {
     // 异步执行 zotero CLI
     try {
       const result = await executeCommand(cmd, args, onOutput);
-
+      
       // 检查是否有错误输出
       if (result.exitCode !== 0 && result.stderr) {
-        return {
-          type: 'error',
-          content: result.stderr
+        return { 
+          type: 'error', 
+          content: result.stderr 
         };
       }
-
+      
       // 如果是 search 命令，高亮关键词
       if ((cmd === 'search' || cmd === 'f' || cmd === 'find') && args.length > 0) {
         const highlighted = highlightSearchResult(result.stdout, args);
-        return {
-          type: result.exitCode === 0 ? 'success' : 'error',
+        return { 
+          type: result.exitCode === 0 ? 'success' : 'error', 
           content: highlighted || result.stderr || '无结果'
         };
       }
 
-      return {
-        type: result.exitCode === 0 ? 'success' : 'error',
+      return { 
+        type: result.exitCode === 0 ? 'success' : 'error', 
         content: result.stdout || result.stderr || '命令执行完成'
       };
     } catch (error) {
       // 捕获所有未处理的错误（网络错误、超时等）
       const errorMsg = error instanceof Error ? error.message : String(error);
       console.error('Command execution error:', error); // 调试日志
-      return {
-        type: 'error',
+      return { 
+        type: 'error', 
         content: `⚠️ 网络错误: ${errorMsg}\n请检查网络连接后重试。`
       };
     }
@@ -171,7 +171,7 @@ class ZoteroExecutor {
   getCompletions(partial: string): CommandSuggestion[] {
     const allCommands = getAvailableCommands();
     const matches = allCommands.filter(c => c.startsWith(partial.toLowerCase()));
-
+    
     return matches.map(name => ({
       name,
       description: this.commandDescriptions.get(name) || ''
@@ -255,7 +255,7 @@ export function ZoteroShell() {
 
       // 只有在没有实时输出时才显示结果内容
       if (result.content && !hasRealtimeOutput) {
-        const lineType: OutputLine['type'] = result.type === 'success' ? 'output' :
+        const lineType: OutputLine['type'] = result.type === 'success' ? 'output' : 
                                             result.type === 'builtin' ? 'info' : 'error';
         addLine(lineType, result.content);
       }
@@ -265,6 +265,7 @@ export function ZoteroShell() {
       // 确保状态总是重置
       setInput('');
       setSuggestions([]);
+      setItemKeySuggestions([]);
       setIsExecuting(false);
     }
   }, [exit, isExecuting, addLine]);
@@ -360,14 +361,14 @@ export function ZoteroShell() {
     }
   });
 
-  // 计算可见行（补全列表现在在输出区域内，不影响输入行位置）
+  // 计算可见行
   const visibleHeight = containerRef.current.height;
   const welcomeHeight = 2; // 欢迎消息占 2 行
   const shortcutHeight = 1; // 快捷键提示占 1 行
   const dividerHeight = lines.length > 0 ? 1 : 0; // 分隔线
   const inputHeight = 1; // 输入行固定1行
-  // 补全列表在输出区域内显示，不占用额外空间
-  const outputHeight = Math.max(1, visibleHeight - welcomeHeight - shortcutHeight - dividerHeight - inputHeight);
+  const completionHeight = 3; // 补全区域固定3行（在底部）
+  const outputHeight = Math.max(1, visibleHeight - welcomeHeight - shortcutHeight - dividerHeight - inputHeight - completionHeight);
 
   const visibleLines = lines.slice(
     Math.max(0, lines.length - outputHeight - scrollOffset),
@@ -376,27 +377,26 @@ export function ZoteroShell() {
 
   return (
     <Box flexDirection="column" height="100%">
-      {/* 欢迎消息 - 固定在顶部 */}
+      {/* 1. 欢迎消息 - 固定在顶部 */}
       <Box flexDirection="column">
         <Text color="yellow">📚 Zotero Shell v1.0.0</Text>
         <Text color="gray">输入 "help" 查看可用命令，或 "exit" 退出</Text>
       </Box>
 
-      {/* 快捷键提示 */}
+      {/* 2. 快捷键提示 */}
       <Box>
         <Text color="gray">Tab to autocomplete, ↑/↓ for history, Ctrl+C to quit</Text>
       </Box>
 
-      {/* 分隔线 */}
+      {/* 3. 分隔线 */}
       {lines.length > 0 && (
         <Box>
           <Text color="gray">{''.padEnd(60, '─')}</Text>
         </Box>
       )}
 
-      {/* 历史输出区域 - 占据剩余空间，补全列表作为内容的一部分显示在底部 */}
+      {/* 4. 历史输出区域 */}
       <Box flexDirection="column" flexGrow={1} overflow="hidden">
-        {/* 历史输出 */}
         {visibleLines.map((item) => (
           <Box key={item.id}>
             {item.type === 'input' ? (
@@ -413,48 +413,9 @@ export function ZoteroShell() {
         {scrollOffset > 0 && (
           <Text color="gray">... 按 PageDown 滚动 ...</Text>
         )}
-        
-        {/* 【在输出区域内】命令建议列表 */}
-        {suggestions.length > 0 && !isExecuting && (
-          <Box flexDirection="column" marginTop={1}>
-            {suggestions.slice(0, 3).map((suggestion) => (
-              <Box key={suggestion.name}>
-                <Text color="gray">  </Text>
-                <Text color="green" bold>{suggestion.name.padEnd(12)}</Text>
-                <Text color="gray">{suggestion.description.substring(0, 50)}</Text>
-                {suggestion.description.length > 50 && <Text color="gray">...</Text>}
-              </Box>
-            ))}
-            {suggestions.length > 3 && (
-              <Box>
-                <Text color="gray">  ... 还有 {suggestions.length - 3} 个匹配</Text>
-              </Box>
-            )}
-          </Box>
-        )}
-        
-        {/* 【在输出区域内】Item Key 建议列表 */}
-        {itemKeySuggestions.length > 0 && !isExecuting && (
-          <Box flexDirection="column" marginTop={1}>
-            {itemKeySuggestions.slice(0, 3).map((item) => (
-              <Box key={item.key}>
-                <Text color="gray">  </Text>
-                <Text color="cyan" bold>{item.key.padEnd(12)}</Text>
-                <Text color="white">{item.title.substring(0, 40)}</Text>
-                {item.title.length > 40 && <Text color="gray">...</Text>}
-                <Text color="gray"> ({item.itemType})</Text>
-              </Box>
-            ))}
-            {itemKeySuggestions.length > 3 && (
-              <Box>
-                <Text color="gray">  ... 还有 {itemKeySuggestions.length - 3} 个匹配</Text>
-              </Box>
-            )}
-          </Box>
-        )}
       </Box>
 
-      {/* 输入框 - 绝对固定在底部 */}
+      {/* 5. 输入行 */}
       <Box>
         <Text color={isExecuting ? "gray" : "cyan"}>
           {isExecuting ? "⏳ " : "> "}
@@ -486,6 +447,45 @@ export function ZoteroShell() {
           }} />
         )}
         {isExecuting && <Text color="gray">执行中...</Text>}
+      </Box>
+
+      {/* 6. 补全列表 - 固定3行在最底部 */}
+      <Box flexDirection="column" height={3} overflow="hidden">
+        {suggestions.length > 0 && !isExecuting && (
+          <>
+            {suggestions.slice(0, 3).map((suggestion) => (
+              <Box key={suggestion.name}>
+                <Text color="gray">  </Text>
+                <Text color="green" bold>{suggestion.name.padEnd(12)}</Text>
+                <Text color="gray">{suggestion.description.substring(0, 50)}</Text>
+                {suggestion.description.length > 50 && <Text color="gray">...</Text>}
+              </Box>
+            ))}
+            {suggestions.length > 3 && (
+              <Box>
+                <Text color="gray">  ... 还有 {suggestions.length - 3} 个匹配</Text>
+              </Box>
+            )}
+          </>
+        )}
+        {itemKeySuggestions.length > 0 && !isExecuting && (
+          <>
+            {itemKeySuggestions.slice(0, 3).map((item) => (
+              <Box key={item.key}>
+                <Text color="gray">  </Text>
+                <Text color="cyan" bold>{item.key.padEnd(12)}</Text>
+                <Text color="white">{item.title.substring(0, 40)}</Text>
+                {item.title.length > 40 && <Text color="gray">...</Text>}
+                <Text color="gray"> ({item.itemType})</Text>
+              </Box>
+            ))}
+            {itemKeySuggestions.length > 3 && (
+              <Box>
+                <Text color="gray">  ... 还有 {itemKeySuggestions.length - 3} 个匹配</Text>
+              </Box>
+            )}
+          </>
+        )}
       </Box>
     </Box>
   );
