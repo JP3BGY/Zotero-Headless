@@ -278382,7 +278382,6 @@ var require_tmp = __commonJS({
 });
 
 // ../cli/src/index.ts
-var import_fs2 = require("fs");
 init_drizzle_orm();
 
 // ../cli/src/progress-bar.ts
@@ -278846,7 +278845,7 @@ function isInteractive() {
 }
 
 // ../cli/src/index.ts
-var import_meta2 = {};
+var __import_meta_url = require("url").pathToFileURL(__filename).toString();
 var syncManager2;
 var getDatabase2;
 var items2;
@@ -281546,70 +281545,32 @@ For more info: https://github.com/altairwei/Zotero-Headless
       const { spawn } = await import("child_process");
       const { fileURLToPath } = await import("url");
       const { dirname: dirname5, join: join6 } = await import("path");
+      const { existsSync: existsSync6 } = await import("fs");
       let shellPath = null;
-      const triedPaths = [];
-      const tryPath = (path7) => {
-        try {
-          const exists2 = (0, import_fs2.existsSync)(path7);
-          triedPaths.push({ path: path7, exists: exists2 });
-          return exists2;
-        } catch (e3) {
-          triedPaths.push({ path: path7, exists: false, error: String(e3) });
-          return false;
-        }
-      };
       try {
-        const __dirname2 = dirname5(fileURLToPath(import_meta2.url));
-        const globalPath = join6(__dirname2, "apps", "shell", "dist", "index.js");
-        if (tryPath(globalPath)) {
-          shellPath = globalPath;
+        const __dirname2 = dirname5(fileURLToPath(__import_meta_url));
+        const relativePath = join6(__dirname2, "apps", "shell", "dist", "index.js");
+        if (existsSync6(relativePath)) {
+          shellPath = relativePath;
         }
-        if (!shellPath) {
-          const bundlePath = join6(__dirname2, "shell.js");
-          if (tryPath(bundlePath)) {
-            shellPath = bundlePath;
-          }
-        }
-      } catch (e3) {
-        triedPaths.push({
-          path: "dirname-resolution-failed",
-          exists: false,
-          error: `Failed to resolve __dirname: ${e3}`
-        });
+      } catch {
       }
-      if (!shellPath && process.argv[1]) {
+      if (!shellPath) {
         try {
-          const cliDir = dirname5(process.argv[1]);
-          const argvPath = join6(cliDir, "apps", "shell", "dist", "index.js");
-          if (tryPath(argvPath)) {
-            shellPath = argvPath;
-          }
-        } catch (e3) {
-          triedPaths.push({
-            path: "argv-resolution-failed",
-            exists: false,
-            error: `Failed to resolve argv[1]: ${e3}`
-          });
+          shellPath = require.resolve("@zotero-headless/shell");
+        } catch {
         }
       }
       if (!shellPath) {
         const devPath = join6(process.cwd(), "apps", "shell", "dist", "index.js");
-        if (tryPath(devPath)) {
+        if (existsSync6(devPath)) {
           shellPath = devPath;
         }
       }
       if (!shellPath) {
-        console.error("\u274C Cannot find shell. Tried paths:");
-        for (const t4 of triedPaths) {
-          const status = t4.exists ? "\u2705 exists" : "\u274C not found";
-          console.error(`   - ${t4.path} (${status})`);
-          if (t4.error) {
-            console.error(`     Error: ${t4.error}`);
-          }
-        }
+        console.error("\u274C Cannot find shell.");
         console.log("");
-        console.log("\u{1F4A1} Try: npm install -g zotero-headless");
-        console.log('\u{1F4A1} Or run "zotero-sh" directly if available.');
+        console.log("\u{1F4A1} Try reinstalling: npm install -g zotero-headless");
         return;
       }
       try {
@@ -281622,7 +281583,6 @@ For more info: https://github.com/altairwei/Zotero-Headless
         });
       } catch (error48) {
         console.error("\u274C Failed to start shell:", error48);
-        console.log('\u{1F4A1} Try running "zotero-sh" directly if available.');
       }
     }
   }

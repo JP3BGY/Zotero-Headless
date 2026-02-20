@@ -316,7 +316,7 @@ export function ZoteroShell() {
       {/* 输入区域 */}
       <Box>
         <Text color={isExecuting ? "gray" : "cyan"}>
-          {isExecuting ? "⏳ 执行中..." : "zotero&gt; "}
+          {isExecuting ? "⏳ 执行中..." : "zotero> "}
         </Text>
         {!isExecuting && (
           <TextInput value={input} onChange={setInput} />
