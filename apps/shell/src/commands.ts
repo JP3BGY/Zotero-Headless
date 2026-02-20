@@ -19,16 +19,16 @@ function findZoteroExecutable(): string {
   try {
     if (process.platform === 'win32') {
       const result = execSync('where zotero', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
-      const path = result.trim().split('\n')[0];
-      if (path) {
-        zoteroPath = path;
+      const foundPath = result.trim().split('\n')[0];
+      if (foundPath) {
+        zoteroPath = foundPath;
         return zoteroPath;
       }
     } else {
       const result = execSync('which zotero', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
-      const path = result.trim();
-      if (path) {
-        zoteroPath = path;
+      const foundPath = result.trim();
+      if (foundPath) {
+        zoteroPath = foundPath;
         return zoteroPath;
       }
     }
