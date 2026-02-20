@@ -182,10 +182,23 @@ jobs:
           echo "✅ Help alias works"
 
           echo ""
-          echo "4. Testing zotero shell startup..."
-          # Test shell command exists (not actual interaction to avoid blocking)
-          zotero shell --help 2>/dev/null || zotero sh --help 2>/dev/null || { echo "❌ zotero shell command not found"; exit 1; }
-          echo "✅ zotero shell command exists"
+          echo "4. Testing zotero shell files exist..."
+          # Check if shell dist files are actually in the package
+          SHELL_PATH=$(npm root -g)/zotero-headless/apps/shell/dist/index.js
+          if [ ! -f "$SHELL_PATH" ]; then
+            echo "❌ Shell file not found at: $SHELL_PATH"
+            echo "   Package contents:"
+            ls -la $(npm root -g)/zotero-headless/ 2>/dev/null || true
+            echo "   apps/ directory:"
+            ls -la $(npm root -g)/zotero-headless/apps/ 2>/dev/null || true
+            exit 1
+          fi
+          echo "✅ Shell file exists: $SHELL_PATH"
+          
+          echo ""
+          echo "5. Testing zotero shell --help..."
+          zotero shell --help 2>/dev/null || { echo "❌ zotero shell --help failed"; exit 1; }
+          echo "✅ zotero shell help works"
 
           echo ""
           echo "=== All tests passed! ==="
@@ -218,11 +231,22 @@ jobs:
           Write-Host "✅ zotero help passed"
 
           Write-Host ""
-          Write-Host "3. Testing zotero shell command..."
-          # Test shell command exists (not actual interaction)
+          Write-Host "4. Testing zotero shell files exist..."
+          # Check if shell dist files are actually in the package
+          $shellPath = Join-Path (npm root -g) "zotero-headless\apps\shell\dist\index.js"
+          if (-not (Test-Path $shellPath)) {
+            Write-Error "❌ Shell file not found at: $shellPath"
+            Write-Host "   Package contents:"
+            Get-ChildItem (npm root -g)\zotero-headless\ -ErrorAction SilentlyContinue
+            exit 1
+          }
+          Write-Host "✅ Shell file exists: $shellPath"
+
+          Write-Host ""
+          Write-Host "5. Testing zotero shell --help..."
           zotero shell --help 2>$null
-          if ($LASTEXITCODE -ne 0) { throw "zotero shell command not found" }
-          Write-Host "✅ zotero shell command exists"
+          if ($LASTEXITCODE -ne 0) { throw "zotero shell --help failed" }
+          Write-Host "✅ zotero shell help works"
 
           Write-Host ""
           Write-Host "=== All tests passed! ==="
