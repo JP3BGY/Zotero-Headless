@@ -2986,58 +2986,93 @@ For more info: https://github.com/altairwei/Zotero-Headless
     aliases: ['sh', 'repl', 'interactive', 'i'],
     description: 'Start interactive shell. Aliases: sh, repl, interactive, i',
     execute: async () => {
-      try {
-        const { spawn } = await import('child_process');
-        const { fileURLToPath } = await import('url');
-        const { dirname, join } = await import('path');
+      const { spawn } = await import('child_process');
+      const { fileURLToPath } = await import('url');
+      const { dirname, join } = await import('path');
 
-        // Find shell path - try multiple locations
-        let shellPath: string | null = null;
-        let triedPaths: string[] = [];
-        
+      // Find shell path - try multiple locations
+      let shellPath: string | null = null;
+      const triedPaths: { path: string; exists: boolean; error?: string }[] = [];
+      
+      // Helper to try a path
+      const tryPath = (path: string): boolean => {
         try {
-          // Try 1: npm global install structure
-          // __dirname is the directory containing index.js (the CLI entry point)
-          // In npm global install: <prefix>/lib/node_modules/zotero-headless/index.js
-          // So we need: <prefix>/lib/node_modules/zotero-headless/apps/shell/dist/index.js
-          const __dirname = dirname(fileURLToPath(import.meta.url));
-          const globalPath = join(__dirname, 'apps', 'shell', 'dist', 'index.js');
-          triedPaths.push(globalPath);
-          if (existsSync(globalPath)) {
-            shellPath = globalPath;
+          const exists = existsSync(path);
+          triedPaths.push({ path, exists });
+          return exists;
+        } catch (e) {
+          triedPaths.push({ path, exists: false, error: String(e) });
+          return false;
+        }
+      };
+      
+      // Try 1: npm global install structure
+      // __dirname is the directory containing index.js (the CLI entry point)
+      // In npm global install: <prefix>/lib/node_modules/zotero-headless/index.js
+      // So we need: <prefix>/lib/node_modules/zotero-headless/apps/shell/dist/index.js
+      try {
+        const __dirname = dirname(fileURLToPath(import.meta.url));
+        const globalPath = join(__dirname, 'apps', 'shell', 'dist', 'index.js');
+        if (tryPath(globalPath)) {
+          shellPath = globalPath;
+        }
+        
+        // Try 2: Check if there's a bundled version (same directory as CLI)
+        if (!shellPath) {
+          const bundlePath = join(__dirname, 'shell.js');
+          if (tryPath(bundlePath)) {
+            shellPath = bundlePath;
           }
-          
-          // Try 2: Relative to current working directory (development)
-          if (!shellPath) {
-            const devPath = join(process.cwd(), 'apps', 'shell', 'dist', 'index.js');
-            triedPaths.push(devPath);
-            if (existsSync(devPath)) {
-              shellPath = devPath;
-            }
-          }
-          
-          // Try 3: Check if there's a bundled version
-          if (!shellPath) {
-            const bundlePath = join(__dirname, 'shell.js');
-            triedPaths.push(bundlePath);
-            if (existsSync(bundlePath)) {
-              shellPath = bundlePath;
-            }
+        }
+      } catch (e) {
+        triedPaths.push({ 
+          path: 'dirname-resolution-failed', 
+          exists: false, 
+          error: `Failed to resolve __dirname: ${e}` 
+        });
+      }
+      
+      // Try 3: Use process.argv[1] to find CLI location (more reliable on Windows)
+      if (!shellPath && process.argv[1]) {
+        try {
+          const cliDir = dirname(process.argv[1]);
+          const argvPath = join(cliDir, 'apps', 'shell', 'dist', 'index.js');
+          if (tryPath(argvPath)) {
+            shellPath = argvPath;
           }
         } catch (e) {
-          // ignore path resolution errors
+          triedPaths.push({ 
+            path: 'argv-resolution-failed', 
+            exists: false, 
+            error: `Failed to resolve argv[1]: ${e}` 
+          });
         }
+      }
+      
+      // Try 4: Relative to current working directory (development)
+      if (!shellPath) {
+        const devPath = join(process.cwd(), 'apps', 'shell', 'dist', 'index.js');
+        if (tryPath(devPath)) {
+          shellPath = devPath;
+        }
+      }
 
-        if (!shellPath) {
-          console.error('❌ Cannot find shell. Tried paths:');
-          for (const p of triedPaths) {
-            console.error(`   - ${p}`);
+      if (!shellPath) {
+        console.error('❌ Cannot find shell. Tried paths:');
+        for (const t of triedPaths) {
+          const status = t.exists ? '✅ exists' : '❌ not found';
+          console.error(`   - ${t.path} (${status})`);
+          if (t.error) {
+            console.error(`     Error: ${t.error}`);
           }
-          console.log('');
-          console.log('💡 Try: npm install -g zotero-headless');
-          return;
         }
+        console.log('');
+        console.log('💡 Try: npm install -g zotero-headless');
+        console.log('💡 Or run "zotero-sh" directly if available.');
+        return;
+      }
 
+      try {
         const child = spawn('node', [shellPath], {
           stdio: 'inherit',
           shell: false
