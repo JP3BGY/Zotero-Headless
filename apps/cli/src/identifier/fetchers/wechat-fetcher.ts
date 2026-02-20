@@ -123,7 +123,7 @@ export class WeChatFetcher extends BaseFetcher {
         // 尝试使用 DecompressionStream 解压
         const ds = new DecompressionStream('gzip');
         const writer = ds.writable.getWriter();
-        writer.write(buffer);
+        writer.write(new Uint8Array(buffer));  // 转换为 Uint8Array
         writer.close();
         
         const reader = ds.readable.getReader();
