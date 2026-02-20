@@ -47,24 +47,8 @@ function findZoteroExecutable(): string {
       zoteroPath = binPath;
       return zoteroPath;
     }
-    
-    // 尝试全局安装的 zotero-headless
-    const globalPath = join(dirname(require.main?.filename || __filename), '..', '..', 'zotero-headless', 'index.js');
-    if (existsSync(globalPath)) {
-      zoteroPath = process.execPath; // 使用 node 运行
-      return zoteroPath;
-    }
   } catch {
     // 忽略错误
-  }
-  
-  // 尝试 3: 使用 process.argv[1] 推断（如果 shell 是通过 node 运行的）
-  if (process.argv[1]) {
-    const possibleCli = join(dirname(process.argv[1]), '..', 'zotero-headless', 'index.js');
-    if (existsSync(possibleCli)) {
-      zoteroPath = process.execPath;
-      return zoteroPath;
-    }
   }
   
   // 默认回退到 'zotero'，让系统自己找
@@ -137,15 +121,13 @@ export async function executeCommand(
   
   // 查找 zotero 可执行文件
   const zoteroExe = findZoteroExecutable();
-  const isNodePath = zoteroExe === process.execPath;
   
   // 构建 spawn 参数
   let spawnCmd: string;
   let spawnArgs: string[];
   
-  if (isNodePath) {
-    // 需要通过 node 运行 zotero CLI
-    // 尝试找到 zotero CLI 的 index.js
+  if (zoteroExe === 'zotero') {
+    // 没有找到 zotero 命令，尝试通过 node 运行 CLI
     const { existsSync } = require('fs');
     let cliPath: string | null = null;
     
@@ -171,7 +153,7 @@ export async function executeCommand(
     spawnCmd = process.execPath;
     spawnArgs = [cliPath, actualCmd, ...args];
   } else {
-    // 直接使用 zotero 命令
+    // 直接使用找到的 zotero 命令
     spawnCmd = zoteroExe;
     spawnArgs = [actualCmd, ...args];
   }
