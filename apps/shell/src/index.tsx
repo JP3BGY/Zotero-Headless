@@ -2,13 +2,17 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { render, Box, Text, useApp, useInput, useStdout, Spacer } from 'ink';
 import TextInput from 'ink-text-input';
-import { 
-  executeCommand, 
-  getAvailableCommands, 
+import {
+  executeCommand,
+  getAvailableCommands,
   getCommandDescriptions,
   parseCommand,
   highlightSearchResult,
-  type ExecuteResult 
+  needsItemKey,
+  getItemKeyCompletions,
+  clearItemCache,
+  type ExecuteResult,
+  type ItemInfo
 } from './commands.js';
 
 // 历史管理类
@@ -56,6 +60,13 @@ type OutputLine = {
 type CommandSuggestion = {
   name: string;
   description: string;
+};
+
+// Item Key 补全项
+type ItemKeySuggestion = {
+  key: string;
+  title: string;
+  itemType: string;
 };
 
 // Zotero 命令执行器
@@ -107,7 +118,7 @@ class ZoteroExecutor {
   }
 
   async execute(
-    input: string, 
+    input: string,
     onOutput?: (data: string) => void
   ): Promise<{ type: 'success' | 'error' | 'builtin'; content: string }> {
     const trimmed = input.trim();
@@ -124,34 +135,34 @@ class ZoteroExecutor {
     // 异步执行 zotero CLI
     try {
       const result = await executeCommand(cmd, args, onOutput);
-      
+
       // 检查是否有错误输出
       if (result.exitCode !== 0 && result.stderr) {
-        return { 
-          type: 'error', 
-          content: result.stderr 
+        return {
+          type: 'error',
+          content: result.stderr
         };
       }
-      
+
       // 如果是 search 命令，高亮关键词
       if ((cmd === 'search' || cmd === 'f' || cmd === 'find') && args.length > 0) {
         const highlighted = highlightSearchResult(result.stdout, args);
-        return { 
-          type: result.exitCode === 0 ? 'success' : 'error', 
+        return {
+          type: result.exitCode === 0 ? 'success' : 'error',
           content: highlighted || result.stderr || '无结果'
         };
       }
 
-      return { 
-        type: result.exitCode === 0 ? 'success' : 'error', 
+      return {
+        type: result.exitCode === 0 ? 'success' : 'error',
         content: result.stdout || result.stderr || '命令执行完成'
       };
     } catch (error) {
       // 捕获所有未处理的错误（网络错误、超时等）
       const errorMsg = error instanceof Error ? error.message : String(error);
       console.error('Command execution error:', error); // 调试日志
-      return { 
-        type: 'error', 
+      return {
+        type: 'error',
         content: `⚠️ 网络错误: ${errorMsg}\n请检查网络连接后重试。`
       };
     }
@@ -160,11 +171,16 @@ class ZoteroExecutor {
   getCompletions(partial: string): CommandSuggestion[] {
     const allCommands = getAvailableCommands();
     const matches = allCommands.filter(c => c.startsWith(partial.toLowerCase()));
-    
+
     return matches.map(name => ({
       name,
       description: this.commandDescriptions.get(name) || ''
     }));
+  }
+
+  async getItemKeyCompletions(prefix: string): Promise<ItemKeySuggestion[]> {
+    const items = await getItemKeyCompletions(prefix);
+    return items;
   }
 }
 
@@ -175,9 +191,10 @@ export function ZoteroShell() {
   const [input, setInput] = useState('');
   const [lines, setLines] = useState<OutputLine[]>([]);
   const [suggestions, setSuggestions] = useState<CommandSuggestion[]>([]);
+  const [itemKeySuggestions, setItemKeySuggestions] = useState<ItemKeySuggestion[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
   const [scrollOffset, setScrollOffset] = useState(0);
-  
+
   const historyManager = useRef(new HistoryManager());
   const executor = useRef(new ZoteroExecutor());
   const lineIdCounter = useRef(0);
@@ -238,7 +255,7 @@ export function ZoteroShell() {
 
       // 只有在没有实时输出时才显示结果内容
       if (result.content && !hasRealtimeOutput) {
-        const lineType: OutputLine['type'] = result.type === 'success' ? 'output' : 
+        const lineType: OutputLine['type'] = result.type === 'success' ? 'output' :
                                             result.type === 'builtin' ? 'info' : 'error';
         addLine(lineType, result.content);
       }
@@ -290,12 +307,30 @@ export function ZoteroShell() {
     }
 
     if (key.tab) {
-      const comps = executor.current.getCompletions(input);
-      if (comps.length === 1) {
-        setInput(comps[0].name + ' ');
-        setSuggestions([]);
-      } else if (comps.length > 0) {
-        setSuggestions(comps);
+      // 检查是否是 item key 补全
+      const parts = input.trim().split(/\s+/);
+      const cmd = parts[0]?.toLowerCase() || '';
+      const arg = parts[1] || '';
+
+      if (needsItemKey(cmd) && parts.length >= 2) {
+        // Item Key 补全
+        executor.current.getItemKeyCompletions(arg).then(items => {
+          if (items.length === 1) {
+            setInput(`${cmd} ${items[0].key}`);
+            setItemKeySuggestions([]);
+          } else if (items.length > 0) {
+            setItemKeySuggestions(items);
+          }
+        });
+      } else {
+        // 命令补全
+        const comps = executor.current.getCompletions(input);
+        if (comps.length === 1) {
+          setInput(comps[0].name + ' ');
+          setSuggestions([]);
+        } else if (comps.length > 0) {
+          setSuggestions(comps);
+        }
       }
       return;
     }
@@ -303,27 +338,45 @@ export function ZoteroShell() {
     // 更新自动补全建议
     const newInput = input + value;
     if (newInput && !key.tab && !key.return) {
-      const comps = executor.current.getCompletions(newInput);
-      setSuggestions(comps.slice(0, 8)); // 最多显示 8 个建议
+      const parts = newInput.trim().split(/\s+/);
+      const cmd = parts[0]?.toLowerCase() || '';
+      const arg = parts[1] || '';
+
+      if (needsItemKey(cmd) && parts.length >= 2) {
+        // Item Key 补全模式
+        executor.current.getItemKeyCompletions(arg).then(items => {
+          setItemKeySuggestions(items.slice(0, 8));
+          setSuggestions([]);
+        });
+      } else {
+        // 命令补全模式
+        const comps = executor.current.getCompletions(newInput);
+        setSuggestions(comps.slice(0, 8));
+        setItemKeySuggestions([]);
+      }
     } else if (!newInput) {
       setSuggestions([]);
+      setItemKeySuggestions([]);
     }
   });
 
   // 计算可见行（排除输入区域占用的空间）
   const visibleHeight = containerRef.current.height;
   const welcomeHeight = 2; // 欢迎消息占 2 行
-  const inputAreaHeight = 2 + (suggestions.length > 0 ? Math.min(suggestions.length, 8) + 1 : 0); // 提示行 + 输入行 + 建议列表
+  const suggestionCount = suggestions.length > 0 ? suggestions.length : itemKeySuggestions.length;
+  const inputAreaHeight = 2 + (suggestionCount > 0 ? Math.min(suggestionCount, 8) + 1 : 0); // 提示行 + 输入行 + 建议列表
   const outputHeight = Math.max(1, visibleHeight - inputAreaHeight - welcomeHeight);
-  
+
   const visibleLines = lines.slice(
     Math.max(0, lines.length - outputHeight - scrollOffset),
     lines.length - scrollOffset
   );
 
-  // 计算最长命令名长度，用于对齐
-  const maxCommandLength = suggestions.length > 0 
+  // 计算最长命令名或 key 长度，用于对齐
+  const maxNameLength = suggestions.length > 0
     ? Math.max(...suggestions.map(s => s.name.length))
+    : itemKeySuggestions.length > 0
+    ? Math.max(...itemKeySuggestions.map(s => s.key.length))
     : 0;
 
   return (
@@ -375,10 +428,25 @@ export function ZoteroShell() {
           <TextInput value={input} onChange={(value) => {
             setInput(value);
             if (value) {
-              const comps = executor.current.getCompletions(value);
-              setSuggestions(comps.slice(0, 8));
+              const parts = value.trim().split(/\s+/);
+              const cmd = parts[0]?.toLowerCase() || '';
+              const arg = parts[1] || '';
+
+              if (needsItemKey(cmd) && parts.length >= 2) {
+                // Item Key 补全模式
+                executor.current.getItemKeyCompletions(arg).then(items => {
+                  setItemKeySuggestions(items.slice(0, 8));
+                  setSuggestions([]);
+                });
+              } else {
+                // 命令补全模式
+                const comps = executor.current.getCompletions(value);
+                setSuggestions(comps.slice(0, 8));
+                setItemKeySuggestions([]);
+              }
             } else {
               setSuggestions([]);
+              setItemKeySuggestions([]);
             }
           }} />
         )}
@@ -391,8 +459,22 @@ export function ZoteroShell() {
           {suggestions.map((suggestion) => (
             <Box key={suggestion.name}>
               <Text color="gray">  </Text>
-              <Text color="green" bold>{suggestion.name.padEnd(maxCommandLength + 2)}</Text>
+              <Text color="green" bold>{suggestion.name.padEnd(maxNameLength + 2)}</Text>
               <Text color="gray">{suggestion.description}</Text>
+            </Box>
+          ))}
+        </Box>
+      )}
+
+      {/* Item Key 建议列表 - 在输入框上方显示 */}
+      {itemKeySuggestions.length > 0 && !isExecuting && (
+        <Box flexDirection="column">
+          {itemKeySuggestions.map((item) => (
+            <Box key={item.key}>
+              <Text color="gray">  </Text>
+              <Text color="cyan" bold>{item.key.padEnd(maxNameLength + 2)}</Text>
+              <Text color="white">{item.title}</Text>
+              <Text color="gray"> ({item.itemType})</Text>
             </Box>
           ))}
         </Box>

@@ -2,6 +2,29 @@
 // In development: uses workspace link
 // In npm package: CLI is at ../../../apps/cli/dist/index.js
 import { commands, type Command } from '../../cli/dist/index.js';
+import { getRawSQLite } from '@zotero-headless/database';
+
+// Item 信息类型
+export type ItemInfo = {
+  key: string;
+  title: string;
+  itemType: string;
+};
+
+// 需要 Item Key 的命令列表
+const ITEM_KEY_COMMANDS = [
+  'rm', 'del', 'delete', 'remove',
+  'get', 'cat', 'view', 'show',
+  'update', 'u', 'edit', 'set',
+  'note', 'n', 'notes',
+  'attachments', 'att', 'files',
+  'export', 'e', 'out', 'save'
+];
+
+// 缓存的 item 列表
+let cachedItems: ItemInfo[] = [];
+let lastCacheTime = 0;
+const CACHE_TTL = 60000; // 60秒缓存
 
 // 命令映射表
 const COMMAND_ALIASES: Record<string, string> = {
@@ -217,4 +240,81 @@ export function highlightSearchResult(text: string, keywords: string[]): string 
 
 function escapeRegex(string: string): string {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * 检查命令是否需要 Item Key 参数
+ */
+export function needsItemKey(cmd: string): boolean {
+  const actualCmd = COMMAND_ALIASES[cmd] || cmd;
+  return ITEM_KEY_COMMANDS.includes(actualCmd) || ITEM_KEY_COMMANDS.includes(cmd);
+}
+
+/**
+ * 从数据库获取 Item 列表（带缓存）
+ */
+export async function getItemsForCompletion(): Promise<ItemInfo[]> {
+  const now = Date.now();
+
+  // 检查缓存是否有效
+  if (cachedItems.length > 0 && (now - lastCacheTime) < CACHE_TTL) {
+    return cachedItems;
+  }
+
+  try {
+    const db = getRawSQLite();
+    if (!db) {
+      return cachedItems; // 返回旧缓存
+    }
+
+    // 使用原始 SQL 查询最近的 100 个 items
+    const stmt = db.prepare(`
+      SELECT key, title, item_type as itemType
+      FROM items
+      WHERE deleted = 0
+      ORDER BY updated_at DESC
+      LIMIT 100
+    `);
+    const result = stmt.all() as Array<{ key: string; title: string | null; itemType: string }>;
+
+    cachedItems = result.map((item) => ({
+      key: item.key,
+      title: item.title || '(无标题)',
+      itemType: item.itemType
+    }));
+
+    lastCacheTime = now;
+    return cachedItems;
+  } catch (error) {
+    // 数据库查询失败，返回缓存或空数组
+    console.error('Failed to load items:', error);
+    return cachedItems;
+  }
+}
+
+/**
+ * 根据前缀匹配 Item Key
+ */
+export async function getItemKeyCompletions(
+  prefix: string,
+  limit: number = 8
+): Promise<ItemInfo[]> {
+  const items = await getItemsForCompletion();
+  const lowerPrefix = prefix.toLowerCase();
+  
+  // 匹配 key 或 title 包含前缀的 items
+  const matches = items.filter(item => 
+    item.key.toLowerCase().includes(lowerPrefix) ||
+    item.title.toLowerCase().includes(lowerPrefix)
+  );
+  
+  return matches.slice(0, limit);
+}
+
+/**
+ * 清除 Item 缓存（用于同步后刷新）
+ */
+export function clearItemCache(): void {
+  cachedItems = [];
+  lastCacheTime = 0;
 }
