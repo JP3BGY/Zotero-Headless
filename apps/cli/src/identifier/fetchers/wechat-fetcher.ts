@@ -104,7 +104,7 @@ export class WeChatFetcher extends BaseFetcher {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
           'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-          'Accept-Encoding': 'gzip, deflate, br',
+          // 不发送 Accept-Encoding，让服务器返回未压缩内容
           'Referer': 'https://mp.weixin.qq.com/',
           'Connection': 'keep-alive',
         },
@@ -115,39 +115,8 @@ export class WeChatFetcher extends BaseFetcher {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      // 处理可能的 gzip 压缩
-      const buffer = await response.arrayBuffer();
-      let data: string;
-      
-      try {
-        // 尝试使用 DecompressionStream 解压
-        const ds = new DecompressionStream('gzip');
-        const writer = ds.writable.getWriter();
-        writer.write(new Uint8Array(buffer));  // 转换为 Uint8Array
-        writer.close();
-        
-        const reader = ds.readable.getReader();
-        const chunks: Uint8Array[] = [];
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          chunks.push(value);
-        }
-        
-        const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-        const result = new Uint8Array(totalLength);
-        let offset = 0;
-        for (const chunk of chunks) {
-          result.set(chunk, offset);
-          offset += chunk.length;
-        }
-        data = new TextDecoder().decode(result);
-      } catch {
-        // 如果不是 gzip，直接解码
-        data = new TextDecoder().decode(buffer);
-      }
-      
-      return data;
+      // 直接获取文本，不手动处理压缩
+      return await response.text();
     } finally {
       clearTimeout(timeoutId);
     }
