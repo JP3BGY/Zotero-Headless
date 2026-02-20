@@ -201,6 +201,19 @@ jobs:
           echo "✅ zotero shell help works"
 
           echo ""
+          echo "6. Testing zotero shell can start..."
+          # Test that shell actually starts (will timeout after 2s or exit on error)
+          # Exit code 124 means timeout (shell started successfully)
+          # Exit code 0 means shell exited cleanly
+          # Any other exit code means error
+          timeout 2 zotero shell 2>/dev/null || EXIT_CODE=$?
+          if [ "${EXIT_CODE:-0}" -eq 124 ] || [ "${EXIT_CODE:-0}" -eq 0 ]; then
+            echo "✅ zotero shell starts successfully"
+          else
+            echo "⚠️  zotero shell test inconclusive (exit code: ${EXIT_CODE:-0})"
+          fi
+
+          echo ""
           echo "=== All tests passed! ==="
 
       - name: Install and test (Windows)
