@@ -1,60 +1,4 @@
-import { spawn } from 'child_process';
-import { Readable } from 'stream';
-import { dirname, join } from 'path';
-
-// 缓存 zotero 可执行文件路径
-let zoteroPath: string | undefined = undefined;
-
-/**
- * 查找 zotero 可执行文件
- * 尝试多种方式：直接命令、node_modules/.bin、相对路径
- */
-function findZoteroExecutable(): string {
-  if (zoteroPath) return zoteroPath;
-  
-  const { execSync } = require('child_process');
-  const { existsSync } = require('fs');
-  
-  // 尝试 1: 使用 which/where 查找
-  try {
-    if (process.platform === 'win32') {
-      const result = execSync('where zotero', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
-      const foundPath = result.trim().split('\n')[0] as string | undefined;
-      if (foundPath) {
-        zoteroPath = foundPath;
-        return zoteroPath;
-      }
-    } else {
-      const result = execSync('which zotero', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
-      const foundPath = result.trim() as string;
-      if (foundPath) {
-        zoteroPath = foundPath;
-        return zoteroPath;
-      }
-    }
-  } catch {
-    // 忽略错误，继续尝试
-  }
-  
-  // 尝试 2: 从 shell 的位置推断
-  // shell 在 node_modules/zotero-headless/apps/shell/dist/index.js
-  // zotero CLI 应该在 node_modules/zotero-headless/index.js
-  // 或者 node_modules/.bin/zotero
-  try {
-    // 尝试 node_modules/.bin/zotero
-    const binPath = join(process.cwd(), 'node_modules', '.bin', process.platform === 'win32' ? 'zotero.cmd' : 'zotero');
-    if (existsSync(binPath)) {
-      zoteroPath = binPath;
-      return zoteroPath;
-    }
-  } catch {
-    // 忽略错误
-  }
-  
-  // 默认回退到 'zotero'，让系统自己找
-  zoteroPath = 'zotero';
-  return zoteroPath;
-}
+import { commands, type Command } from '@zotero-headless/cli';
 
 // 命令映射表
 const COMMAND_ALIASES: Record<string, string> = {
@@ -108,6 +52,36 @@ export interface ExecuteResult {
   exitCode: number;
 }
 
+// 捕获 console 输出
+function captureConsoleOutput(fn: () => Promise<void>): Promise<ExecuteResult> {
+  const originalLog = console.log;
+  const originalError = console.error;
+  let stdout = '';
+  let stderr = '';
+
+  console.log = (...args: any[]) => {
+    stdout += args.map(a => String(a)).join(' ') + '\n';
+    originalLog.apply(console, args);
+  };
+
+  console.error = (...args: any[]) => {
+    stderr += args.map(a => String(a)).join(' ') + '\n';
+    originalError.apply(console, args);
+  };
+
+  return fn()
+    .then(() => ({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: 0 }))
+    .catch((error) => {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      stderr += errorMsg + '\n';
+      return { stdout: stdout.trim(), stderr: stderr.trim(), exitCode: 1 };
+    })
+    .finally(() => {
+      console.log = originalLog;
+      console.error = originalError;
+    });
+}
+
 /**
  * 异步执行 zotero 命令
  */
@@ -119,83 +93,28 @@ export async function executeCommand(
   // 转换命令别名
   const actualCmd = COMMAND_ALIASES[cmd] || cmd;
   
-  // 查找 zotero 可执行文件
-  const zoteroExe = findZoteroExecutable();
+  // 找到对应的 CLI 命令
+  const command = commands.find((c: Command) =>
+    c.name === actualCmd || c.aliases?.includes(actualCmd)
+  );
   
-  // 构建 spawn 参数
-  let spawnCmd: string;
-  let spawnArgs: string[];
+  if (!command) {
+    return {
+      stdout: '',
+      stderr: `❌ Unknown command: ${cmd}`,
+      exitCode: 1
+    };
+  }
+
+  // 执行命令并捕获输出
+  const result = await captureConsoleOutput(() => command.execute(args));
   
-  if (zoteroExe === 'zotero') {
-    // 没有找到 zotero 命令，尝试通过 node 运行 CLI
-    const { existsSync } = require('fs');
-    let cliPath: string | null = null;
-    
-    // 尝试从 shell 路径推断
-    const shellDir = dirname(__filename);
-    const possiblePaths = [
-      join(shellDir, '..', '..', 'index.js'),  // shell 在 apps/shell/dist/
-      join(shellDir, '..', '..', '..', 'zotero-headless', 'index.js'),
-      join(process.cwd(), 'node_modules', 'zotero-headless', 'index.js'),
-    ];
-    
-    for (const path of possiblePaths) {
-      if (existsSync(path)) {
-        cliPath = path;
-        break;
-      }
-    }
-    
-    if (!cliPath) {
-      throw new Error('Cannot find zotero CLI. Please ensure zotero-headless is properly installed.');
-    }
-    
-    spawnCmd = process.execPath;
-    spawnArgs = [cliPath, actualCmd, ...args];
-  } else {
-    // 直接使用找到的 zotero 命令
-    spawnCmd = zoteroExe;
-    spawnArgs = [actualCmd, ...args];
+  // 如果有实时输出回调，发送 stdout
+  if (onOutput && result.stdout) {
+    onOutput(result.stdout);
   }
   
-  return new Promise((resolve, reject) => {
-    const child = spawn(spawnCmd, spawnArgs, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: process.platform === 'win32' && !zoteroExe.endsWith('.cmd'),
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    // 实时输出
-    child.stdout?.on('data', (data) => {
-      const str = data.toString();
-      stdout += str;
-      if (onOutput) {
-        onOutput(str);
-      }
-    });
-
-    child.stderr?.on('data', (data) => {
-      const str = data.toString();
-      stderr += str;
-      if (onOutput) {
-        onOutput(str);
-      }
-    });
-
-    child.on('close', (code) => {
-      resolve({
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
-        exitCode: code ?? 0
-      });
-    });
-
-    child.on('error', (err) => {
-      reject(err);
-    });
-  });
+  return result;
 }
 
 /**

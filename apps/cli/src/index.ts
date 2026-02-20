@@ -175,7 +175,7 @@ function getContentType(filename: string): string {
 
 // ============ CLI Commands ============
 
-interface Command {
+export interface Command {
   name: string;
   aliases?: string[];
   description: string;
@@ -3048,7 +3048,11 @@ For more info: https://github.com/altairwei/Zotero-Headless
 
 // ============ CLI Entry Point ============
 
-async function main() {
+// Export commands for programmatic use (e.g., from shell)
+export { commands };
+
+// Export main function for testing
+export async function main() {
   const args = process.argv.slice(2);
 
   // Check for --version flag
@@ -3122,4 +3126,7 @@ async function main() {
   }
 }
 
-main();
+// Only run main if this file is executed directly
+if (require.main === module) {
+  main();
+}

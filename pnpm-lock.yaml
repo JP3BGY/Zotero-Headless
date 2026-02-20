@@ -152,6 +152,9 @@ importers:
       '@zotero-headless/api':
         specifier: workspace:*
         version: link:../../packages/api
+      '@zotero-headless/cli':
+        specifier: workspace:*
+        version: link:../cli
       '@zotero-headless/core':
         specifier: workspace:*
         version: link:../../packages/core
