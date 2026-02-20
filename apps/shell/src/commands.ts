@@ -3,7 +3,7 @@ import { Readable } from 'stream';
 import { dirname, join } from 'path';
 
 // 缓存 zotero 可执行文件路径
-let zoteroPath: string | null = null;
+let zoteroPath: string | undefined = undefined;
 
 /**
  * 查找 zotero 可执行文件
@@ -19,14 +19,14 @@ function findZoteroExecutable(): string {
   try {
     if (process.platform === 'win32') {
       const result = execSync('where zotero', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
-      const foundPath = result.trim().split('\n')[0];
+      const foundPath = result.trim().split('\n')[0] as string | undefined;
       if (foundPath) {
         zoteroPath = foundPath;
         return zoteroPath;
       }
     } else {
       const result = execSync('which zotero', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
-      const foundPath = result.trim();
+      const foundPath = result.trim() as string;
       if (foundPath) {
         zoteroPath = foundPath;
         return zoteroPath;
