@@ -186,6 +186,9 @@ importers:
       '@types/react':
         specifier: ^18.2.0
         version: 18.3.28
+      esbuild:
+        specifier: ^0.19.0
+        version: 0.19.12
       typescript:
         specifier: ^5.3.0
         version: 5.9.3

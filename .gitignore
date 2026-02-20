@@ -4,6 +4,13 @@ node_modules/
 # Build output
 dist/
 build/
+dist-package/
+apps/shell/bundle/
+apps/cli-bundle/dist/
+
+# Package artifacts
+*.tgz
+staging-package/
 
 # Environment
 .env

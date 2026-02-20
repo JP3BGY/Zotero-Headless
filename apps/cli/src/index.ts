@@ -2994,19 +2994,36 @@ For more info: https://github.com/altairwei/Zotero-Headless
       // Find shell path - try multiple locations
       let shellPath: string | null = null;
 
-      // Try 1: Relative to CLI entry point (__dirname)
-      // This works for npm global install
+      // Try 1: Shell bundle next to CLI entry point (npm package layout)
       try {
         const __dirname = dirname(fileURLToPath(import.meta.url));
-        const relativePath = join(__dirname, 'apps', 'shell', 'dist', 'index.js');
-        if (existsSync(relativePath)) {
-          shellPath = relativePath;
+        // Try .mjs first (ESM bundle), then .js fallback
+        for (const name of ['shell.mjs', 'shell.js']) {
+          const bundlePath = join(__dirname, name);
+          if (existsSync(bundlePath)) {
+            shellPath = bundlePath;
+            break;
+          }
         }
       } catch {
         // ignore
       }
 
-      // Try 2: In node_modules (development or npm link)
+      // Try 2: Relative to CLI entry point (__dirname)
+      // This works for npm global install (legacy layout)
+      if (!shellPath) {
+        try {
+          const __dirname = dirname(fileURLToPath(import.meta.url));
+          const relativePath = join(__dirname, 'apps', 'shell', 'dist', 'index.js');
+          if (existsSync(relativePath)) {
+            shellPath = relativePath;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      // Try 3: In node_modules (development or npm link)
       if (!shellPath) {
         try {
           shellPath = require.resolve('@zotero-headless/shell');
@@ -3015,7 +3032,7 @@ For more info: https://github.com/altairwei/Zotero-Headless
         }
       }
 
-      // Try 3: Relative to current working directory
+      // Try 4: Relative to current working directory (development)
       if (!shellPath) {
         const devPath = join(process.cwd(), 'apps', 'shell', 'dist', 'index.js');
         if (existsSync(devPath)) {

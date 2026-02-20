@@ -69,81 +69,31 @@ if (bundleContent.startsWith('#!/usr/bin/env node')) {
 }
 console.log('✅ Bundle copied to dist-package/index.js with shebang');
 
-// Copy shell files
-console.log('📦 Copying shell files...');
+// Bundle and copy shell
+console.log('📦 Bundling shell...');
 const shellSrcDir = join(rootDir, 'apps', 'shell');
-const shellDistDir = join(distDir, 'apps', 'shell');
+const shellBundleFile = join(shellSrcDir, 'bundle', 'shell.mjs');
 
-if (existsSync(shellSrcDir)) {
-  mkdirSync(shellDistDir, { recursive: true });
-  
-  // Copy package.json
-  copyFileSync(
-    join(shellSrcDir, 'package.json'),
-    join(shellDistDir, 'package.json')
-  );
-  
-  // Copy dist files
-  const shellDistSrc = join(shellSrcDir, 'dist');
-  const shellDistTarget = join(shellDistDir, 'dist');
-  if (existsSync(shellDistSrc)) {
-    mkdirSync(shellDistTarget, { recursive: true });
-    cpSync(shellDistSrc, shellDistTarget, { recursive: true });
-    console.log('✅ Shell files copied');
-  } else {
-    console.log('⚠️ Shell dist not found, trying to build...');
-    try {
-      execSync('pnpm build', { cwd: shellSrcDir, stdio: 'inherit' });
-      if (existsSync(shellDistSrc)) {
-        mkdirSync(shellDistTarget, { recursive: true });
-        cpSync(shellDistSrc, shellDistTarget, { recursive: true });
-        console.log('✅ Shell files copied after build');
-      }
-    } catch (e) {
-      console.error('❌ Failed to build shell:', e.message);
-    }
-  }
-} else {
-  console.log('⚠️ Shell source not found, skipping');
+// Run shell bundle script
+try {
+  execSync('node bundle.js', {
+    cwd: shellSrcDir,
+    stdio: 'inherit'
+  });
+} catch (error) {
+  console.error('❌ Shell bundling failed:', error.message);
+  process.exit(1);
 }
 
-// Copy CLI dist files (needed for shell imports)
-console.log('📦 Copying CLI dist files...');
-const cliSrcDir = join(rootDir, 'apps', 'cli');
-const cliDistDir = join(distDir, 'apps', 'cli');
-
-if (existsSync(cliSrcDir)) {
-  mkdirSync(cliDistDir, { recursive: true });
-  
-  // Copy package.json
-  copyFileSync(
-    join(cliSrcDir, 'package.json'),
-    join(cliDistDir, 'package.json')
-  );
-  
-  // Copy dist files
-  const cliDistSrc = join(cliSrcDir, 'dist');
-  const cliDistTarget = join(cliDistDir, 'dist');
-  if (existsSync(cliDistSrc)) {
-    mkdirSync(cliDistTarget, { recursive: true });
-    cpSync(cliDistSrc, cliDistTarget, { recursive: true });
-    console.log('✅ CLI files copied');
-  } else {
-    console.log('⚠️ CLI dist not found, trying to build...');
-    try {
-      execSync('pnpm build', { cwd: cliSrcDir, stdio: 'inherit' });
-      if (existsSync(cliDistSrc)) {
-        mkdirSync(cliDistTarget, { recursive: true });
-        cpSync(cliDistSrc, cliDistTarget, { recursive: true });
-        console.log('✅ CLI files copied after build');
-      }
-    } catch (e) {
-      console.error('❌ Failed to build CLI:', e.message);
-    }
-  }
-} else {
-  console.log('⚠️ CLI source not found, skipping');
+if (!existsSync(shellBundleFile)) {
+  console.error('❌ Shell bundle file not found:', shellBundleFile);
+  process.exit(1);
 }
+
+// Copy shell bundle to dist-package
+const shellBundlePath = join(distDir, 'shell.mjs');
+copyFileSync(shellBundleFile, shellBundlePath);
+console.log('✅ Shell bundle copied to dist-package/shell.mjs');
 
 // Create package.json
 console.log('📝 Creating package.json...');
@@ -153,7 +103,7 @@ const packageJson = {
   description: 'Zotero Web API sync client - CLI tool for syncing Zotero libraries without desktop app',
   bin: {
     zotero: './index.js',
-    'zotero-sh': './apps/shell/dist/index.js'
+    'zotero-sh': './shell.mjs'
   },
   engines: {
     node: '>=18.0.0'
@@ -163,6 +113,8 @@ const packageJson = {
     'sql.js': '^1.14.0',
     'ink': '^5.0.0',
     'ink-text-input': '^6.0.0',
+    'ink-select-input': '^6.0.0',
+    'ink-spinner': '^5.0.0',
     'react': '^18.2.0'
   },
   keywords: ['zotero', 'cli', 'sync', 'reference', 'bibliography'],

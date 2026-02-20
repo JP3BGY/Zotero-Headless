@@ -183,14 +183,12 @@ jobs:
 
           echo ""
           echo "4. Testing zotero shell files exist..."
-          # Check if shell dist files are actually in the package
-          SHELL_PATH=$(npm root -g)/zotero-headless/apps/shell/dist/index.js
+          # Check if shell bundle file is in the package
+          SHELL_PATH=$(npm root -g)/zotero-headless/shell.mjs
           if [ ! -f "$SHELL_PATH" ]; then
             echo "❌ Shell file not found at: $SHELL_PATH"
             echo "   Package contents:"
             ls -la $(npm root -g)/zotero-headless/ 2>/dev/null || true
-            echo "   apps/ directory:"
-            ls -la $(npm root -g)/zotero-headless/apps/ 2>/dev/null || true
             exit 1
           fi
           echo "✅ Shell file exists: $SHELL_PATH"
@@ -245,8 +243,8 @@ jobs:
 
           Write-Host ""
           Write-Host "4. Testing zotero shell files exist..."
-          # Check if shell dist files are actually in the package
-          $shellPath = Join-Path (npm root -g) "zotero-headless\apps\shell\dist\index.js"
+          # Check if shell bundle file is in the package
+          $shellPath = Join-Path (npm root -g) "zotero-headless\shell.mjs"
           if (-not (Test-Path $shellPath)) {
             Write-Error "❌ Shell file not found at: $shellPath"
             Write-Host "   Package contents:"
