@@ -143,7 +143,7 @@ class ZoteroExecutor {
 }
 
 // 主组件
-function ZoteroShell() {
+export function ZoteroShell() {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [input, setInput] = useState('');
@@ -325,6 +325,3 @@ function ZoteroShell() {
     </Box>
   );
 }
-
-// 启动 shell
-render(<ZoteroShell />);

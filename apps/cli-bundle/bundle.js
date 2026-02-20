@@ -92,6 +92,46 @@ const workspacePlugin = {
   }
 };
 
+// Create esbuild plugin to handle import.meta.url
+const importMetaUrlPlugin = {
+  name: 'import-meta-url',
+  setup(build) {
+    build.onLoad({ filter: /\.tsx?$/ }, async (args) => {
+      const fs = await import('fs');
+      
+      // Read the file
+      let contents = await fs.promises.readFile(args.path, 'utf8');
+      
+      // Check if file has shebang
+      let shebang = '';
+      if (contents.startsWith('#!')) {
+        const newlineIndex = contents.indexOf('\n');
+        if (newlineIndex !== -1) {
+          shebang = contents.substring(0, newlineIndex + 1);
+          contents = contents.substring(newlineIndex + 1);
+        }
+      }
+      
+      // Replace import.meta.url with a CJS-compatible version
+      // Only replace if it's actually used in the file
+      if (contents.includes('import.meta.url')) {
+        contents = contents.replace(/import\.meta\.url/g, '__import_meta_url');
+        contents = `const __import_meta_url = require('url').pathToFileURL(__filename).toString();\n${contents}`;
+      }
+      
+      // Add shebang back if it existed
+      if (shebang) {
+        contents = shebang + contents;
+      }
+      
+      return {
+        contents,
+        loader: args.path.endsWith('.tsx') ? 'tsx' : 'ts',
+      };
+    });
+  }
+};
+
 // Bundle with esbuild
 await esbuild.build({
   entryPoints: [join(rootDir, 'apps/cli/src/index.ts')],
@@ -108,7 +148,7 @@ await esbuild.build({
   define: {
     'process.env.BUNDLED': '"true"',
   },
-  plugins: [workspacePlugin],
+  plugins: [workspacePlugin, importMetaUrlPlugin],
   minify: false,
   sourcemap: false,
 });

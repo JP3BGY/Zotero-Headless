@@ -2989,86 +2989,44 @@ For more info: https://github.com/altairwei/Zotero-Headless
       const { spawn } = await import('child_process');
       const { fileURLToPath } = await import('url');
       const { dirname, join } = await import('path');
+      const { existsSync } = await import('fs');
 
       // Find shell path - try multiple locations
       let shellPath: string | null = null;
-      const triedPaths: { path: string; exists: boolean; error?: string }[] = [];
-      
-      // Helper to try a path
-      const tryPath = (path: string): boolean => {
-        try {
-          const exists = existsSync(path);
-          triedPaths.push({ path, exists });
-          return exists;
-        } catch (e) {
-          triedPaths.push({ path, exists: false, error: String(e) });
-          return false;
-        }
-      };
-      
-      // Try 1: npm global install structure
-      // __dirname is the directory containing index.js (the CLI entry point)
-      // In npm global install: <prefix>/lib/node_modules/zotero-headless/index.js
-      // So we need: <prefix>/lib/node_modules/zotero-headless/apps/shell/dist/index.js
+
+      // Try 1: Relative to CLI entry point (__dirname)
+      // This works for npm global install
       try {
         const __dirname = dirname(fileURLToPath(import.meta.url));
-        const globalPath = join(__dirname, 'apps', 'shell', 'dist', 'index.js');
-        if (tryPath(globalPath)) {
-          shellPath = globalPath;
+        const relativePath = join(__dirname, 'apps', 'shell', 'dist', 'index.js');
+        if (existsSync(relativePath)) {
+          shellPath = relativePath;
         }
-        
-        // Try 2: Check if there's a bundled version (same directory as CLI)
-        if (!shellPath) {
-          const bundlePath = join(__dirname, 'shell.js');
-          if (tryPath(bundlePath)) {
-            shellPath = bundlePath;
-          }
-        }
-      } catch (e) {
-        triedPaths.push({ 
-          path: 'dirname-resolution-failed', 
-          exists: false, 
-          error: `Failed to resolve __dirname: ${e}` 
-        });
+      } catch {
+        // ignore
       }
-      
-      // Try 3: Use process.argv[1] to find CLI location (more reliable on Windows)
-      if (!shellPath && process.argv[1]) {
+
+      // Try 2: In node_modules (development or npm link)
+      if (!shellPath) {
         try {
-          const cliDir = dirname(process.argv[1]);
-          const argvPath = join(cliDir, 'apps', 'shell', 'dist', 'index.js');
-          if (tryPath(argvPath)) {
-            shellPath = argvPath;
-          }
-        } catch (e) {
-          triedPaths.push({ 
-            path: 'argv-resolution-failed', 
-            exists: false, 
-            error: `Failed to resolve argv[1]: ${e}` 
-          });
+          shellPath = require.resolve('@zotero-headless/shell');
+        } catch {
+          // ignore
         }
       }
-      
-      // Try 4: Relative to current working directory (development)
+
+      // Try 3: Relative to current working directory
       if (!shellPath) {
         const devPath = join(process.cwd(), 'apps', 'shell', 'dist', 'index.js');
-        if (tryPath(devPath)) {
+        if (existsSync(devPath)) {
           shellPath = devPath;
         }
       }
 
       if (!shellPath) {
-        console.error('❌ Cannot find shell. Tried paths:');
-        for (const t of triedPaths) {
-          const status = t.exists ? '✅ exists' : '❌ not found';
-          console.error(`   - ${t.path} (${status})`);
-          if (t.error) {
-            console.error(`     Error: ${t.error}`);
-          }
-        }
+        console.error('❌ Cannot find shell.');
         console.log('');
-        console.log('💡 Try: npm install -g zotero-headless');
-        console.log('💡 Or run "zotero-sh" directly if available.');
+        console.log('💡 Try reinstalling: npm install -g zotero-headless');
         return;
       }
 
@@ -3083,7 +3041,6 @@ For more info: https://github.com/altairwei/Zotero-Headless
         });
       } catch (error) {
         console.error('❌ Failed to start shell:', error);
-        console.log('💡 Try running "zotero-sh" directly if available.');
       }
     }
   }
