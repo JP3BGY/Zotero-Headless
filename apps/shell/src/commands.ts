@@ -190,25 +190,26 @@ export function getCommandDescriptions(): Map<string, string> {
 
 /**
  * 获取可用命令列表（用于自动补全）
+ * 动态从 CLI commands 数组获取，确保包含所有命令
  */
 export function getAvailableCommands(): string[] {
-  return [
-    'help', 'exit', 'quit', 'q',
-    'list', 'ls', 'll',
-    'search', 'find', 'f',
-    'sync', 's', 'pull', 'fetch',
-    'add', 'a', 'new', 'touch',
-    'delete', 'rm', 'del', 'remove',
-    'get', 'cat', 'view', 'show',
-    'stats', 'stat', 'info', 'df',
-    'verify', 'v', 'check', 'ping',
-    'note', 'n', 'notes',
-    'attachments', 'att', 'files',
-    'export', 'e', 'out', 'save',
-    'update', 'u', 'edit', 'set',
-    'webdav', 'wd',
-    'config', 'cfg'
+  const commandNames = new Set<string>();
+  
+  // 从 CLI 命令中提取所有命令名和别名
+  commands.forEach((cmd: Command) => {
+    commandNames.add(cmd.name);
+    cmd.aliases?.forEach((alias: string) => {
+      commandNames.add(alias);
+    });
+  });
+  
+  // 添加 shell 内置命令
+  const builtinCommands = [
+    'help', 'exit', 'quit', 'q', 'clear', 'cls'
   ];
+  builtinCommands.forEach(cmd => commandNames.add(cmd));
+  
+  return Array.from(commandNames);
 }
 
 /**
