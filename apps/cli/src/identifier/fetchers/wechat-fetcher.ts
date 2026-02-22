@@ -218,8 +218,8 @@ export class WeChatFetcher extends BaseFetcher {
                           this.extractFromHtmlExact(html, 'js_author_name', 'span') ||
                           '';
     
-    // IP 属地 - 使用精确匹配
-    const location = this.extractFromHtmlExact(html, 'js_ip_wording', 'span') ||
+    // IP 属地 - 使用精确匹配，处理可能的前缀
+    const location = this.extractLocation(html) ||
                      extractVar('city') ||
                      extractVar('provinceName') ||
                      '';
@@ -236,6 +236,30 @@ export class WeChatFetcher extends BaseFetcher {
       location,
       isOriginal,
     };
+  }
+
+  /**
+   * 提取 IP 属地（处理多种格式）
+   */
+  private extractLocation(html: string): string | null {
+    // 模式 1: 标准格式 <span id="js_ip_wording">湖南</span>
+    const match1 = html.match(/id="js_ip_wording"[^>]*>([^<]+)<\/span>/i);
+    if (match1?.[1]) {
+      const loc = match1[1].trim();
+      // 如果包含 "IP属地：" 前缀，去掉它
+      if (loc.includes('IP属地')) {
+        return loc.replace(/IP属地[：:]\s*/, '').trim();
+      }
+      return loc;
+    }
+    
+    // 模式 2: 从 aria-label 属性提取
+    const match2 = html.match(/id="js_ip_wording_wrp"[^>]*aria-label="([^"]+)"/i);
+    if (match2?.[1]) {
+      return match2[1].trim();
+    }
+    
+    return null;
   }
 
   /**
