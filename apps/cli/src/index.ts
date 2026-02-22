@@ -495,10 +495,11 @@ const commands: Command[] = [
 
   {
     name: 'list',
-    aliases: ['ls', 'll'],
-    description: 'List items. Aliases: ls, ll (detailed). Options: -t/--type, -u/--unsynced, -d/--deleted, -s/--since, -e/--until, -S/--sort, -o/--order, -l/--limit, -O/--offset',
+    aliases: ['ls', 'll', 'la'],
+    description: 'List items. Aliases: ls, ll (detailed), la (compact). Options: -t/--type, -u/--unsynced, -d/--deleted, -s/--since, -e/--until, -S/--sort, -o/--order, -l/--limit, -O/--offset, -c/--compact',
     execute: async (args) => {
       const isDetailed = process.argv.includes('ll');  // Check if invoked as 'll'
+      const isCompact = process.argv.includes('la');   // Check if invoked as 'la'
       await initModules();
       const db = getDatabase();
 
@@ -516,6 +517,7 @@ const commands: Command[] = [
         order?: 'asc' | 'desc';
         limit: number;
         offset: number;
+        compact?: boolean;
       } = { limit: configLimit, offset: 0 };
 
       const positionalArgs: string[] = [];
@@ -540,6 +542,8 @@ const commands: Command[] = [
           options.limit = parseInt(args[++i]) || 20;
         } else if (arg === '--offset' || arg === '-o') {
           options.offset = parseInt(args[++i]) || 0;
+        } else if (arg === '--compact' || arg === '-c') {
+          options.compact = true;
         } else if (!arg.startsWith('-')) {
           positionalArgs.push(arg);
         }
@@ -548,6 +552,9 @@ const commands: Command[] = [
       // Backward compatibility: positional args as limit/offset
       if (positionalArgs.length > 0) options.limit = parseInt(positionalArgs[0]) || 20;
       if (positionalArgs.length > 1) options.offset = parseInt(positionalArgs[1]) || 0;
+
+      // Determine output mode: compact if --compact, -c, or invoked as 'la'
+      const useCompact = options.compact || isCompact;
 
       const library = await db.select().from(libraries).get();
       if (!library) {
@@ -629,7 +636,70 @@ const commands: Command[] = [
 
       if (results.length === 0) {
         console.log('   No items match the criteria.');
+        return;
+      }
+
+      if (useCompact) {
+        // Compact mode: similar to ls -alF
+        // Format: [sync][type] [attachments] [date] [title]
+        // Indicators: / = has attachments, * = unsynced, X = deleted
+        const formatCompactDate = (timestamp: number) => {
+          const d = new Date(timestamp * 1000);
+          const now = new Date();
+          const isCurrentYear = d.getFullYear() === now.getFullYear();
+          
+          if (isCurrentYear) {
+            // Same year: show "Mon DD HH:MM"
+            return d.toLocaleDateString('en-US', { 
+              month: 'short', 
+              day: '2-digit',
+              hour: '2-digit',
+              minute: '2-digit'
+            }).replace(',', '');
+          } else {
+            // Different year: show "Mon DD  YYYY"
+            return d.toLocaleDateString('en-US', { 
+              month: 'short', 
+              day: '2-digit',
+              year: 'numeric'
+            });
+          }
+        };
+
+        results.forEach(item => {
+          const syncIndicator = item.synced ? '✓' : '*';
+          const delIndicator = item.deleted ? 'X' : ' ';
+          const attCount = Number(item.attachmentCount) || 0;
+          const attIndicator = attCount > 0 ? '/' : ' ';
+          const attDisplay = attCount > 0 ? String(attCount).padStart(2, ' ') : '  ';
+          
+          const dateStr = formatCompactDate(item.updatedAt);
+          const titleStr = (item.title?.substring(0, 50) || '(no title)').padEnd(50, ' ');
+          const typeStr = item.itemType.padEnd(12, ' ');
+          
+          // Format: [S][D][A] [#] [date] [type] [title]
+          // S = sync status, D = deleted, A = has attachments
+          console.log(`${syncIndicator}${delIndicator}${attIndicator} ${attDisplay} ${dateStr}  ${typeStr}  ${titleStr}`);
+        });
+        
+        // Print legend
+        console.log(`\nLegend: [Sync][Del][Att] [#Att] [Date] [Type] [Title]`);
+        console.log(`  Sync: ✓=synced *=unsynced`);
+        console.log(`  Del:  X=deleted  =active`);
+        console.log(`  Att:  /=has attachments  =none`);
+      } else if (isDetailed) {
+        // Detailed mode (ll)
+        results.forEach(item => {
+          const syncStatus = item.synced ? '✅' : '🔄';
+          const delStatus = item.deleted ? ' (deleted)' : '';
+          const attCount = Number(item.attachmentCount) || 0;
+          const attIcon = attCount > 0 ? ` 📎${attCount}` : '';
+          console.log(`  ${syncStatus} [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}${delStatus}${attIcon}`);
+          console.log(`      Type: ${item.itemType} | Updated: ${formatDate(item.updatedAt)} | Key: ${item.key}`);
+          console.log();
+        });
       } else {
+        // Standard mode (ls)
         results.forEach(item => {
           const syncStatus = item.synced ? '✅' : '🔄';
           const delStatus = item.deleted ? ' (deleted)' : '';
@@ -2990,7 +3060,7 @@ Usage: zotero <command> [options]
 
 Core Commands:
   sync (s, pull, fetch)        Synchronize library
-  list (ls, ll)                List items with filters (shows 📎N for attachment count)
+  list (ls, ll, la)            List items (ls=standard, ll=detailed, la=compact)
   search (find, grep, f)       Search by title/author/tags
   get (show, cat, view)        Show item details
   stats (st, info, df)         Show statistics
@@ -2998,7 +3068,7 @@ Core Commands:
 
 Item Management:
   add (a, new, touch)          Add new item with optional attachments
-  add-by-id (add)              Add by DOI/ISBN/PMID/arXiv with optional attachments
+  add-by-id (addby)            Add by DOI/ISBN/PMID/arXiv with optional attachments
   update (u, edit, set)        Update item field
   delete (rm, del, d, trash)   Delete/trash item
   export (e, out, save)        Export to bibtex/ris/csv/json
