@@ -2152,7 +2152,7 @@ const commands: Command[] = [
 
   {
     name: 'add-by-id',
-    aliases: ['add'],
+    aliases: ['addby'],
     description: 'Add item(s) by identifier (DOI, ISBN, PMID, arXiv). Options: -a/--attachment <path> (multiple allowed)',
     execute: async (args) => {
       // Parse arguments for attachments
