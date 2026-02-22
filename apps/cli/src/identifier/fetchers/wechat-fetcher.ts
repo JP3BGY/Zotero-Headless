@@ -189,11 +189,19 @@ export class WeChatFetcher extends BaseFetcher {
     }
     allScripts = allScripts.replace(/__biz/g, '__BIZ');
     
-    // 从 JS 变量提取
+    // 从 JS 变量提取 - 支持多种格式：var x = "v", x = "v", x:"v"
     const extractVar = (field: string): string | null => {
-      const regex = new RegExp(`(?:var\\s+)?${field.replace(/\./g, '\\.')}\\s*=\\s*["']([^"']+)["']`);
-      const m = allScripts.match(regex);
-      return m?.[1] || null;
+      // 格式1: var field = "value" 或 field = "value"
+      const regex1 = new RegExp(`(?:var\\s+)?${field.replace(/\./g, '\\.')}\\s*=\\s*["']([^"']+)["']`);
+      const m1 = allScripts.match(regex1);
+      if (m1?.[1]) return m1[1];
+      
+      // 格式2: field:"value" (对象属性，无空格)
+      const regex2 = new RegExp(`${field.replace(/\./g, '\\.')}["']?\\s*:\\s*["']([^"']+)["']`);
+      const m2 = allScripts.match(regex2);
+      if (m2?.[1]) return m2[1];
+      
+      return null;
     };
     
     const title = extractVar('msg_title') || 
@@ -218,10 +226,10 @@ export class WeChatFetcher extends BaseFetcher {
                           this.extractFromHtmlExact(html, 'js_author_name', 'span') ||
                           '';
     
-    // IP 属地 - 使用精确匹配，处理可能的前缀
-    const location = this.extractLocation(html) ||
+    // IP 属地 - 优先从 JS 变量提取（provinceName），然后尝试 HTML 元素
+    const location = extractVar('provinceName') ||
+                     this.extractLocation(html) ||
                      extractVar('city') ||
-                     extractVar('provinceName') ||
                      '';
     
     // 原创标识 - 使用精确匹配
