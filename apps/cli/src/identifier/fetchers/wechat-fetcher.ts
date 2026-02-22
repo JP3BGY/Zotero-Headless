@@ -206,26 +206,26 @@ export class WeChatFetcher extends BaseFetcher {
                         '';
     
     const rawDate = extractVar('createTime') || this.extractPublishTime(html);
-    const date = this.formatDate(rawDate);
+    const date = this.formatWeChatDate(rawDate);
     
     // 公众号名称（多种模式尝试）
     const wechatName = this.extractJsName(html) || 
                        extractVar('nickname') || 
                        'Unknown';
     
-    // 文章作者（优先 js_author_name_text，然后 js_author_name）
-    const articleAuthor = this.extractFromHtml(html, 'js_author_name_text') ||
-                          this.extractFromHtml(html, 'js_author_name') ||
+    // 文章作者（优先 js_author_name_text，然后 js_author_name）- 使用精确匹配
+    const articleAuthor = this.extractFromHtmlExact(html, 'js_author_name_text', 'span') ||
+                          this.extractFromHtmlExact(html, 'js_author_name', 'span') ||
                           '';
     
-    // IP 属地
-    const location = this.extractFromHtml(html, 'js_ip_wording') ||
+    // IP 属地 - 使用精确匹配
+    const location = this.extractFromHtmlExact(html, 'js_ip_wording', 'span') ||
                      extractVar('city') ||
                      extractVar('provinceName') ||
                      '';
     
-    // 原创标识
-    const isOriginal = this.extractFromHtml(html, 'copyright_logo') || '';
+    // 原创标识 - 使用精确匹配
+    const isOriginal = this.extractFromHtmlExact(html, 'copyright_logo', 'span') || '';
     
     return {
       title,
@@ -257,6 +257,15 @@ export class WeChatFetcher extends BaseFetcher {
   }
 
   /**
+   * 从 HTML 元素提取（精确匹配结束标签）
+   */
+  private extractFromHtmlExact(html: string, id: string, endTag: string): string | null {
+    const regex = new RegExp(`id="${id}"[^>]*>([^<]+)<\\/${endTag}>`, 'i');
+    const match = html.match(regex);
+    return match?.[1]?.trim() || null;
+  }
+
+  /**
    * 提取公众号名称
    */
   private extractJsName(html: string): string | null {
@@ -275,7 +284,7 @@ export class WeChatFetcher extends BaseFetcher {
   }
 
   /**
-   * 提取发布时间
+   * 提取发布时间 - 使用精确匹配 </em> 结尾
    */
   private extractPublishTime(html: string): string | null {
     const match = html.match(/id="publish_time"[^>]*>([^<]+)<\/em>/i);
@@ -283,17 +292,26 @@ export class WeChatFetcher extends BaseFetcher {
   }
 
   /**
-   * 格式化日期
+   * 格式化日期为微信风格
+   * 格式: 2026年2月22日 09:03
    */
-  private formatDate(dateStr: string | null): string {
-    if (!dateStr) return new Date().toISOString().split('T')[0];
+  private formatWeChatDate(dateStr: string | null): string {
+    if (!dateStr) return new Date().toLocaleString('zh-CN', { 
+      year: 'numeric', month: 'long', day: 'numeric', 
+      hour: '2-digit', minute: '2-digit', hour12: false 
+    }).replace(/\//g, '年').replace(/, /g, '日 ');
     
     try {
       const d = new Date(dateStr);
       if (!isNaN(d.getTime())) {
-        return d.toISOString().split('T')[0];
+        return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
       }
     } catch {}
+    
+    // 如果已经是中文格式，直接返回
+    if (dateStr.includes('年') && dateStr.includes('月')) {
+      return dateStr;
+    }
     
     return dateStr;
   }
