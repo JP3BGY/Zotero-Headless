@@ -9,7 +9,7 @@ import { appConfig } from '@zotero-headless/core';
 import { eq, like, desc, asc, count, and, isNull, sql } from 'drizzle-orm';
 import { ProgressBar } from './progress-bar.js';
 import { resolveConflictsInteractive, isInteractive, ConflictItem } from './conflict-resolver.js';
-import { t, setLanguage, formatItemType, formatField, type Language } from './i18n.js';
+import { t, setLanguage, getLanguage, formatItemType, formatField, type Language } from './i18n.js';
 
 // Lazy-loaded modules (to avoid initialization on help commands)
 let syncManager: any;
