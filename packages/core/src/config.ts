@@ -136,6 +136,11 @@ function resolveDatabasePath(configPath: string | undefined): string {
   return path.join(os.homedir(), configPath);
 }
 
+// 获取默认数据目录
+function getDefaultDataDir(): string {
+  return path.join(os.homedir(), '.config', 'zotero-headless');
+}
+
 // 配置验证 Schema
 const ConfigSchema = z.object({
   zotero: z.object({
@@ -145,6 +150,7 @@ const ConfigSchema = z.object({
   database: z.object({
     path: z.string().default(getDefaultDatabasePath()),
   }),
+  dataDir: z.string().default(getDefaultDataDir()),
   log: z.object({
     level: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   }),
@@ -156,6 +162,8 @@ export type Config = z.infer<typeof ConfigSchema>;
  * 加载并验证配置
  */
 export function loadConfig(): Config {
+  const dataDir = process.env.DATA_DIR || getDefaultDataDir();
+  
   const rawConfig = {
     zotero: {
       apiKey: process.env.ZOTERO_API_KEY,
@@ -164,6 +172,7 @@ export function loadConfig(): Config {
     database: {
       path: resolveDatabasePath(process.env.DATABASE_PATH),
     },
+    dataDir: dataDir,
     log: {
       level: process.env.LOG_LEVEL,
     },
