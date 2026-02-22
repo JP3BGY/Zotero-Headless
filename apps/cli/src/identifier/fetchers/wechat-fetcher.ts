@@ -8,6 +8,9 @@
 
 import { BaseFetcher } from './base-fetcher.js';
 import type { Identifier, MetadataResult, FetcherConfig, Creator } from '../types.js';
+import https from 'https';
+import http from 'http';
+import { gunzipSync } from 'zlib';
 
 export class WeChatFetcher extends BaseFetcher {
   constructor(config: FetcherConfig) {
@@ -29,10 +32,10 @@ export class WeChatFetcher extends BaseFetcher {
     
     console.log('📥 Fetching WeChat article...');
     
-    // 1. 下载文章（使用微信特定的 headers）
+    // 1. 下载文章（使用微信特定的 headers，必须接受 gzip）
     const html = await this.downloadArticle(url);
     
-    // 检查文章有效性
+    // 检查文章有效性（包含"参数错误"也可能是临时问题，继续尝试解析）
     if (this.isInvalidArticle(html)) {
       throw new Error('Article URL is invalid or expired (参数错误). This usually means the link has expired or requires authentication.');
     }
@@ -91,35 +94,68 @@ export class WeChatFetcher extends BaseFetcher {
   }
 
   /**
-   * 下载文章（使用微信特定的 headers）
+   * 下载文章（使用微信特定的 headers，必须接受 gzip）
+   * 
+   * 关键：微信服务器需要 Accept-Encoding: gzip, deflate, br
+   * 否则可能返回 "参数错误"
    */
   private async downloadArticle(url: string): Promise<string> {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
-
-    try {
-      const response = await fetch(url, {
+    return new Promise((resolve, reject) => {
+      const urlObj = new URL(url);
+      const client = urlObj.protocol === 'https:' ? https : http;
+      
+      const options = {
+        hostname: urlObj.hostname,
+        path: urlObj.pathname + urlObj.search,
         method: 'GET',
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
           'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-          // 不发送 Accept-Encoding，让服务器返回未压缩内容
+          // 关键：必须接受 gzip，否则微信返回"参数错误"
+          'Accept-Encoding': 'gzip, deflate, br',
           'Referer': 'https://mp.weixin.qq.com/',
           'Connection': 'keep-alive',
         },
-        signal: controller.signal,
+        timeout: this.config.timeout || 30000,
+      };
+
+      const req = client.request(options, (res) => {
+        const chunks: Buffer[] = [];
+        
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        
+        res.on('end', () => {
+          try {
+            const buffer = Buffer.concat(chunks);
+            let html: string;
+            
+            // 根据 Content-Encoding 解压
+            const encoding = res.headers['content-encoding'];
+            if (encoding === 'gzip') {
+              html = gunzipSync(buffer).toString('utf-8');
+            } else {
+              html = buffer.toString('utf-8');
+            }
+            
+            resolve(html);
+          } catch (err) {
+            reject(new Error(`Failed to decode response: ${err.message}`));
+          }
+        });
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
+      req.on('error', (err) => {
+        reject(new Error(`Request failed: ${err.message}`));
+      });
 
-      // 直接获取文本，不手动处理压缩
-      return await response.text();
-    } finally {
-      clearTimeout(timeoutId);
-    }
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error('Request timeout'));
+      });
+
+      req.end();
+    });
   }
 
   /**
