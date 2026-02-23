@@ -336,6 +336,13 @@ const commands: Command[] = [
     name: 'attachment-download',
     aliases: ['attdl', 'down'],
     description: 'Download attachment from WebDAV',
+    options: [
+      { name: '--force', alias: '-f', description: 'Overwrite existing file' },
+    ],
+    examples: [
+      'zotero attachment-download ABC123',
+      'zotero attdl ABC123 -f',
+    ],
     execute: async (args) => {
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
@@ -347,6 +354,13 @@ const commands: Command[] = [
     name: 'attachment-open',
     aliases: ['atto', 'open'],
     description: 'Open attachment with system default app',
+    options: [
+      { name: '--wait', alias: '-w', description: 'Wait for application to close' },
+    ],
+    examples: [
+      'zotero attachment-open ABC123',
+      'zotero atto ABC123 -w',
+    ],
     execute: async (args) => {
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
@@ -358,6 +372,15 @@ const commands: Command[] = [
     name: 'attachment-dedup',
     aliases: ['attdedup', 'dedup'],
     description: 'Find and remove duplicate attachments',
+    options: [
+      { name: '--delete', alias: '-d', description: 'Automatically delete duplicates' },
+      { name: '--dry-run', description: 'Show duplicates without deleting' },
+    ],
+    examples: [
+      'zotero attachment-dedup',
+      'zotero attdedup --dry-run',
+      'zotero attdedup --delete',
+    ],
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
@@ -376,6 +399,13 @@ const commands: Command[] = [
     name: 'groups',
     aliases: ['g', 'team', 'org'],
     description: 'List and sync group libraries. Aliases: g, team, org. Use --sync <group-id> to sync a group library',
+    options: [
+      { name: '--sync', alias: '-s', description: 'Sync specific group library', value: '<group-id>' },
+    ],
+    examples: [
+      'zotero groups',
+      'zotero groups --sync 12345',
+    ],
     execute: async (args) => {
       await initModules();
 
@@ -469,6 +499,13 @@ const commands: Command[] = [
     name: 'sync:upload',
     aliases: ['su'],
     description: 'Upload local changes only',
+    options: [
+      { name: '--force', alias: '-f', description: 'Force upload even if unchanged' },
+    ],
+    examples: [
+      'zotero sync:upload',
+      'zotero sync:upload -f',
+    ],
     execute: async () => {
       console.log('📤 This would upload local changes...');
       // Implementation for upload-only would go here
@@ -798,6 +835,13 @@ const commands: Command[] = [
     name: 'list:unsynced',
     aliases: ['lsu'],
     description: 'List unsynced items',
+    options: [
+      { name: '--limit', alias: '-l', description: 'Limit number of results', value: '<N>' },
+    ],
+    examples: [
+      'zotero list:unsynced',
+      'zotero list:unsynced -l 50',
+    ],
     execute: async () => {
       await initModules();
       const db = getDatabase();
@@ -1100,6 +1144,15 @@ const commands: Command[] = [
     name: 'get',
     aliases: ['show', 'cat', 'view'],
     description: 'Show item details. Aliases: show, cat, view',
+    options: [
+      { name: '--format', alias: '-f', description: 'Output format (json|yaml|text)', value: '<format>' },
+      { name: '--attachments', alias: '-a', description: 'Include attachment info' },
+    ],
+    examples: [
+      'zotero get ABC123',
+      'zotero cat ABC123 -f json',
+      'zotero show ABC123 -a',
+    ],
     execute: async (args) => {
       await initModules();
       if (args.length === 0) {
@@ -1192,6 +1245,15 @@ const commands: Command[] = [
     name: 'stats',
     aliases: ['st', 'info', 'status', 'df'],
     description: 'Show library statistics. Aliases: st, info, status, df',
+    options: [
+      { name: '--type', alias: '-t', description: 'Show stats for specific item type', value: '<type>' },
+      { name: '--group', alias: '-g', description: 'Show stats by group library' },
+    ],
+    examples: [
+      'zotero stats',
+      'zotero stats -t book',
+      'zotero stats --group',
+    ],
     execute: async () => {
       await initModules();
       const db = getDatabase();
@@ -1274,6 +1336,15 @@ const commands: Command[] = [
     name: 'verify',
     aliases: ['v', 'check', 'test', 'ping'],
     description: 'Verify API key and connection. Aliases: v, check, test, ping',
+    options: [
+      { name: '--fix', description: 'Attempt to fix verification issues' },
+      { name: '--verbose', alias: '-v', description: 'Show detailed output' },
+    ],
+    examples: [
+      'zotero verify',
+      'zotero verify --fix',
+      'zotero v -v',
+    ],
     execute: async () => {
       await initModules();
       console.log('🔑 Verifying API key...\n');
@@ -1341,6 +1412,10 @@ const commands: Command[] = [
     name: 'attachments',
     aliases: ['att', 'files', 'docs'],
     description: 'List attachments. Aliases: att, files, docs',
+    examples: [
+      'zotero attachments ABC123',
+      'zotero att ABC123',
+    ],
     execute: async (args) => {
       await initModules();
       const options: {
@@ -1443,6 +1518,15 @@ const commands: Command[] = [
     name: 'webdav:config',
     aliases: ['wdc'],
     description: 'Configure WebDAV server',
+    options: [
+      { name: '--url', description: 'WebDAV server URL', value: '<url>' },
+      { name: '--username', description: 'WebDAV username', value: '<user>' },
+      { name: '--password', description: 'WebDAV password', value: '<pass>' },
+    ],
+    examples: [
+      'zotero webdav:config',
+      'zotero wdc --url https://dav.example.com --username user',
+    ],
     execute: async (args) => {
       await initModules();
       if (args.length < 3) {
@@ -1520,6 +1604,14 @@ const commands: Command[] = [
     name: 'webdav:sync',
     aliases: ['wds'],
     description: 'Sync attachments to WebDAV',
+    options: [
+      { name: '--download', alias: '-d', description: 'Download only (skip uploads)' },
+      { name: '--upload', alias: '-u', description: 'Upload only (skip downloads)' },
+    ],
+    examples: [
+      'zotero webdav:sync',
+      'zotero wds -d',
+    ],
     execute: async (args) => {
       await initModules();
       const quiet = args.includes('--quiet') || args.includes('-q');
@@ -1594,6 +1686,13 @@ const commands: Command[] = [
     name: 'webdav:status',
     aliases: ['wdst'],
     description: 'Show WebDAV configuration status',
+    options: [
+      { name: '--verbose', alias: '-v', description: 'Show detailed status' },
+    ],
+    examples: [
+      'zotero webdav:status',
+      'zotero wdst',
+    ],
     execute: async () => {
       await initModules();
       const db = getDatabase();
@@ -1672,6 +1771,13 @@ const commands: Command[] = [
     name: 'webdav:scan',
     aliases: ['wdscan'],
     description: 'Scan WebDAV for existing Zotero Desktop attachments',
+    options: [
+      { name: '--orphaned', alias: '-o', description: 'Show orphaned attachments only' },
+    ],
+    examples: [
+      'zotero webdav:scan',
+      'zotero wdscan --orphaned',
+    ],
     execute: async (args) => {
       await initModules();
       const quiet = args.includes('--quiet') || args.includes('-q');
@@ -1769,6 +1875,16 @@ const commands: Command[] = [
     name: 'add',
     aliases: ['a', 'new', 'touch', 'create'],
     description: 'Add a new item. Aliases: a, new, touch, create. Options: -a/--attachment <path> (multiple allowed)',
+    options: [
+      { name: '--type', alias: '-t', description: 'Item type (book|journalArticle|webpage|...) ', value: '<type>' },
+      { name: '--attachment', alias: '-a', description: 'Add attachment file (can specify multiple)', value: '<file>' },
+      { name: '--collection', alias: '-c', description: 'Add to collection', value: '<key>' },
+    ],
+    examples: [
+      'zotero add book "Title" "Author"',
+      'zotero touch journalArticle "Title" -a file.pdf',
+      'zotero new webpage "Title" --collection ABC123',
+    ],
     execute: async (args) => {
       await initModules();
       console.log('📝 Adding new item to library...\n');
@@ -1947,6 +2063,14 @@ const commands: Command[] = [
     name: 'update',
     aliases: ['u', 'edit', 'set', 'mod'],
     description: 'Update an item. Aliases: u, edit, set, mod',
+    options: [
+      { name: '--field', alias: '-f', description: 'Field to update', value: '<field>' },
+      { name: '--value', alias: '-v', description: 'New value', value: '<value>' },
+    ],
+    examples: [
+      'zotero update ABC123 --field title --value "New Title"',
+      'zotero u ABC123 -f date -v "2024-01-01"',
+    ],
     execute: async (args) => {
       await initModules();
       console.log('📝 Updating item locally...\n');
@@ -2072,6 +2196,15 @@ const commands: Command[] = [
     name: 'delete',
     aliases: ['d', 'del', 'rm', 'trash'],
     description: 'Delete (trash) an item. Aliases: rm, del, d. Options: -p/--permanent, -f/--force',
+    options: [
+      { name: '--force', alias: '-f', description: 'Permanently delete (skip trash)' },
+      { name: '--permanent', alias: '-p', description: 'Same as --force' },
+    ],
+    examples: [
+      'zotero delete ABC123',
+      'zotero rm ABC123 -f',
+      'zotero del ABC123 ABC124',
+    ],
     execute: async (args) => {
       await initModules();
       console.log('🗑️  Deleting item locally...\n');
@@ -2192,6 +2325,14 @@ const commands: Command[] = [
     name: 'export',
     aliases: ['e', 'out', 'save'],
     description: 'Export items to various formats. Aliases: e, out, save',
+    options: [
+      { name: '--format', alias: '-f', description: 'Export format (bibtex|ris|csv|json)', value: '<format>' },
+      { name: '--output', alias: '-o', description: 'Output file path', value: '<path>' },
+    ],
+    examples: [
+      'zotero export ABC123 -f bibtex',
+      'zotero e ABC123 ABC124 -o output.bib',
+    ],
     execute: async (args) => {
       await initModules();
       console.log('📤 Exporting items...\n');
@@ -2276,6 +2417,14 @@ const commands: Command[] = [
     name: 'add-by-id',
     aliases: ['addby'],
     description: 'Add item(s) by identifier (DOI, ISBN, PMID, arXiv). Options: -a/--attachment <path> (multiple allowed)',
+    options: [
+      { name: '--attachment', alias: '-a', description: 'Add attachment file', value: '<file>' },
+      { name: '--collection', alias: '-c', description: 'Add to collection', value: '<key>' },
+    ],
+    examples: [
+      'zotero add-by-id "10.1000/xyz"',
+      'zotero addby "978-0-123456-78-9" -a file.pdf',
+    ],
     execute: async (args) => {
       // Parse arguments for attachments
       const attachmentPaths: string[] = [];
@@ -2564,6 +2713,15 @@ const commands: Command[] = [
     name: 'note',
     aliases: ['n', 'notes'],
     description: 'Note management. Subcommands: add, edit, show, list. Supports Markdown input/output',
+    options: [
+      { name: '--item', alias: '-i', description: 'Parent item key', value: '<key>' },
+      { name: '--edit', alias: '-e', description: 'Edit note content' },
+    ],
+    examples: [
+      'zotero note list ABC123',
+      'zotero note add ABC123 "Content"',
+      'zotero note edit NOTE456 -e',
+    ],
     execute: async (args) => {
       await initModules();
 
@@ -3048,6 +3206,15 @@ Notes:
     name: 'config',
     aliases: ['cfg', 'conf'],
     description: 'Configure zotero CLI settings',
+    options: [
+      { name: '--get', alias: '-g', description: 'Get config value', value: '<key>' },
+      { name: '--set', alias: '-s', description: 'Set config value', value: '<key=value>' },
+      { name: '--list', alias: '-l', description: 'List all config' },
+    ],
+    examples: [
+      'zotero config --get apiKey',
+      'zotero config -s "defaultLimit=50"',
+    ],
     execute: async (args) => {
       const { configManager } = await import('@zotero-headless/core');
       
@@ -3073,6 +3240,14 @@ Notes:
     name: 'history',
     aliases: ['hist', 'h', 'recent'],
     description: 'Show recent items and commands',
+    options: [
+      { name: '--limit', alias: '-l', description: 'Number of entries', value: '<N>' },
+      { name: '--clear', alias: '-c', description: 'Clear history' },
+    ],
+    examples: [
+      'zotero history',
+      'zotero history -l 20',
+    ],
     execute: async (args) => {
       const { historyManager } = await import('@zotero-headless/core');
       
@@ -3104,6 +3279,14 @@ Notes:
     name: 'help',
     aliases: ['h', '?'],
     description: 'Show help message',
+    options: [
+      { name: '--all', alias: '-a', description: 'Show all commands including hidden ones' },
+    ],
+    examples: [
+      'zotero help',
+      'zotero help sync',
+      'zotero sync --help',
+    ],
     execute: async () => {
       console.log(`
 🛠️  Zotero-Headless CLI
@@ -3171,6 +3354,12 @@ For more info: https://github.com/altairwei/Zotero-Headless
     name: 'shell',
     aliases: ['sh', 'repl', 'interactive', 'i'],
     description: 'Start interactive shell. Use --lang=en or --lang=zh to set language.',
+    options: [
+      { name: '--lang', description: 'Set language (en|zh)', value: '<lang>' },
+    ],
+    examples: [
+      'zotero shell',
+    ],
     execute: async (args: string[]) => {
       const { spawn } = await import('child_process');
       const { fileURLToPath } = await import('url');
@@ -3350,12 +3539,6 @@ export async function main() {
   }
 }
 
-// Only run main if this file is executed directly
-// @ts-ignore
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main();
-}
-
 /**
  * Show detailed help for a specific command
  */
@@ -3392,6 +3575,6 @@ function showCommandHelp(cmd: Command, invokedName: string) {
 
 // Only run main if this file is executed directly
 // @ts-ignore
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (require.main === module) {
   main();
 }

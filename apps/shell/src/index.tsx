@@ -231,11 +231,11 @@ class ZoteroExecutor {
     }
 
     const options = getCommandOptions(cmd);
-    const matches = options.filter(opt => opt.startsWith(lastToken));
+    const matches = options.filter(opt => opt.name.startsWith(lastToken));
 
-    return matches.map(name => ({
-      name,
-      description: 'option'
+    return matches.map(opt => ({
+      name: opt.name,
+      description: opt.description
     }));
   }
 

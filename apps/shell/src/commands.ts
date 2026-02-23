@@ -322,9 +322,9 @@ export function clearItemCache(): void {
 }
 
 /**
- * 获取命令的选项补全列表
+ * 获取命令的选项补全列表（带描述）
  */
-export function getCommandOptions(cmd: string): string[] {
+export function getCommandOptions(cmd: string): { name: string; description: string }[] {
   // 转换命令别名
   const actualCmd = COMMAND_ALIASES[cmd] || cmd;
   
@@ -337,12 +337,13 @@ export function getCommandOptions(cmd: string): string[] {
     return [];
   }
   
-  // 返回所有选项（包括长格式和短格式）
-  const options: string[] = [];
+  // 返回所有选项（包括长格式和短格式）及其描述
+  const options: { name: string; description: string }[] = [];
   for (const opt of command.options) {
-    options.push(opt.name);
+    const desc = opt.description + (opt.value ? ` (${opt.value})` : '');
+    options.push({ name: opt.name, description: desc });
     if (opt.alias) {
-      options.push(opt.alias);
+      options.push({ name: opt.alias, description: desc });
     }
   }
   
