@@ -10,6 +10,7 @@ import {
   highlightSearchResult,
   needsItemKey,
   getItemKeyCompletions,
+  getCommandOptions,
   clearItemCache,
   type ExecuteResult,
   type ItemInfo
@@ -220,6 +221,24 @@ class ZoteroExecutor {
     }));
   }
 
+  getOptionCompletions(input: string): CommandSuggestion[] {
+    const parts = input.trim().split(/\s+/);
+    const cmd = parts[0]?.toLowerCase() || '';
+    const lastToken = parts[parts.length - 1] || '';
+
+    if (!cmd || !lastToken.startsWith('-')) {
+      return [];
+    }
+
+    const options = getCommandOptions(cmd);
+    const matches = options.filter(opt => opt.startsWith(lastToken));
+
+    return matches.map(name => ({
+      name,
+      description: 'option'
+    }));
+  }
+
   async getItemKeyCompletions(prefix: string): Promise<ItemKeySuggestion[]> {
     const items = await getItemKeyCompletions(prefix);
     return items;
@@ -350,12 +369,24 @@ export function ZoteroShell() {
     }
 
     if (key.tab) {
-      // 检查是否是 item key 补全
+      // 检查是否是 item key / option / command 补全
       const parts = input.trim().split(/\s+/);
       const cmd = parts[0]?.toLowerCase() || '';
       const arg = parts[1] || '';
+      const lastToken = parts[parts.length - 1] || '';
 
-      if (needsItemKey(cmd) && parts.length >= 2) {
+      if (lastToken.startsWith('-') && cmd) {
+        // Option 补全
+        const comps = executor.current.getOptionCompletions(input);
+        if (comps.length === 1) {
+          const completed = input.replace(/\S+$/, comps[0].name);
+          setInput(completed + ' ');
+          setSuggestions([]);
+        } else if (comps.length > 0) {
+          setSuggestions(comps);
+          setItemKeySuggestions([]);
+        }
+      } else if (needsItemKey(cmd) && parts.length >= 2) {
         // Item Key 补全
         executor.current.getItemKeyCompletions(arg).then(items => {
           if (items.length === 1) {
@@ -373,6 +404,7 @@ export function ZoteroShell() {
           setSuggestions([]);
         } else if (comps.length > 0) {
           setSuggestions(comps);
+          setItemKeySuggestions([]);
         }
       }
       return;
@@ -385,7 +417,14 @@ export function ZoteroShell() {
       const cmd = parts[0]?.toLowerCase() || '';
       const arg = parts[1] || '';
 
-      if (needsItemKey(cmd) && parts.length >= 2) {
+      const lastToken = parts[parts.length - 1] || '';
+
+      if (lastToken.startsWith('-') && cmd) {
+        // 选项补全模式
+        const comps = executor.current.getOptionCompletions(newInput);
+        setSuggestions(comps.slice(0, 8));
+        setItemKeySuggestions([]);
+      } else if (needsItemKey(cmd) && parts.length >= 2) {
         // Item Key 补全模式
         executor.current.getItemKeyCompletions(arg).then(items => {
           setItemKeySuggestions(items.slice(0, 8));
@@ -470,7 +509,14 @@ export function ZoteroShell() {
               const cmd = parts[0]?.toLowerCase() || '';
               const arg = parts[1] || '';
 
-              if (needsItemKey(cmd) && parts.length >= 2) {
+              const lastToken = parts[parts.length - 1] || '';
+
+              if (lastToken.startsWith('-') && cmd) {
+                // 选项补全模式
+                const comps = executor.current.getOptionCompletions(value);
+                setSuggestions(comps.slice(0, 8));
+                setItemKeySuggestions([]);
+              } else if (needsItemKey(cmd) && parts.length >= 2) {
                 // Item Key 补全模式
                 executor.current.getItemKeyCompletions(arg).then(items => {
                   setItemKeySuggestions(items.slice(0, 8));

@@ -144,7 +144,8 @@ export async function executeCommand(
 
   try {
     // 执行命令并捕获输出（实时输出通过 onOutput）
-    const result = await captureConsoleOutput(() => command.execute(args), onOutput);
+    // 传递原始命令名 cmd（如 'll', 'la'）以便命令区分输出格式
+    const result = await captureConsoleOutput(() => command.execute(args, cmd), onOutput);
     return result;
   } catch (error) {
     // 捕获所有未处理的错误（包括网络错误）
@@ -318,4 +319,32 @@ export async function getItemKeyCompletions(
 export function clearItemCache(): void {
   cachedItems = [];
   lastCacheTime = 0;
+}
+
+/**
+ * 获取命令的选项补全列表
+ */
+export function getCommandOptions(cmd: string): string[] {
+  // 转换命令别名
+  const actualCmd = COMMAND_ALIASES[cmd] || cmd;
+  
+  // 找到对应的 CLI 命令
+  const command = commands.find((c: Command) =>
+    c.name === actualCmd || c.aliases?.includes(actualCmd)
+  );
+  
+  if (!command || !command.options) {
+    return [];
+  }
+  
+  // 返回所有选项（包括长格式和短格式）
+  const options: string[] = [];
+  for (const opt of command.options) {
+    options.push(opt.name);
+    if (opt.alias) {
+      options.push(opt.alias);
+    }
+  }
+  
+  return options;
 }

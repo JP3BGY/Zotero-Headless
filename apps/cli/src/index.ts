@@ -175,18 +175,40 @@ function getContentType(filename: string): string {
 
 // ============ CLI Commands ============
 
+export interface CommandOption {
+  name: string;
+  alias?: string;
+  description: string;
+  value?: string; // value placeholder like "<type>", "<N>"
+}
+
 export interface Command {
   name: string;
   aliases?: string[];
   description: string;
-  execute: (args: string[]) => Promise<void>;
+  options?: CommandOption[];
+  examples?: string[];
+  execute: (args: string[], invokedAs?: string) => Promise<void>;
 }
 
 const commands: Command[] = [
   {
     name: 'sync',
     aliases: ['s', 'pull', 'fetch', 'refresh'],
-    description: 'Synchronize library. Aliases: s, pull, fetch, refresh. Options: -f/--full-sync, -g/--groups, -q/--quiet, -i/--interactive',
+    description: 'Synchronize library with Zotero servers',
+    options: [
+      { name: '--full-sync', alias: '-f', description: 'Perform a full sync (ignore version cache)' },
+      { name: '--groups', alias: '-g', description: 'Sync all group libraries' },
+      { name: '--group', alias: '-G', description: 'Sync specific group library', value: '<id>' },
+      { name: '--quiet', alias: '-q', description: 'Quiet mode (no progress bar)' },
+      { name: '--interactive', alias: '-i', description: 'Interactive conflict resolution' },
+    ],
+    examples: [
+      'zotero sync',
+      'zotero sync -f',
+      'zotero sync -g',
+      'zotero sync -G12345',
+    ],
     execute: async (args) => {
       await initModules();
       const fullSync = args.includes('--full-sync') || args.includes('-f');
@@ -496,10 +518,29 @@ const commands: Command[] = [
   {
     name: 'list',
     aliases: ['ls', 'll', 'la'],
-    description: 'List items. Aliases: ls, ll (detailed), la (compact). Options: -t/--type, -u/--unsynced, -d/--deleted, -s/--since, -e/--until, -S/--sort, -o/--order, -l/--limit, -O/--offset, -c/--compact',
-    execute: async (args) => {
-      const isDetailed = process.argv.includes('ll');  // Check if invoked as 'll'
-      const isCompact = process.argv.includes('la');   // Check if invoked as 'la'
+    description: 'List items in the library',
+    options: [
+      { name: '--type', alias: '-t', description: 'Filter by item type', value: '<type>' },
+      { name: '--unsynced', alias: '-u', description: 'Show only unsynced items' },
+      { name: '--deleted', alias: '-d', description: 'Show deleted items' },
+      { name: '--since', alias: '-s', description: 'Show items updated since date', value: '<YYYY-MM-DD>' },
+      { name: '--until', alias: '-e', description: 'Show items updated until date', value: '<YYYY-MM-DD>' },
+      { name: '--sort', description: 'Sort by field (title|date|updated|type)', value: '<field>' },
+      { name: '--order', description: 'Sort order (asc|desc)', value: '<order>' },
+      { name: '--limit', alias: '-l', description: 'Limit number of results', value: '<N>' },
+      { name: '--offset', alias: '-o', description: 'Offset for pagination', value: '<N>' },
+      { name: '--compact', alias: '-c', description: 'Compact output format' },
+    ],
+    examples: [
+      'zotero list',
+      'zotero ls -t book',
+      'zotero ls -u -l 10',
+      'zotero la',
+      'zotero ll --sort title',
+    ],
+    execute: async (args, invokedAs) => {
+      const isDetailed = invokedAs === 'll';  // Check if invoked as 'll'
+      const isCompact = invokedAs === 'la';   // Check if invoked as 'la'
       await initModules();
       const db = getDatabase();
 
@@ -828,7 +869,18 @@ const commands: Command[] = [
   {
     name: 'search',
     aliases: ['find', 'grep', 'f'],
-    description: 'Search items. Aliases: find, grep, f. Options: -f/--field (title|author|tags|note|all), -s/--since, -u/--unsynced, -l/--limit. Use --field note to search in note content.',
+    description: 'Search items by keywords',
+    options: [
+      { name: '--field', alias: '-f', description: 'Search field (title|author|tags|note|all)', value: '<field>' },
+      { name: '--since', alias: '-s', description: 'Search items since date', value: '<YYYY-MM-DD>' },
+      { name: '--unsynced', alias: '-u', description: 'Search only unsynced items' },
+      { name: '--limit', alias: '-l', description: 'Limit number of results', value: '<N>' },
+    ],
+    examples: [
+      'zotero search "machine learning"',
+      'zotero grep "Smith" -f author',
+      'zotero f "findings" --field note',
+    ],
     execute: async (args) => {
       await initModules();
 
@@ -3242,7 +3294,23 @@ export async function main() {
   const commandName = args[0]?.toLowerCase() || 'help';
   const commandArgs = args.slice(1);
 
-  // Check for --help or -h flag
+  // Handle "zotero help <command>" syntax
+  if (commandName === 'help' && commandArgs.length > 0 && !commandArgs[0].startsWith('-')) {
+    const helpTarget = commandArgs[0].toLowerCase();
+    const cmd = commands.find(c =>
+      c.name === helpTarget || c.aliases?.includes(helpTarget)
+    );
+    if (cmd) {
+      showCommandHelp(cmd, helpTarget);
+      return;
+    } else {
+      console.log(`❌ Unknown command: ${helpTarget}`);
+      console.log(`   Run "zotero help" for all commands.`);
+      process.exit(1);
+    }
+  }
+
+  // Check for --help or -h flag on commands
   if (commandArgs.includes('--help') || commandArgs.includes('-h') || commandName === 'help') {
     // Show help for specific command or general help
     if (commandName !== 'help') {
@@ -3251,13 +3319,7 @@ export async function main() {
         c.name === commandName || c.aliases?.includes(commandName)
       );
       if (cmd) {
-        console.log(`\nUsage: zotero ${commandName} [options]`);
-        console.log(`\n${cmd.description}`);
-        if (cmd.aliases) {
-          console.log(`\nAliases: ${cmd.aliases.join(', ')}`);
-        }
-        // TODO: Add command-specific help text
-        console.log(`\nRun "zotero help" for all commands.`);
+        showCommandHelp(cmd, commandName);
         return;
       }
     }
@@ -3281,7 +3343,7 @@ export async function main() {
   }
 
   try {
-    await command.execute(commandArgs);
+    await command.execute(commandArgs, commandName);
   } catch (error) {
     console.error('❌ Command failed:', error);
     process.exit(1);
@@ -3289,6 +3351,47 @@ export async function main() {
 }
 
 // Only run main if this file is executed directly
-if (require.main === module) {
+// @ts-ignore
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main();
+}
+
+/**
+ * Show detailed help for a specific command
+ */
+function showCommandHelp(cmd: Command, invokedName: string) {
+  console.log(`\n📖 ${cmd.name} - ${cmd.description}\n`);
+  
+  console.log(`Usage: zotero ${invokedName}${cmd.options ? ' [options]' : ''} [arguments]\n`);
+  
+  if (cmd.aliases && cmd.aliases.length > 0) {
+    console.log(`Aliases: ${cmd.aliases.join(', ')}\n`);
+  }
+  
+  if (cmd.options && cmd.options.length > 0) {
+    console.log('Options:');
+    for (const opt of cmd.options) {
+      const aliasStr = opt.alias ? `, ${opt.alias}` : '';
+      const valueStr = opt.value ? ` ${opt.value}` : '';
+      console.log(`  ${opt.name}${aliasStr}${valueStr}`);
+      console.log(`      ${opt.description}`);
+    }
+    console.log('');
+  }
+  
+  if (cmd.examples && cmd.examples.length > 0) {
+    console.log('Examples:');
+    for (const ex of cmd.examples) {
+      console.log(`  $ ${ex}`);
+    }
+    console.log('');
+  }
+  
+  console.log('Use "zotero help" to see all available commands.\n');
+}
+
+// Only run main if this file is executed directly
+// @ts-ignore
+if (import.meta.url === `file://${process.argv[1]}`) {
   main();
 }
