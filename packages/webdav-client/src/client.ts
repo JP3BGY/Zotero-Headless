@@ -42,6 +42,16 @@ export class WebDAVClient {
   }
 
   /**
+   * Join URL path parts (always uses forward slashes for URLs)
+   */
+  private joinUrlPath(...parts: string[]): string {
+    return parts
+      .map(p => p.replace(/\\/g, '/').replace(/^\/+|\/+$/g, ''))
+      .filter(p => p)
+      .join('/');
+  }
+
+  /**
    * Make a WebDAV request
    */
   private async request(
@@ -52,7 +62,7 @@ export class WebDAVClient {
       headers?: Record<string, string>;
     } = {}
   ): Promise<{ status: number; headers: Record<string, string>; body: string }> {
-    const urlPath = path.join(this.config.basePath || '/', filePath);
+    const urlPath = this.joinUrlPath(this.config.basePath || '/', filePath);
     const url = new URL(urlPath, this.baseUrl);
 
     const auth = Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64');
@@ -136,7 +146,7 @@ export class WebDAVClient {
    */
   async downloadFile(remotePath: string, localPath: string, onProgress?: (downloaded: number, total: number) => void): Promise<void> {
     return new Promise(async (resolve, reject) => {
-      const urlPath = path.join(this.config.basePath || '/', remotePath);
+      const urlPath = this.joinUrlPath(this.config.basePath || '/', remotePath);
       const url = new URL(urlPath, this.baseUrl);
       const auth = Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64');
 

@@ -4,7 +4,9 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit"
@@ -13,9 +15,11 @@
     "@zotero-headless/api": "workspace:*",
     "@zotero-headless/database": "workspace:*",
     "@zotero-headless/webdav-client": "workspace:*",
+    "adm-zip": "^0.5.10",
     "drizzle-orm": "^0.30.10"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.0.0",
     "typescript": "^5.3.0"

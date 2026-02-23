@@ -220,10 +220,16 @@ importers:
       '@zotero-headless/webdav-client':
         specifier: workspace:*
         version: link:../webdav-client
+      adm-zip:
+        specifier: ^0.5.10
+        version: 0.5.16
       drizzle-orm:
         specifier: ^0.30.10
         version: 0.30.10(@types/better-sqlite3@7.6.13)(better-sqlite3@11.9.1)(sql.js@1.14.0)
     devDependencies:
+      '@types/adm-zip':
+        specifier: ^0.5.7
+        version: 0.5.7
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
@@ -1367,6 +1373,12 @@ packages:
     resolution: {integrity: sha512-MTBk/3jGLNB2tVxv6uLlFh1iu64iYOQ2PbdOSK3NW8JZsmlaOh2q6sdtKowBhfw8QFLmYNzTW4/oK4uATIi6ZA==}
     dev: true
 
+  /@types/adm-zip@0.5.7:
+    resolution: {integrity: sha512-DNEs/QvmyRLurdQPChqq0Md4zGvPwHerAJYWk9l2jCbD1VPpnzRJorOdiq4zsw09NFbYnhfsoEhWtxIzXpn2yw==}
+    dependencies:
+      '@types/node': 25.2.3
+    dev: true
+
   /@types/better-sqlite3@7.5.0:
     resolution: {integrity: sha512-G9ZbMjydW2yj1AgiPlUtdgF3a1qNpLJLudc9ynJCeJByS3XFWpmT9LT+VSHrKHFbxb31CvtYwetLTOvG9zdxdg==}
     dependencies:
@@ -1483,6 +1495,11 @@ packages:
     engines: {node: '>=0.4.0'}
     hasBin: true
     dev: true
+
+  /adm-zip@0.5.16:
+    resolution: {integrity: sha512-TGw5yVi4saajsSEgz25grObGHEUaDrniwvA2qwSC060KfqGPdglhvPMA2lPIoxs3PQIItj2iag35fONcQqgUaQ==}
+    engines: {node: '>=12.0'}
+    dev: false
 
   /agent-base@6.0.2:
     resolution: {integrity: sha512-RZNwNclF7+MS/8bDg70amg32dyeZGZxiDuQmZxKLAlQjr3jGyLx+4Kkk58UO7D2QdgFIQCovuSuZESne6RG6XQ==}
@@ -4111,6 +4128,7 @@ packages:
       '@zotero-headless/api': link:packages/api
       '@zotero-headless/database': link:packages/database
       '@zotero-headless/webdav-client': link:packages/webdav-client
+      adm-zip: 0.5.16
       drizzle-orm: 0.30.10(@types/better-sqlite3@7.5.0)(better-sqlite3@11.9.1)(sql.js@1.14.0)
     transitivePeerDependencies:
       - '@aws-sdk/client-rds-data'

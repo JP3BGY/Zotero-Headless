@@ -140,6 +140,9 @@ export function initializeDatabase(): Database {
       deleted INTEGER NOT NULL DEFAULT 0,
       size INTEGER,
       md5 TEXT,
+      webdav_synced INTEGER NOT NULL DEFAULT 0,
+      webdav_path TEXT,
+      webdav_synced_at INTEGER,
       raw_json TEXT NOT NULL,
       PRIMARY KEY (key, library_id),
       FOREIGN KEY (library_id) REFERENCES libraries(id)
@@ -177,6 +180,25 @@ export function initializeDatabase(): Database {
     CREATE INDEX IF NOT EXISTS idx_items_synced ON items(synced);
     CREATE INDEX IF NOT EXISTS idx_items_deleted ON items(deleted);
   `);
+  
+  // Migration: Add missing columns to existing tables
+  try {
+    // Check if webdav_synced column exists
+    const columns = sqliteInstance.prepare(`PRAGMA table_info(attachments)`).all() as any[];
+    const hasWebdavSynced = columns.some(col => col.name === 'webdav_synced');
+    
+    if (!hasWebdavSynced) {
+      console.log('🔄 Migrating database: Adding WebDAV columns to attachments...');
+      sqliteInstance.exec(`
+        ALTER TABLE attachments ADD COLUMN webdav_synced INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE attachments ADD COLUMN webdav_path TEXT;
+        ALTER TABLE attachments ADD COLUMN webdav_synced_at INTEGER;
+      `);
+      console.log('✅ Migration complete');
+    }
+  } catch (e) {
+    console.warn('⚠️ Database migration warning:', e);
+  }
   
   console.log(`📂 Database initialized: ${dbPath}`);
   

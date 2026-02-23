@@ -127,6 +127,11 @@ export const attachments = sqliteTable('attachments', {
   size: integer('size'),
   md5: textCol('md5'),
   
+  // WebDAV sync fields
+  webdavSynced: integer('webdav_synced', { mode: 'boolean' }).notNull().default(false),
+  webdavPath: textCol('webdav_path'),
+  webdavSyncedAt: integer('webdav_synced_at'),
+  
   rawJson: textCol('raw_json').notNull(),
 }, (table) => ({
   pk: primaryKey({ columns: [table.key, table.libraryId] }),

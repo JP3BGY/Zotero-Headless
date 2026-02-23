@@ -327,7 +327,7 @@ const commands: Command[] = [
           console.log(`   Conflicts: ${result.conflicts.length}`);
           result.conflicts.forEach(c => console.log(`     - ${c}`));
         }
-        process.exit(1);
+        throw new Error(`Sync completed with ${result.errors.length} errors`);
       }
     }
   },
@@ -1519,43 +1519,141 @@ const commands: Command[] = [
     aliases: ['wdc'],
     description: 'Configure WebDAV server',
     options: [
-      { name: '--url', description: 'WebDAV server URL', value: '<url>' },
-      { name: '--username', description: 'WebDAV username', value: '<user>' },
-      { name: '--password', description: 'WebDAV password', value: '<pass>' },
+      { name: '--auto-sync', description: 'Enable/disable auto-sync for attachments', value: '<true|false>' },
+      { name: '--base-path', description: 'Update base path for WebDAV storage', value: '<path>' },
     ],
     examples: [
-      'zotero webdav:config',
-      'zotero wdc --url https://dav.example.com --username user',
+      'zotero webdav:config https://dav.example.com user pass',
+      'zotero webdav:config https://dav.example.com user pass /zotero --auto-sync true',
+      'zotero webdav:config --auto-sync true     # Update existing config',
+      'zotero webdav:config --auto-sync false    # Disable auto-sync',
     ],
     execute: async (args) => {
       await initModules();
-      if (args.length < 3) {
+      
+      // Parse arguments
+      let url: string | undefined;
+      let username: string | undefined;
+      let password: string | undefined;
+      let basePath: string | undefined;
+      let autoSync: boolean | undefined;
+      let updateOnly = false;
+      
+      for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        if (arg === '--auto-sync') {
+          const val = args[++i];
+          autoSync = val === 'true' || val === 'yes' || val === '1';
+          updateOnly = true;  // If only --auto-sync is provided, it's an update
+        } else if (arg.startsWith('--auto-sync=')) {
+          const val = arg.split('=')[1];
+          autoSync = val === 'true' || val === 'yes' || val === '1';
+          updateOnly = true;
+        } else if (arg === '--base-path') {
+          basePath = args[++i];
+          updateOnly = true;
+        } else if (arg.startsWith('--base-path=')) {
+          basePath = arg.split('=')[1];
+          updateOnly = true;
+        } else if (arg === '--enabled') {
+          const val = args[++i];
+          // --enabled is for update mode only
+          updateOnly = true;
+        } else if (arg.startsWith('--enabled=')) {
+          updateOnly = true;
+        } else if (!url) {
+          url = arg;
+        } else if (!username) {
+          username = arg;
+        } else if (!password) {
+          password = arg;
+        } else if (!basePath) {
+          basePath = arg;
+        }
+      }
+      
+      // Check if this is an update-only operation (no credentials provided but update flags present)
+      const hasCredentials = url && username && password;
+      const hasUpdateFlags = autoSync !== undefined || basePath !== undefined;
+      
+      if (!hasCredentials && hasUpdateFlags) {
+        // Update mode: only update specific fields without re-entering credentials
+        const db = getDatabase();
+        const existing = await db.select().from(webdavConfig).get();
+        
+        if (!existing) {
+          console.log('❌ WebDAV not configured');
+          console.log('   Run "zotero webdav:config <url> <username> <password>" first');
+          return;
+        }
+        
+        console.log('🔄 Updating WebDAV configuration...\n');
+        const result = await attachmentManager.updateWebDAVConfig({
+          autoSync,
+          basePath,
+        });
+        
+        if (result.success) {
+          console.log('✅ Configuration updated!');
+          console.log(`   URL: ${result.config.url}`);
+          console.log(`   Username: ${result.config.username}`);
+          console.log(`   Base Path: ${result.config.basePath}`);
+          console.log(`   Auto Sync: ${result.config.autoSync ? 'Enabled' : 'Disabled'}`);
+          if (result.config.autoSync) {
+            console.log(`\n💡 Auto-sync is enabled. New attachments will be automatically uploaded to WebDAV.`);
+          }
+        } else {
+          console.log('❌ Update failed!');
+          console.log(`   Error: ${result.error}`);
+        }
+        return;
+      }
+      
+      if (!hasCredentials) {
         console.log('❌ Please provide WebDAV configuration');
-        console.log('   Usage: zotero webdav:config <url> <username> <password> [basePath]');
+        console.log('');
+        console.log('Setup mode (initial configuration):');
+        console.log('   zotero webdav:config <url> <username> <password> [basePath] [--auto-sync true]');
         console.log('   Example: zotero webdav:config https://dav.jianguoyun.com/dav/zotero user pass /');
+        console.log('');
+        console.log('Update mode (modify existing config):');
+        console.log('   zotero webdav:config --auto-sync true');
+        console.log('   zotero webdav:config --auto-sync false --base-path /new/path');
         return;
       }
 
-      const [url, username, password, basePath] = args;
-
       console.log('🔧 Configuring WebDAV...\n');
+      
+      // Normalize basePath: remove leading/trailing slashes for better UX
+      const normalizedBasePath = basePath 
+        ? basePath.replace(/^\/+/, '').replace(/\/+$/, '') || 'zotero'
+        : 'zotero';
+      
+      if (basePath && basePath !== normalizedBasePath) {
+        console.log(`   ℹ️  Base path normalized: "${basePath}" → "${normalizedBasePath}"`);
+      }
+      
       const result = await attachmentManager.configureWebDAV({
-        url,
-        username,
-        password,
-        basePath: basePath || '/zotero',
-        autoSync: false,
+        url: url!,
+        username: username!,
+        password: password!,
+        basePath: normalizedBasePath,
+        autoSync: autoSync || false,
       });
 
       if (result.success) {
         console.log('✅ WebDAV configured successfully!');
         console.log(`   URL: ${url}`);
         console.log(`   Username: ${username}`);
-        console.log(`   Base Path: ${basePath || '/zotero'}`);
+        console.log(`   Base Path: ${normalizedBasePath}`);
+        console.log(`   Auto Sync: ${autoSync ? 'Enabled' : 'Disabled'}`);
+        if (autoSync) {
+          console.log(`\n💡 Auto-sync is enabled. New attachments will be automatically uploaded to WebDAV.`);
+        }
       } else {
         console.log('❌ WebDAV configuration failed!');
         console.log(`   Error: ${result.error}`);
-        process.exit(1);
+        throw new Error(result.error || 'WebDAV configuration failed');
       }
     }
   },
@@ -1997,7 +2095,7 @@ const commands: Command[] = [
               filename: filename,
               contentType: getContentType(filename),
               fileType: path.extname(filename).toLowerCase(),
-              localPath: attPath,
+              path: attPath,
               version: 0,
               createdAt: now,
               updatedAt: now,
@@ -2457,6 +2555,18 @@ const commands: Command[] = [
 选项:
   -a, --attachment <path>  添加附件文件（可多次使用）
 
+WebDAV 同步:
+  微信文章会自动生成 Snapshot 附件，可通过以下方式同步到 WebDAV:
+
+  1. 手动同步: 运行 zotero webdav:sync
+  2. 自动同步: 配置 autoSync (见下文)
+
+  配置自动同步:
+    zotero webdav:config <url> <username> <password> [basePath] --auto-sync
+
+  查看 WebDAV 状态:
+    zotero webdav:status
+
 示例:
   zotero add-by-id "10.1007/s11263-019-01228-7"
   zotero add-by-id "978-3-642-15515-4"
@@ -2567,7 +2677,8 @@ const commands: Command[] = [
                 fs.mkdirSync(saveDir, { recursive: true });
               }
               
-              const htmlPath = path.join(saveDir, `${attKey}.html`);
+              // 使用 uniqueFilename 作为实际文件名（与显示一致）
+              const htmlPath = path.join(saveDir, uniqueFilename);
               fs.writeFileSync(htmlPath, result.extra.processedHtml);
               
               // 创建 attachment 记录
@@ -2578,7 +2689,7 @@ const commands: Command[] = [
                 filename: uniqueFilename,  // iOS 兼容：使用内容哈希，不等于 attachment key
                 contentType: 'text/html',
                 fileType: '.html',
-                localPath: htmlPath,
+                path: htmlPath,
                 version: 0,
                 createdAt: now,
                 updatedAt: now,
@@ -2598,17 +2709,42 @@ const commands: Command[] = [
               }).run();
               
               console.log(`      ✅ Snapshot: ${uniqueFilename} (${(result.extra.processedHtml.length / 1024).toFixed(1)} KB)`);
-              console.log(`      💡 运行 "zotero sync" 上传 WebDAV`);
+              
+              // 检查 autoSync 配置
+              const wdc = await db.select().from(webdavConfig).get();
+              if (wdc?.autoSync) {
+                console.log(`      🔄 自动同步到 WebDAV (autoSync enabled)...`);
+                try {
+                  const syncResult = await attachmentManager.syncToWebDAV(attKey);
+                  if (syncResult.success) {
+                    console.log(`      ✅ 已上传到 WebDAV`);
+                  } else {
+                    console.log(`      ⚠️  上传失败: ${syncResult.error}`);
+                    console.log(`         稍后运行 "zotero webdav:sync" 重试`);
+                  }
+                } catch (e: any) {
+                  console.log(`      ⚠️  自动同步出错: ${e.message}`);
+                  console.log(`         稍后运行 "zotero webdav:sync" 重试`);
+                }
+              } else {
+                console.log(`      💡 运行 "zotero webdav:sync" 上传 WebDAV`);
+                if (!wdc) {
+                  console.log(`         或先配置: zotero webdav:config <url> <user> <pass>`);
+                }
+              }
             }
 
             // Add attachments if provided
             if (validAttachments.length > 0) {
               console.log(`   📎 添加 ${validAttachments.length} 个附件...`);
+              
+              const addedAttKeys: string[] = [];
 
               for (const attPath of validAttachments) {
                 const filename = path.basename(attPath);
                 const stats = fs.statSync(attPath);
                 const attKey = generateKey();
+                addedAttKeys.push(attKey);
 
                 // Create attachment record
                 const now = Math.floor(Date.now() / 1000);
@@ -2619,7 +2755,7 @@ const commands: Command[] = [
                   filename: filename,
                   contentType: getContentType(filename),
                   fileType: path.extname(filename).toLowerCase(),
-                  localPath: attPath,
+                  path: attPath,
                   version: 0,
                   createdAt: now,
                   updatedAt: now,
@@ -2640,6 +2776,36 @@ const commands: Command[] = [
 
                 console.log(`      ✅ ${filename} (${(stats.size / 1024).toFixed(1)} KB)`);
               }
+              
+              // Auto-sync attachments if enabled
+              const wdc = await db.select().from(webdavConfig).get();
+              if (wdc?.autoSync && addedAttKeys.length > 0) {
+                console.log(`      🔄 自动同步 ${addedAttKeys.length} 个附件到 WebDAV...`);
+                let syncCount = 0;
+                let failCount = 0;
+                for (const attKey of addedAttKeys) {
+                  try {
+                    const syncResult = await attachmentManager.syncToWebDAV(attKey);
+                    if (syncResult.success) {
+                      syncCount++;
+                    } else {
+                      failCount++;
+                      console.log(`         ⚠️  ${attKey}: ${syncResult.error}`);
+                    }
+                  } catch (e: any) {
+                    failCount++;
+                    console.log(`         ⚠️  ${attKey}: ${e.message}`);
+                  }
+                }
+                if (syncCount > 0) {
+                  console.log(`      ✅ ${syncCount} 个附件已上传`);
+                }
+                if (failCount > 0) {
+                  console.log(`      ⚠️  ${failCount} 个附件上传失败，运行 "zotero webdav:sync" 重试`);
+                }
+              } else if (!wdc?.autoSync && addedAttKeys.length > 0) {
+                console.log(`      💡 运行 "zotero webdav:sync" 上传这些附件`);
+              }
             }
           }
 
@@ -2647,7 +2813,7 @@ const commands: Command[] = [
           if (validAttachments.length > 0) {
             console.log(`   📎 共添加 ${validAttachments.length} 个附件`);
           }
-          console.log('💡 运行 "zotero sync" 上传到远程');
+          console.log('💡 运行 "zotero sync" 同步到 Zotero 服务器');
         }
 
         // 7. 显示失败详情

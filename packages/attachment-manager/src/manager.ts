@@ -7,8 +7,10 @@ import { WebDAVClient, createWebDAVClient } from '@zotero-headless/webdav-client
 import { eq, and, or, desc, sql, isNull, isNotNull } from 'drizzle-orm';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as crypto from 'crypto';
 import { execSync } from 'child_process';
+import AdmZip from 'adm-zip';
 
 export interface AttachmentInfo {
   key: string;
@@ -132,12 +134,52 @@ export class AttachmentManager {
   }
 
   /**
+   * Update WebDAV configuration partially (without re-entering credentials)
+   */
+  async updateWebDAVConfig(updates: {
+    autoSync?: boolean;
+    enabled?: boolean;
+    basePath?: string;
+  }): Promise<{ success: boolean; error?: string; config?: any }> {
+    try {
+      const existing = await this.db.select().from(webdavConfig).get();
+
+      if (!existing) {
+        return { success: false, error: 'WebDAV not configured. Run "zotero webdav:config" first.' };
+      }
+
+      const now = Math.floor(Date.now() / 1000);
+      const updateData: any = { updatedAt: now };
+      
+      if (updates.autoSync !== undefined) {
+        updateData.autoSync = updates.autoSync;
+      }
+      if (updates.enabled !== undefined) {
+        updateData.enabled = updates.enabled;
+      }
+      if (updates.basePath !== undefined) {
+        updateData.basePath = updates.basePath;
+      }
+
+      await this.db.update(webdavConfig)
+        .set(updateData)
+        .where(eq(webdavConfig.id, existing.id));
+
+      // Return updated config
+      const updated = await this.db.select().from(webdavConfig).get();
+      return { success: true, config: updated };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
    * List attachments
    */
   async listAttachments(options: AttachmentListOptions = {}): Promise<AttachmentInfo[]> {
     const { itemKey, libraryId, webdavSynced, limit = 100, offset = 0 } = options;
 
-    let whereCondition: any = isNull(attachments.deleted); // Not deleted
+    let whereCondition: any = eq(attachments.deleted, false); // Not deleted
 
     if (itemKey) {
       whereCondition = and(whereCondition, eq(attachments.itemKey, itemKey));
@@ -168,7 +210,7 @@ export class AttachmentManager {
       md5: a.md5 || undefined,
       attachmentType: a.attachmentType,
       url: a.url || undefined,
-      localPath: a.localPath || undefined,
+      localPath: a.path || undefined,
       webdavPath: a.webdavPath || undefined,
       webdavSynced: a.webdavSynced,
     }));
@@ -194,7 +236,7 @@ export class AttachmentManager {
       md5: attachment.md5 || undefined,
       attachmentType: attachment.attachmentType,
       url: attachment.url || undefined,
-      localPath: attachment.localPath || undefined,
+      localPath: attachment.path || undefined,
       webdavPath: attachment.webdavPath || undefined,
       webdavSynced: attachment.webdavSynced,
     };
@@ -214,18 +256,18 @@ export class AttachmentManager {
    */
   private createZipIfNeeded(inputFile: string, outputZip: string): string {
     const ext = path.extname(inputFile).toLowerCase();
-    
+
     if (ext === '.zip') {
       fs.copyFileSync(inputFile, outputZip);
       return outputZip;
     }
-    
-    // Need to create ZIP - use zip -j to store only file, no directory structure
+
+    // Need to create ZIP using adm-zip (cross-platform)
+    const zip = new AdmZip();
     const filename = path.basename(inputFile);
-    const dir = path.dirname(inputFile);
-    
-    execSync(`cd "${dir}" && zip -j "${outputZip}" "${filename}"`, { stdio: 'ignore' });
-    
+    zip.addLocalFile(inputFile, '', filename);
+    zip.writeZip(outputZip);
+
     return outputZip;
   }
 
@@ -281,18 +323,19 @@ export class AttachmentManager {
         return { success: false, error: 'Attachment not found' };
       }
 
-      if (!attachment.localPath || !fs.existsSync(attachment.localPath)) {
-        return { success: false, error: 'Local file not found' };
+      if (!attachment.path || !fs.existsSync(attachment.path)) {
+        return { success: false, error: `Local file not found: ${attachment.path || '(no path)'}` };
       }
 
       // Calculate WebDAV paths - Zotero's actual structure
       // Files are at root: /zotero/<item_key>.zip and /zotero/<item_key>.prop
-      const webdavPath = `${attachment.itemKey}.zip`;
-      const propPath = `${attachment.itemKey}.prop`;
+      const webdavPath = `${attachment.key}.zip`;
+      const propPath = `${attachment.key}.prop`;
 
-      // Create temporary ZIP file
-      const tempZip = `/tmp/${webdavPath}`;
-      this.createZipIfNeeded(attachment.localPath, tempZip);
+      // Create temporary ZIP file in OS temp directory
+      const tempDir = os.tmpdir();
+      const tempZip = path.join(tempDir, webdavPath);
+      this.createZipIfNeeded(attachment.path, tempZip);
 
       // Upload ZIP
       const zipStats = fs.statSync(tempZip);
@@ -304,9 +347,9 @@ export class AttachmentManager {
 
       // Generate and upload .prop file (XML format)
       const propContent = this.generatePropContent(tempZip);
-      const propTempPath = `/tmp/${propPath}`;
+      const propTempPath = path.join(tempDir, propPath);
       fs.writeFileSync(propTempPath, propContent);
-      
+
       try {
         await this.webdavClient!.uploadFile(propTempPath, propPath);
         fs.unlinkSync(propTempPath); // Clean up temp file
@@ -318,10 +361,8 @@ export class AttachmentManager {
         }
       }
 
-      // Clean up temp ZIP
-      if (tempZip !== attachment.localPath) {
-        fs.unlinkSync(tempZip);
-      }
+      // Calculate md5 before cleanup
+      const zipMd5 = this.calculateMD5(tempZip);
 
       // Update database
       const now = Math.floor(Date.now() / 1000);
@@ -329,12 +370,17 @@ export class AttachmentManager {
         .set({
           webdavPath,
           webdavSynced: true,
-          webdavSyncedAt: now.toString(),
-          md5: this.calculateMD5(`/tmp/${webdavPath}`),
+          webdavSyncedAt: now,
+          md5: zipMd5,
           fileSize: zipStats.size,
-          updatedAt: now.toString(),
+          updatedAt: now,
         })
         .where(eq(attachments.key, attachmentKey));
+
+      // Clean up temp ZIP
+      if (tempZip !== attachment.path && fs.existsSync(tempZip)) {
+        fs.unlinkSync(tempZip);
+      }
 
       return { success: true };
     } catch (error: any) {
@@ -361,8 +407,7 @@ export class AttachmentManager {
       .from(attachments)
       .where(and(
         eq(attachments.webdavSynced, false),
-        eq(attachments.deleted, false),
-        isNull(attachments.deleted)
+        eq(attachments.deleted, false)
       ))
       .all();
 
@@ -540,7 +585,7 @@ export class AttachmentManager {
       attachmentsToDownload = await this.db.select()
         .from(attachments)
         .where(and(
-          isNull(attachments.localPath),
+          isNull(attachments.path),
           sql`${attachments.webdavPath} IS NOT NULL`,
           eq(attachments.deleted, false)
         ))
@@ -625,8 +670,8 @@ export class AttachmentManager {
         .all();
       
       // Filter attachments with local or webdav path
-      const filteredAttachments = allAttachments.filter(att => 
-        att.localPath !== null && att.localPath !== undefined ||
+      const filteredAttachments = allAttachments.filter(att =>
+        att.path !== null && att.path !== undefined ||
         att.webdavPath !== null && att.webdavPath !== undefined
       );
 
@@ -642,9 +687,9 @@ export class AttachmentManager {
         let size = 0;
 
         try {
-          if (att.localPath && fs.existsSync(att.localPath)) {
+          if (att.path && fs.existsSync(att.path)) {
             // Calculate hash from local file
-            const content = fs.readFileSync(att.localPath);
+            const content = fs.readFileSync(att.path);
             hash = crypto.createHash('md5').update(content).digest('hex');
             size = content.length;
           } else if (att.md5) {
@@ -676,7 +721,7 @@ export class AttachmentManager {
             attachments: group.map(att => ({
               key: att.key,
               filename: att.filename,
-              localPath: att.localPath || undefined,
+              localPath: att.path || undefined,
               webdavPath: att.webdavPath || undefined,
             })),
           };
@@ -747,7 +792,7 @@ export class AttachmentManager {
     }
 
     // Determine file path
-    let filePath = attachment.localPath;
+    let filePath = attachment.path;
     
     if (!filePath) {
       // Try to download first
