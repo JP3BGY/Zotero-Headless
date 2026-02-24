@@ -82,7 +82,6 @@ export class AttachmentManager {
     url: string;
     username: string;
     password: string;
-    basePath?: string;
     autoSync?: boolean;
   }): Promise<{ success: boolean; error?: string }> {
     try {
@@ -90,7 +89,7 @@ export class AttachmentManager {
         url: config.url,
         username: config.username,
         password: config.password,
-        basePath: config.basePath || '/',
+        basePath: '/zotero',
       });
 
       const test = await client.testConnection();
@@ -101,7 +100,6 @@ export class AttachmentManager {
       // Ensure /zotero directory exists (Zotero Desktop compatible)
       try {
         await client.createDirectory('/');
-        console.log('   📁 Created zotero subdirectory');
       } catch (e) {
         // Directory might already exist, that's ok
       }
@@ -115,7 +113,7 @@ export class AttachmentManager {
             url: config.url,
             username: config.username,
             password: config.password,
-            basePath: config.basePath || '/',
+            basePath: '/zotero',
             autoSync: config.autoSync || false,
             enabled: true,
             updatedAt: now,
@@ -126,7 +124,7 @@ export class AttachmentManager {
           url: config.url,
           username: config.username,
           password: config.password,
-          basePath: config.basePath || '/',
+          basePath: '/zotero',
           autoSync: config.autoSync || false,
           enabled: true,
           createdAt: now,
@@ -157,7 +155,7 @@ export class AttachmentManager {
 
       const now = Math.floor(Date.now() / 1000);
       const updateData: any = { updatedAt: now };
-      
+
       if (updates.autoSync !== undefined) {
         updateData.autoSync = updates.autoSync;
       }
