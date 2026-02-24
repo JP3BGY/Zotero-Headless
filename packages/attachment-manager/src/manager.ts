@@ -335,12 +335,22 @@ export class AttachmentManager {
 
           if (needsUpdate) {
             console.log(`   📝 Updating attachment item ${attachment.key} in Zotero...`);
+            
+            // Extract title from rawJson if available
+            let attachmentTitle = existingItem.data.title || 'Attachment';
+            try {
+              const rawData = JSON.parse(attachment.rawJson || '{}');
+              attachmentTitle = rawData.data?.title || existingItem.data.title || 'Attachment';
+            } catch (e) {
+              // Use existing title
+            }
+            
             const updateData = {
               ...existingItem.data,
               linkMode: 'imported_file',
               contentType: attachment.contentType || 'application/octet-stream',
               filename: attachment.filename || 'attachment.zip',
-              title: attachment.title || attachment.filename || 'Attachment',
+              title: attachmentTitle,
               md5: null, // Will be set after WebDAV upload
               mtime: null, // Will be set after WebDAV upload
             };
@@ -375,13 +385,22 @@ export class AttachmentManager {
         }
       }
       
+      // Extract title from rawJson if available, otherwise use filename
+      let attachmentTitle = 'Attachment';
+      try {
+        const rawData = JSON.parse(attachment.rawJson || '{}');
+        attachmentTitle = rawData.data?.title || attachment.filename || 'Attachment';
+      } catch (e) {
+        attachmentTitle = attachment.filename || 'Attachment';
+      }
+      
       const attachmentItem = {
         itemType: 'attachment',
         key: attachment.key,
         version: 0, // Required for key-based writes
         parentItem: attachment.parentItemKey,
         linkMode: 'imported_file',
-        title: attachment.title || attachment.filename || 'Attachment',
+        title: attachmentTitle,
         contentType: attachment.contentType || 'application/octet-stream',
         charset: '',
         filename: attachment.filename || 'attachment.zip',
