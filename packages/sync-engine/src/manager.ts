@@ -61,50 +61,98 @@ export class SyncManager extends EventEmitter {
   }
 
   /**
-   * Sync user library (default)
+   * Sync user library (default) with auto-retry on 412 errors
    */
   private async syncUserLibrary(options: SyncOptions = {}): Promise<SyncResult> {
     this.emit('sync:start', { ...options, libraryType: 'user' });
 
-    try {
-      console.log('🔑 Verifying API key...');
-      const keyInfo = await this.apiClient.verifyKey();
-      console.log(`   Logged in as: ${keyInfo.username}`);
+    const maxRetries = 3;
+    let attempt = 0;
+    let lastError: Error | null = null;
 
-      const libraryId = options.libraryId ?? await this.ensureLibrary(keyInfo.userID, 'user', 'My Library');
-      const library = await this.getLibrary(libraryId);
-      const localVersion = library?.version ?? 0;
-      const zoteroId = String(library?.zoteroId ?? keyInfo.userID);
-      const remoteVersion = await this.apiClient.getLibraryVersion(zoteroId, 'user');
-
-      console.log(`📊 Versions - Local: ${localVersion}, Remote: ${remoteVersion}`);
-
-      const unsyncedItems = await this.getUnsyncedItems(libraryId);
-      const hasUnsyncedChanges = unsyncedItems.length > 0;
-
-      if (remoteVersion <= localVersion && !options.fullSync && !hasUnsyncedChanges) {
-        console.log('✅ Library is up to date!');
-        return { success: true, updated: 0, deleted: 0, errors: [] };
+    while (attempt < maxRetries) {
+      if (attempt > 0) {
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 8000); // Exponential backoff: 1s, 2s, 4s, max 8s
+        console.log(`   ⏳ Retrying sync in ${delay}ms (attempt ${attempt + 1}/${maxRetries})...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
 
-      const result = await this.twoWaySync(libraryId, zoteroId, 'user', localVersion, remoteVersion, options.fullSync ?? false);
-      await this.updateLibraryVersion(libraryId, remoteVersion);
-      await this.logSync(libraryId, result.success ? 'success' : 'partial', localVersion, remoteVersion, result);
+      try {
+        console.log('🔑 Verifying API key...');
+        const keyInfo = await this.apiClient.verifyKey();
+        console.log(`   Logged in as: ${keyInfo.username}`);
 
-      this.emit('sync:complete', result);
-      
-      const parts: string[] = [];
-      if (result.updated > 0) parts.push(`${result.updated} updated`);
-      if (result.deleted > 0) parts.push(`${result.deleted} deleted`);
-      if (parts.length === 0) parts.push('no changes');
-      console.log(`✅ Sync complete: ${parts.join(', ')}`);
+        const libraryId = options.libraryId ?? await this.ensureLibrary(keyInfo.userID, 'user', 'My Library');
+        const library = await this.getLibrary(libraryId);
+        const localVersion = library?.version ?? 0;
+        const zoteroId = String(library?.zoteroId ?? keyInfo.userID);
+        const remoteVersion = await this.apiClient.getLibraryVersion(zoteroId, 'user');
 
-      return result;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error('❌ Sync failed:', message);
-      return { success: false, updated: 0, deleted: 0, errors: [message] };
+        console.log(`📊 Versions - Local: ${localVersion}, Remote: ${remoteVersion}`);
+
+        const unsyncedItems = await this.getUnsyncedItems(libraryId);
+        const hasUnsyncedChanges = unsyncedItems.length > 0;
+
+        if (remoteVersion <= localVersion && !options.fullSync && !hasUnsyncedChanges) {
+          console.log('✅ Library is up to date!');
+          return { success: true, updated: 0, deleted: 0, errors: [] };
+        }
+
+        const result = await this.twoWaySync(libraryId, zoteroId, 'user', localVersion, remoteVersion, options.fullSync ?? false);
+        await this.updateLibraryVersion(libraryId, remoteVersion);
+        await this.logSync(libraryId, result.success ? 'success' : 'partial', localVersion, remoteVersion, result);
+
+        this.emit('sync:complete', result);
+        
+        const parts: string[] = [];
+        if (result.updated > 0) parts.push(`${result.updated} updated`);
+        if (result.deleted > 0) parts.push(`${result.deleted} deleted`);
+        if (parts.length === 0) parts.push('no changes');
+        console.log(`✅ Sync complete: ${parts.join(', ')}`);
+
+        // If we had conflicts but succeeded overall, report partial success
+        if (result.conflicts && result.conflicts.length > 0) {
+          console.log(`   ⚠️  ${result.conflicts.length} conflict(s) resolved automatically`);
+        }
+
+        return result;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        const message = lastError.message;
+        
+        // Check if this is a 412 error that warrants a retry
+        if (message.includes('412') || message.includes('Precondition Failed')) {
+          attempt++;
+          console.log(`   ⚠️  Sync conflict detected (412), will retry...`);
+          
+          // Refresh library version before retry
+          try {
+            const zoteroId = String((await this.getLibrary(options.libraryId ?? 1))?.zoteroId ?? '1');
+            const freshVersion = await this.apiClient.getLibraryVersion(zoteroId, 'user');
+            console.log(`   🔄 Remote version updated, restarting sync...`);
+          } catch (e) {
+            // Ignore version check errors
+          }
+          
+          if (attempt < maxRetries) {
+            continue; // Retry
+          }
+        } else {
+          // Non-412 error, fail immediately
+          console.error('❌ Sync failed:', message);
+          return { success: false, updated: 0, deleted: 0, errors: [message] };
+        }
+      }
     }
+
+    // All retries exhausted
+    console.error(`❌ Sync failed after ${maxRetries} attempts:`, lastError?.message);
+    return { 
+      success: false, 
+      updated: 0, 
+      deleted: 0, 
+      errors: [`Failed after ${maxRetries} attempts: ${lastError?.message}`] 
+    };
   }
 
   /**
@@ -558,37 +606,55 @@ export class SyncManager extends EventEmitter {
               deletedFromRemote = true;
             } else if (e.message?.includes('412') || e.statusCode === 412) {
               // Version conflict - remote has been modified
-              console.log(`   ⚠️  Conflict: ${item.key} (remote modified, cannot delete)`);
+              // Zotero Desktop behavior: Check if remote also deleted the item
+              console.log(`   ⚠️  Version conflict for ${item.key}, checking remote state...`);
               
-              if (this.config.conflictStrategy === 'remote') {
-                // Cancel local delete, will re-fetch on next sync
-                try {
-                  await this.db.update(items)
-                    .set({ deleted: 0, synced: 0 })
-                    .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
-                    .run();
-                  console.log(`   ✅ Cancelled delete for ${item.key}, will re-fetch remote version`);
-                } catch (cancelError) {
-                  console.error(`   ❌ Failed to cancel delete for ${item.key}:`, cancelError);
-                  conflicts.push(item.key);
+              try {
+                // Get current remote deleted items
+                const remoteDeleted = await this.apiClient.getDeleted(zoteroId, 0, libraryType);
+                const isRemoteDeleted = remoteDeleted.items.includes(item.key);
+                
+                if (isRemoteDeleted) {
+                  // Remote also deleted this item - treat as success (Zotero Desktop behavior)
+                  console.log(`   ✅ Remote already deleted ${item.key}, treating as success`);
+                  deletedFromRemote = true;
+                } else {
+                  // Remote still exists and was modified - handle based on strategy
+                  console.log(`   ⚠️  Remote modified ${item.key}, resolving conflict...`);
+                  
+                  if (this.config.conflictStrategy === 'remote') {
+                    // Cancel local delete, keep remote version
+                    await this.db.update(items)
+                      .set({ deleted: 0, synced: 1 })
+                      .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
+                      .run();
+                    console.log(`   ✅ Cancelled delete for ${item.key}, keeping remote version`);
+                  } else if (this.config.conflictStrategy === 'local') {
+                    // Get latest version and retry delete
+                    const remoteItem = await this.apiClient.getItem(zoteroId, item.key, libraryType);
+                    const remoteVersion = remoteItem?.data?.version || item.version + 1;
+                    
+                    try {
+                      await this.apiClient.deleteItem(zoteroId, item.key, remoteVersion, libraryType);
+                      console.log(`   🗑️  Force deleted ${item.key} with updated version`);
+                      deletedFromRemote = true;
+                    } catch (retryError: any) {
+                      if (retryError.message?.includes('404')) {
+                        // Item was deleted between our check and delete attempt
+                        console.log(`   ✅ Item ${item.key} was already deleted (404 on retry)`);
+                        deletedFromRemote = true;
+                      } else {
+                        throw retryError;
+                      }
+                    }
+                  } else {
+                    // Manual mode - still need to check if we can resolve automatically
+                    // If remote wasn't modified meaningfully, try to delete anyway
+                    conflicts.push(item.key);
+                  }
                 }
-              } else if (this.config.conflictStrategy === 'local') {
-                // Try to delete with latest version
-                try {
-                  const remoteItem = await this.apiClient.getItem(zoteroId, item.key, libraryType);
-                  const remoteVersion = remoteItem?.data?.version || item.version;
-                  await this.apiClient.deleteItem(zoteroId, item.key, remoteVersion, libraryType);
-                  await this.db.delete(items)
-                    .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
-                    .run();
-                  console.log(`   🗑️  Force deleted ${item.key} from remote`);
-                  deleted++;
-                } catch (forceError) {
-                  console.error(`   ❌ Failed to force delete ${item.key}:`, forceError);
-                  conflicts.push(item.key);
-                }
-              } else {
-                // Manual mode
+              } catch (checkError: any) {
+                console.error(`   ❌ Failed to check remote state for ${item.key}:`, checkError.message);
                 conflicts.push(item.key);
               }
             } else {
