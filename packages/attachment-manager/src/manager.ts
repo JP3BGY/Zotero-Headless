@@ -357,6 +357,24 @@ export class AttachmentManager {
 
       // Create new attachment item in Zotero
       console.log(`   📝 Creating attachment item ${attachment.key} in Zotero...`);
+      
+      // Check if parent item exists in Zotero first
+      if (attachment.parentItemKey) {
+        try {
+          await zoteroApi.getItem(zoteroId, attachment.parentItemKey, libraryType);
+          console.log(`   ✅ Parent item ${attachment.parentItemKey} exists`);
+        } catch (e: any) {
+          if (e.message?.includes('404')) {
+            console.warn(`   ⚠️  Parent item ${attachment.parentItemKey} not found in Zotero`);
+            console.warn(`   ⚠️  Skipping attachment creation - will retry after parent syncs`);
+            return { 
+              success: false, 
+              error: `Parent item ${attachment.parentItemKey} not found. Please sync the parent item first.` 
+            };
+          }
+        }
+      }
+      
       const attachmentItem = {
         itemType: 'attachment',
         key: attachment.key,
@@ -376,15 +394,20 @@ export class AttachmentManager {
       const result = await zoteroApi.createItems(zoteroId, [attachmentItem], libraryType);
       console.log(`   📥 API Response:`, JSON.stringify(result, null, 2));
       
-      // Check for success - handle both 'successful' and 'success' field names
-      const successful = result.successful || (result as any).success;
-      if (!successful || !successful['0']) {
-        console.error(`   ❌ Attachment creation failed:`, result.failed || (result as any).failed);
-        return { success: false, error: 'Failed to create attachment item in Zotero' };
+      // Check for success
+      if (result.failed && result.failed['0']) {
+        const errorMsg = result.failed['0'].message || 'Unknown error';
+        console.error(`   ❌ Attachment creation failed: ${errorMsg}`);
+        return { success: false, error: errorMsg };
+      }
+      
+      if (result.successful && result.successful['0']) {
+        console.log(`   ✅ Created attachment item: ${result.successful['0']}`);
+        return { success: true };
       }
 
-      console.log(`   ✅ Created attachment item: ${successful['0']}`);
-      return { success: true };
+      console.error(`   ❌ Unexpected API response`);
+      return { success: false, error: 'Failed to create attachment item in Zotero' };
     } catch (error: any) {
       console.error(`   ❌ Failed to ensure attachment item:`, error.message);
       return { success: false, error: error.message };
