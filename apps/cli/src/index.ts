@@ -2683,7 +2683,8 @@ WebDAV 同步:
               fs.writeFileSync(htmlPath, result.extra.processedHtml);
               
               // 创建 attachment 记录
-              const accessDate = new Date().toISOString();
+              // Zotero requires ISO 8601 format WITHOUT milliseconds
+              const accessDate = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
               const sourceUrl = result.item.url || '';
               
               await db.insert(attachments).values({
