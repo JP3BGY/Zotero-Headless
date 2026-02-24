@@ -374,10 +374,16 @@ export class AttachmentManager {
       };
 
       const result = await zoteroApi.createItems(zoteroId, [attachmentItem], libraryType);
-      if (!result.successful || !result.successful['0']) {
+      console.log(`   📥 API Response:`, JSON.stringify(result, null, 2));
+      
+      // Check for success - handle both 'successful' and 'success' field names
+      const successful = result.successful || (result as any).success;
+      if (!successful || !successful['0']) {
+        console.error(`   ❌ Attachment creation failed:`, result.failed || (result as any).failed);
         return { success: false, error: 'Failed to create attachment item in Zotero' };
       }
 
+      console.log(`   ✅ Created attachment item: ${successful['0']}`);
       return { success: true };
     } catch (error: any) {
       console.error(`   ❌ Failed to ensure attachment item:`, error.message);
