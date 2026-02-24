@@ -61,7 +61,7 @@ export class AttachmentManager {
         url: config.url,
         username: config.username,
         password: config.password,
-        basePath: '/zotero',
+        basePath: config.basePath || '/',
       });
 
       const test = await this.webdavClient.testConnection();
@@ -82,14 +82,18 @@ export class AttachmentManager {
     url: string;
     username: string;
     password: string;
+    basePath?: string;
     autoSync?: boolean;
   }): Promise<{ success: boolean; error?: string }> {
     try {
+      // Use user's basePath (default to '/'), client will append '/zotero'
+      const userBasePath = config.basePath || '/';
+      
       const client = createWebDAVClient({
         url: config.url,
         username: config.username,
         password: config.password,
-        basePath: '/zotero',
+        basePath: userBasePath,
       });
 
       const test = await client.testConnection();
@@ -98,6 +102,7 @@ export class AttachmentManager {
       }
 
       // Ensure /zotero directory exists (Zotero Desktop compatible)
+      // The client automatically uses /zotero subdirectory
       try {
         await client.createDirectory('/');
       } catch (e) {
@@ -113,7 +118,7 @@ export class AttachmentManager {
             url: config.url,
             username: config.username,
             password: config.password,
-            basePath: '/zotero',
+            basePath: userBasePath,
             autoSync: config.autoSync || false,
             enabled: true,
             updatedAt: now,
@@ -124,7 +129,7 @@ export class AttachmentManager {
           url: config.url,
           username: config.username,
           password: config.password,
-          basePath: '/zotero',
+          basePath: userBasePath,
           autoSync: config.autoSync || false,
           enabled: true,
           createdAt: now,

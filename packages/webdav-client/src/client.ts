@@ -36,9 +36,16 @@ export class WebDAVClient {
 
   constructor(config: WebDAVConfig, options: WebDAVClientOptions = {}) {
     const normalizedBasePath = (config.basePath || '').trim();
-    const safeBasePath = normalizedBasePath.length > 0
-      ? '/' + normalizedBasePath.replace(/^\/+/, '').replace(/\/+$/, '')
-      : '/zotero';
+    // Ensure zotero subdirectory is used (Zotero Desktop compatible)
+    // If basePath is empty or '/', use '/zotero'
+    // Otherwise, append '/zotero' to the basePath
+    let safeBasePath: string;
+    if (!normalizedBasePath || normalizedBasePath === '/') {
+      safeBasePath = '/zotero';
+    } else {
+      const cleanPath = normalizedBasePath.replace(/^\/+/, '').replace(/\/+$/, '');
+      safeBasePath = '/' + cleanPath + '/zotero';
+    }
 
     this.config = {
       ...config,
