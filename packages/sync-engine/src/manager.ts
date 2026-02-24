@@ -3,7 +3,7 @@
 // See Zotero-Headless-Complete-Design.md Section 5
 
 import { EventEmitter } from 'events';
-import { getDatabase, getRawSQLite, libraries, items, collections, itemTags, syncLogs, attachments, type Database } from '@zotero-headless/database';
+import { getDatabase, getRawSQLite, libraries, items, collections, itemTags, syncLogs, attachments, webdavConfig, type Database } from '@zotero-headless/database';
 import { ZoteroAPIClient } from '@zotero-headless/api';
 import { appConfig } from '@zotero-headless/core';
 import { ConflictResolver, conflictResolver } from './conflict.js';
@@ -344,6 +344,27 @@ export class SyncManager extends EventEmitter {
     errors.push(...uploadResult.errors);
     conflicts.push(...uploadResult.conflicts);
 
+    // ===== PHASE 3: WebDAV sync (if autoSync enabled) =====
+    const webdavConfig = await this.getWebDAVConfig();
+    if (webdavConfig?.enabled && webdavConfig?.autoSync) {
+      console.log('\n☁️ Phase 3: Syncing attachments to WebDAV (autoSync enabled)...');
+      try {
+        const { AttachmentManager } = await import('@zotero-headless/attachment-manager');
+        const attachmentManager = new AttachmentManager();
+        const webdavResult = await attachmentManager.syncAllToWebDAV();
+        
+        if (webdavResult.success) {
+          console.log(`   ✅ WebDAV sync complete: ${webdavResult.synced} attachments synced`);
+        } else {
+          console.log(`   ⚠️ WebDAV sync completed with issues:`);
+          webdavResult.errors.forEach(err => console.log(`      - ${err}`));
+        }
+      } catch (e: any) {
+        console.log(`   ⚠️ WebDAV sync failed: ${e.message}`);
+        console.log(`      Run "zotero webdav:sync" manually to retry`);
+      }
+    }
+
     return {
       success: errors.length === 0 && conflicts.length === 0,
       updated: totalUpdated,
@@ -679,6 +700,16 @@ export class SyncManager extends EventEmitter {
           }
           // Also delete from local DB after successful remote deletion
           if (deletedFromRemote) {
+            // Cascade delete attachments first
+            await this.db.delete(items)
+              .where(and(
+                eq(items.libraryId, libraryId),
+                eq(items.itemType, 'attachment'),
+                eq(items.rawJson, `%"parentItem":"${item.key}"%`)
+              ))
+              .run();
+            
+            // Then delete the parent item
             await this.db.delete(items)
               .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
               .run();
@@ -996,11 +1027,37 @@ export class SyncManager extends EventEmitter {
   }
 
   /**
-   * Soft delete items
+   * Soft delete items and cascade delete their attachments
    */
   private async softDeleteItems(keys: string[], libraryId: number): Promise<void> {
     if (keys.length === 0) return;
 
+    // First, mark attachments of these items as deleted (cascade delete)
+    // Attachments have parentItemKey referencing these items
+    for (const parentKey of keys) {
+      const childAttachments = await this.db.select()
+        .from(items)
+        .where(and(
+          eq(items.libraryId, libraryId),
+          eq(items.itemType, 'attachment'),
+          eq(items.rawJson, `%"parentItem":"${parentKey}"%`)
+        ))
+        .all();
+      
+      if (childAttachments.length > 0) {
+        console.log(`   🗑️  Cascading delete: ${childAttachments.length} attachment(s) of ${parentKey}`);
+        await this.db.update(items)
+          .set({ deleted: true, updatedAt: Math.floor(Date.now() / 1000), synced: false })
+          .where(and(
+            eq(items.libraryId, libraryId),
+            eq(items.itemType, 'attachment'),
+            eq(items.rawJson, `%"parentItem":"${parentKey}"%`)
+          ))
+          .run();
+      }
+    }
+
+    // Then mark the parent items as deleted
     await this.db.update(items)
       .set({ deleted: true, updatedAt: Math.floor(Date.now() / 1000), synced: false })
       .where(and(
@@ -1085,6 +1142,19 @@ export class SyncManager extends EventEmitter {
         errorMessage: result.errors?.join('; ') ?? result.conflicts?.join('; ') ?? null,
       })
       .run();
+  }
+
+  /**
+   * Get WebDAV configuration
+   */
+  private async getWebDAVConfig(): Promise<{ enabled: boolean; autoSync: boolean } | null> {
+    try {
+      const config = await this.db.select().from(webdavConfig).get();
+      if (!config) return null;
+      return { enabled: config.enabled, autoSync: config.autoSync };
+    } catch (e) {
+      return null;
+    }
   }
 }
 
