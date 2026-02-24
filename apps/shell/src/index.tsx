@@ -24,7 +24,7 @@ const isEnglish = lang === 'en';
 const t = {
   welcome: isEnglish ? '📚 Zotero Shell v1.0.0' : '📚 Zotero Shell v1.0.0',
   subtitle: isEnglish ? 'Type "help" for commands, or "exit" to quit' : '输入 "help" 查看可用命令，或 "exit" 退出',
-  shortcuts: isEnglish ? 'Tab to autocomplete, ↑/↓ for history, Ctrl+C to quit' : 'Tab to autocomplete, ↑/↓ for history, Ctrl+C to quit',
+  shortcuts: isEnglish ? 'Tab=complete, ↑↓=history, PgUp/PgDn=scroll, Ctrl+C=exit' : 'Tab=补全, ↑↓=历史, PgUp/PgDn=滚动, Ctrl+C=退出',
   scrollHint: isEnglish ? '... Press PageDown to scroll ...' : '... 按 PageDown 滚动 ...',
   executing: isEnglish ? 'Executing...' : '执行中...',
   moreMatches: (n: number) => isEnglish ? `... ${n} more matches` : `... 还有 ${n} 个匹配`,
@@ -52,9 +52,10 @@ Others:
   exit, quit              Exit shell
 
 Shortcuts:
-  ↑/↓                     Browse history
-  Tab                     Autocomplete
-  Ctrl+C                  Exit
+  Tab                     Autocomplete commands/options
+  ↑/↓                     Browse command history
+  PgUp/PgDn               Scroll output up/down
+  Ctrl+C                  Exit shell
       `.trim() : `
 📚 Zotero Shell 帮助
 
@@ -78,8 +79,9 @@ Shortcuts:
   exit, quit              退出 shell
 
 快捷键:
+  Tab                     自动补全命令/选项
   ↑/↓                     浏览历史命令
-  Tab                     自动补全
+  PgUp/PgDn               向上/向下滚动输出
   Ctrl+C                  退出
       `.trim(),
 };
@@ -250,6 +252,7 @@ export function ZoteroShell() {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [input, setInput] = useState('');
+  const [inputKey, setInputKey] = useState(0); // Force cursor reset on completion
   const [lines, setLines] = useState<OutputLine[]>([]);
   const [suggestions, setSuggestions] = useState<CommandSuggestion[]>([]);
   const [itemKeySuggestions, setItemKeySuggestions] = useState<ItemKeySuggestion[]>([]);
@@ -381,6 +384,7 @@ export function ZoteroShell() {
         if (comps.length === 1) {
           const completed = input.replace(/\S+$/, comps[0].name);
           setInput(completed + ' ');
+          setInputKey(prev => prev + 1); // Reset cursor to end
           setSuggestions([]);
         } else if (comps.length > 0) {
           setSuggestions(comps);
@@ -391,6 +395,7 @@ export function ZoteroShell() {
         executor.current.getItemKeyCompletions(arg).then(items => {
           if (items.length === 1) {
             setInput(`${cmd} ${items[0].key}`);
+            setInputKey(prev => prev + 1); // Reset cursor to end
             setItemKeySuggestions([]);
           } else if (items.length > 0) {
             setItemKeySuggestions(items);
@@ -401,6 +406,7 @@ export function ZoteroShell() {
         const comps = executor.current.getCompletions(input);
         if (comps.length === 1) {
           setInput(comps[0].name + ' ');
+          setInputKey(prev => prev + 1); // Reset cursor to end
           setSuggestions([]);
         } else if (comps.length > 0) {
           setSuggestions(comps);
@@ -502,7 +508,10 @@ export function ZoteroShell() {
           {isExecuting ? "⏳ " : "> "}
         </Text>
         {!isExecuting && (
-          <TextInput value={input} onChange={(value) => {
+          <TextInput 
+            key={inputKey}
+            value={input} 
+            onChange={(value) => {
             setInput(value);
             if (value) {
               const parts = value.trim().split(/\s+/);
