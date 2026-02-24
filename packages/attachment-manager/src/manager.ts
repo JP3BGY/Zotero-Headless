@@ -360,6 +360,7 @@ export class AttachmentManager {
       const attachmentItem = {
         itemType: 'attachment',
         key: attachment.key,
+        version: 0, // Required for key-based writes
         parentItem: attachment.parentItemKey,
         linkMode: 'imported_file',
         title: attachment.title || attachment.filename || 'Attachment',
