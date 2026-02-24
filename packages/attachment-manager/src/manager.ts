@@ -336,24 +336,40 @@ export class AttachmentManager {
           if (needsUpdate) {
             console.log(`   📝 Updating attachment item ${attachment.key} in Zotero...`);
             
-            // Extract title from rawJson if available
+            // Extract fields from rawJson if available
             let attachmentTitle = existingItem.data.title || 'Attachment';
+            let linkMode = existingItem.data.linkMode || 'imported_file';
+            let url = existingItem.data.url || '';
+            let accessDate = existingItem.data.accessDate || '';
+            let charset = existingItem.data.charset || '';
             try {
               const rawData = JSON.parse(attachment.rawJson || '{}');
               attachmentTitle = rawData.data?.title || existingItem.data.title || 'Attachment';
+              linkMode = rawData.data?.linkMode || existingItem.data.linkMode || 'imported_file';
+              url = rawData.data?.url || existingItem.data.url || '';
+              accessDate = rawData.data?.accessDate || existingItem.data.accessDate || '';
+              charset = rawData.data?.charset || existingItem.data.charset || '';
             } catch (e) {
-              // Use existing title
+              // Use existing values
             }
             
-            const updateData = {
+            const updateData: any = {
               ...existingItem.data,
-              linkMode: 'imported_file',
+              linkMode: linkMode,
               contentType: attachment.contentType || 'application/octet-stream',
               filename: attachment.filename || 'attachment.zip',
               title: attachmentTitle,
+              charset: charset,
               md5: null, // Will be set after WebDAV upload
               mtime: null, // Will be set after WebDAV upload
             };
+            
+            // Preserve URL and accessDate for imported_url attachments
+            if (linkMode === 'imported_url') {
+              if (url) updateData.url = url;
+              if (accessDate) updateData.accessDate = accessDate;
+            }
+            
             await zoteroApi.updateItem(zoteroId, attachment.key, updateData, existingItem.version, libraryType);
           }
           return { success: true };
@@ -387,28 +403,42 @@ export class AttachmentManager {
       
       // Extract title from rawJson if available, otherwise use filename
       let attachmentTitle = 'Attachment';
+      let linkMode = 'imported_file';
+      let url = '';
+      let accessDate = '';
+      let charset = '';
       try {
         const rawData = JSON.parse(attachment.rawJson || '{}');
         attachmentTitle = rawData.data?.title || attachment.filename || 'Attachment';
+        linkMode = rawData.data?.linkMode || 'imported_file';
+        url = rawData.data?.url || '';
+        accessDate = rawData.data?.accessDate || '';
+        charset = rawData.data?.charset || '';
       } catch (e) {
         attachmentTitle = attachment.filename || 'Attachment';
       }
       
-      const attachmentItem = {
+      const attachmentItem: any = {
         itemType: 'attachment',
         key: attachment.key,
         version: 0, // Required for key-based writes
         parentItem: attachment.parentItemKey,
-        linkMode: 'imported_file',
+        linkMode: linkMode,
         title: attachmentTitle,
         contentType: attachment.contentType || 'application/octet-stream',
-        charset: '',
+        charset: charset,
         filename: attachment.filename || 'attachment.zip',
         md5: null,
         mtime: null,
         tags: [],
         relations: {},
       };
+      
+      // Add URL and accessDate for imported_url attachments (snapshots)
+      if (linkMode === 'imported_url') {
+        if (url) attachmentItem.url = url;
+        if (accessDate) attachmentItem.accessDate = accessDate;
+      }
 
       const result = await zoteroApi.createItems(zoteroId, [attachmentItem], libraryType);
       console.log(`   📥 API Response:`, JSON.stringify(result, null, 2));

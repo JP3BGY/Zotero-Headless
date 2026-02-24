@@ -2683,6 +2683,9 @@ WebDAV 同步:
               fs.writeFileSync(htmlPath, result.extra.processedHtml);
               
               // 创建 attachment 记录
+              const accessDate = new Date().toISOString();
+              const sourceUrl = result.item.url || '';
+              
               await db.insert(attachments).values({
                 key: attKey,
                 parentItemKey: itemKey,
@@ -2703,8 +2706,11 @@ WebDAV 同步:
                     title: 'Snapshot',
                     filename: uniqueFilename,
                     contentType: 'text/html',
+                    charset: 'utf-8',
                     parentItem: itemKey,
-                    linkMode: 'imported_url'
+                    linkMode: 'imported_url',
+                    url: sourceUrl,
+                    accessDate: accessDate
                   }
                 }),
               }).run();
