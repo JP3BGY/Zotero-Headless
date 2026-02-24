@@ -551,6 +551,8 @@ zotero add-by-id "10.1038/nature23477, 1706.03762"
 | `zotero webdav:status` | 查看 WebDAV 配置状态 |
 | `zotero webdav:scan` | 扫描 WebDAV 上的附件 |
 
+> ℹ️ WebDAV 附件目录固定为 `/zotero`（与官方 Zotero 客户端一致），不支持自定义 basePath。
+
 **配置示例**：
 
 ```bash
@@ -987,7 +989,7 @@ zotero attachment-dedup --delete
 
 ### WebDAV 配置
 
-附件下载需要配置 WebDAV：
+附件下载需要配置 WebDAV（存储路径固定为 `/zotero`）：
 
 ```bash
 # 配置 WebDAV

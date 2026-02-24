@@ -90,7 +90,7 @@ export class AttachmentManager {
         url: config.url,
         username: config.username,
         password: config.password,
-        basePath: '/zotero',
+        basePath: config.basePath || '/',
       });
 
       const test = await client.testConnection();
@@ -98,9 +98,10 @@ export class AttachmentManager {
         return { success: false, error: test.error };
       }
 
-      // Create zotero subdirectory (Zotero Desktop compatible)
+      // Ensure /zotero directory exists (Zotero Desktop compatible)
       try {
         await client.createDirectory('/');
+        console.log('   📁 Created zotero subdirectory');
       } catch (e) {
         // Directory might already exist, that's ok
       }
@@ -114,7 +115,7 @@ export class AttachmentManager {
             url: config.url,
             username: config.username,
             password: config.password,
-            basePath: '/zotero',
+            basePath: config.basePath || '/',
             autoSync: config.autoSync || false,
             enabled: true,
             updatedAt: now,
@@ -146,7 +147,6 @@ export class AttachmentManager {
   async updateWebDAVConfig(updates: {
     autoSync?: boolean;
     enabled?: boolean;
-    basePath?: string;
   }): Promise<{ success: boolean; error?: string; config?: any }> {
     try {
       const existing = await this.db.select().from(webdavConfig).get();
@@ -163,9 +163,6 @@ export class AttachmentManager {
       }
       if (updates.enabled !== undefined) {
         updateData.enabled = updates.enabled;
-      }
-      if (updates.basePath !== undefined) {
-        updateData.basePath = updates.basePath;
       }
 
       await this.db.update(webdavConfig)
