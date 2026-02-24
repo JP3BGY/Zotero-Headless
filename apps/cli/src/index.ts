@@ -2711,43 +2711,15 @@ WebDAV 同步:
               
               console.log(`      ✅ Snapshot: ${uniqueFilename} (${(result.extra.processedHtml.length / 1024).toFixed(1)} KB)`);
               
-              // Sync parent item to Zotero BEFORE trying to sync attachment
-              // This is required because attachment items need parentItem to exist in Zotero
-              console.log(`      🔄 同步父条目到 Zotero...`);
-              try {
-                const { syncManager } = await import('@zotero-headless/sync-engine');
-                const syncResult = await syncManager.sync({ libraryId: library.id });
-                if (syncResult.success) {
-                  console.log(`      ✅ 父条目已同步`);
-                } else {
-                  console.log(`      ⚠️  父条目同步失败，跳过附件同步`);
-                  console.log(`         稍后运行 "zotero sync && zotero webdav:sync" 重试`);
-                  continue; // Skip attachment sync
-                }
-              } catch (syncError: any) {
-                console.log(`      ⚠️  同步出错: ${syncError.message}`);
-                console.log(`         稍后运行 "zotero sync && zotero webdav:sync" 重试`);
-                continue; // Skip attachment sync
-              }
-              
               // 检查 autoSync 配置
               const wdc = await db.select().from(webdavConfig).get();
               if (wdc?.autoSync) {
                 console.log(`      🔄 自动同步到 WebDAV (autoSync enabled)...`);
-                try {
-                  const syncResult = await attachmentManager.syncToWebDAV(attKey);
-                  if (syncResult.success) {
-                    console.log(`      ✅ 已上传到 WebDAV`);
-                  } else {
-                    console.log(`      ⚠️  上传失败: ${syncResult.error}`);
-                    console.log(`         稍后运行 "zotero webdav:sync" 重试`);
-                  }
-                } catch (e: any) {
-                  console.log(`      ⚠️  自动同步出错: ${e.message}`);
-                  console.log(`         稍后运行 "zotero webdav:sync" 重试`);
-                }
+                console.log(`      💡 父条目将在下次 sync 时上传到 Zotero，然后附件自动关联`);
+                // Note: WebDAV sync will be handled by sync process or manual webdav:sync
+                // The attachment item will be created during regular sync (parent first, then attachment)
               } else {
-                console.log(`      💡 运行 "zotero webdav:sync" 上传 WebDAV`);
+                console.log(`      💡 运行 "zotero sync" 上传条目，然后 "zotero webdav:sync" 上传附件`);
                 if (!wdc) {
                   console.log(`         或先配置: zotero webdav:config <url> <user> <pass>`);
                 }
@@ -2800,24 +2772,8 @@ WebDAV 同步:
               // Auto-sync attachments if enabled
               const wdc = await db.select().from(webdavConfig).get();
               if (wdc?.autoSync && addedAttKeys.length > 0) {
-                // First sync parent items to Zotero (required for attachment creation)
-                console.log(`      🔄 同步父条目到 Zotero...`);
-                try {
-                  const { syncManager } = await import('@zotero-headless/sync-engine');
-                  const syncResult = await syncManager.sync({ libraryId: library.id });
-                  if (!syncResult.success) {
-                    console.log(`      ⚠️  父条目同步失败，跳过附件同步`);
-                    console.log(`         稍后运行 "zotero sync && zotero webdav:sync" 重试`);
-                    continue;
-                  }
-                  console.log(`      ✅ 父条目已同步`);
-                } catch (syncError: any) {
-                  console.log(`      ⚠️  同步出错: ${syncError.message}`);
-                  console.log(`         稍后运行 "zotero sync && zotero webdav:sync" 重试`);
-                  continue;
-                }
-                
                 console.log(`      🔄 自动同步 ${addedAttKeys.length} 个附件到 WebDAV...`);
+                console.log(`      💡 父条目将在下次 sync 时上传到 Zotero`);
                 let syncCount = 0;
                 let failCount = 0;
                 for (const attKey of addedAttKeys) {

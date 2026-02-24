@@ -498,8 +498,24 @@ export class SyncManager extends EventEmitter {
     const unsyncedItems = await this.getUnsyncedItems(libraryId);
     console.log(`   Found ${unsyncedItems.length} unsynced items`);
 
-    // 2. Upload each item
-    for (const item of unsyncedItems) {
+    // Separate parent items and attachment items
+    // Parent items must be uploaded before attachments (which reference them via parentItem)
+    const parentItems = unsyncedItems.filter(item => {
+      const rawData = JSON.parse(item.rawJson || '{}');
+      return rawData.data?.itemType !== 'attachment';
+    });
+    
+    const attachmentItems = unsyncedItems.filter(item => {
+      const rawData = JSON.parse(item.rawJson || '{}');
+      return rawData.data?.itemType === 'attachment';
+    });
+
+    if (attachmentItems.length > 0) {
+      console.log(`   (${parentItems.length} parent items, ${attachmentItems.length} attachments)`);
+    }
+
+    // Upload parent items first
+    for (const item of parentItems) {
       try {
         const rawData = JSON.parse(item.rawJson);
         let data = rawData.data;
@@ -789,6 +805,103 @@ export class SyncManager extends EventEmitter {
         } else {
           errors.push(`Upload ${item.key} failed: ${e}`);
         }
+      }
+    }
+
+    // Upload attachment items after all parent items are uploaded
+    // This ensures parentItem references exist in Zotero
+    for (const item of attachmentItems) {
+      try {
+        const rawData = JSON.parse(item.rawJson);
+        let data = rawData.data;
+        
+        // Add key and version from item to data for new items
+        if (item.version === 0 && item.key) {
+          data.key = item.key;
+          data.version = item.version;
+        }
+
+        // Ensure tags is an array
+        if (typeof data.tags === 'string') {
+          try {
+            data.tags = JSON.parse(data.tags);
+          } catch (e) {
+            data.tags = [];
+          }
+        }
+        if (!Array.isArray(data.tags)) {
+          data.tags = [];
+        }
+
+        if (item.deleted) {
+          // Delete attachment from remote
+          try {
+            await this.apiClient.deleteItem(zoteroId, item.key, item.version, libraryType);
+            await this.db.delete(items)
+              .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
+              .run();
+            deleted++;
+            console.log(`   🗑️  Deleted attachment ${item.key}`);
+          } catch (e: any) {
+            if (e.message?.includes('404')) {
+              // Already deleted
+              await this.db.delete(items)
+                .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
+                .run();
+              deleted++;
+            } else {
+              errors.push(`Delete attachment ${item.key} failed: ${e}`);
+            }
+          }
+        } else if (item.version === 0) {
+          // Create new attachment item
+          console.log(`   📤 Creating attachment item: ${data.key} (parent: ${data.parentItem})`);
+          try {
+            const result = await this.apiClient.createItems(zoteroId, [data], libraryType);
+            if (result.successful && result.successful['0']) {
+              const newKey = result.successful['0'].key || result.successful['0'];
+              console.log(`   ✅ Created attachment ${newKey}`);
+              
+              // Update local key if server reassigned
+              if (newKey !== item.key) {
+                await this.db.update(items)
+                  .set({ key: newKey, synced: true, version: 1 })
+                  .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
+                  .run();
+              } else {
+                await this.markAsSynced(item.key, libraryId);
+              }
+              updated++;
+            } else if (result.failed && result.failed['0']) {
+              const errorMsg = result.failed['0'].message || 'Unknown error';
+              console.error(`   ❌ Failed to create attachment ${item.key}: ${errorMsg}`);
+              
+              // Check if parent item doesn't exist
+              if (errorMsg.includes('Parent item') && errorMsg.includes('not found')) {
+                console.log(`   ⚠️  Parent item not synced yet, will retry on next sync`);
+                // Don't mark as error, just skip for now
+              } else {
+                errors.push(`Create attachment ${item.key} failed: ${errorMsg}`);
+              }
+            }
+          } catch (e: any) {
+            console.error(`   ❌ Failed to create attachment ${item.key}:`, e.message);
+            errors.push(`Create attachment ${item.key} failed: ${e}`);
+          }
+        } else {
+          // Update existing attachment
+          try {
+            delete data.key; // Don't send key for updates
+            await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
+            await this.markAsSynced(item.key, libraryId);
+            updated++;
+            console.log(`   ✅ Updated attachment ${item.key}`);
+          } catch (e: any) {
+            errors.push(`Update attachment ${item.key} failed: ${e}`);
+          }
+        }
+      } catch (e: any) {
+        errors.push(`Process attachment ${item.key} failed: ${e}`);
       }
     }
 
