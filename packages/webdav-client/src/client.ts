@@ -35,7 +35,15 @@ export class WebDAVClient {
   private maxRetries: number;
 
   constructor(config: WebDAVConfig, options: WebDAVClientOptions = {}) {
-    this.config = config;
+    const normalizedBasePath = (config.basePath || '').trim();
+    const safeBasePath = normalizedBasePath.length > 0
+      ? '/' + normalizedBasePath.replace(/^\/+/, '').replace(/\/+$/, '')
+      : '/zotero';
+
+    this.config = {
+      ...config,
+      basePath: safeBasePath,
+    };
     this.baseUrl = new URL(config.url);
     this.timeout = options.timeout || 30000; // 30s default
     this.maxRetries = options.maxRetries || 3;
@@ -62,7 +70,7 @@ export class WebDAVClient {
       headers?: Record<string, string>;
     } = {}
   ): Promise<{ status: number; headers: Record<string, string>; body: string }> {
-    const urlPath = this.joinUrlPath(this.config.basePath || '/', filePath);
+    const urlPath = this.joinUrlPath(this.config.basePath || '/zotero', filePath);
     const url = new URL(urlPath, this.baseUrl);
 
     const auth = Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64');
@@ -146,7 +154,7 @@ export class WebDAVClient {
    */
   async downloadFile(remotePath: string, localPath: string, onProgress?: (downloaded: number, total: number) => void): Promise<void> {
     return new Promise(async (resolve, reject) => {
-      const urlPath = this.joinUrlPath(this.config.basePath || '/', remotePath);
+      const urlPath = this.joinUrlPath(this.config.basePath || '/zotero', remotePath);
       const url = new URL(urlPath, this.baseUrl);
       const auth = Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64');
 
@@ -259,7 +267,7 @@ export class WebDAVClient {
       
       // Skip the base directory itself
       const normalizedPath = href.replace(/\/$/, '');
-      const basePath = this.config.basePath || '/';
+      const basePath = (this.config.basePath || '/zotero').replace(/\/$/, '');
       if (normalizedPath === basePath || normalizedPath === basePath + '/') {
         continue;
       }

@@ -61,7 +61,7 @@ export class AttachmentManager {
         url: config.url,
         username: config.username,
         password: config.password,
-        basePath: config.basePath,
+        basePath: '/zotero',
       });
 
       const test = await this.webdavClient.testConnection();
@@ -90,12 +90,19 @@ export class AttachmentManager {
         url: config.url,
         username: config.username,
         password: config.password,
-        basePath: config.basePath || '/zotero',
+        basePath: '/zotero',
       });
 
       const test = await client.testConnection();
       if (!test.success) {
         return { success: false, error: test.error };
+      }
+
+      // Create zotero subdirectory (Zotero Desktop compatible)
+      try {
+        await client.createDirectory('/');
+      } catch (e) {
+        // Directory might already exist, that's ok
       }
 
       const now = Math.floor(Date.now() / 1000);
@@ -107,7 +114,7 @@ export class AttachmentManager {
             url: config.url,
             username: config.username,
             password: config.password,
-            basePath: config.basePath || '/zotero',
+            basePath: '/zotero',
             autoSync: config.autoSync || false,
             enabled: true,
             updatedAt: now,
@@ -118,7 +125,7 @@ export class AttachmentManager {
           url: config.url,
           username: config.username,
           password: config.password,
-          basePath: config.basePath || '/zotero',
+          basePath: config.basePath || '/',
           autoSync: config.autoSync || false,
           enabled: true,
           createdAt: now,

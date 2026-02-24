@@ -1517,14 +1517,14 @@ const commands: Command[] = [
   {
     name: 'webdav:config',
     aliases: ['wdc'],
-    description: 'Configure WebDAV server',
+    description: 'Configure WebDAV server. Files are stored under <basePath>/zotero/ for Zotero Desktop compatibility.',
     options: [
       { name: '--auto-sync', description: 'Enable/disable auto-sync for attachments', value: '<true|false>' },
-      { name: '--base-path', description: 'Update base path for WebDAV storage', value: '<path>' },
+      { name: '--base-path', description: 'Base path for WebDAV storage (zotero subdir will be created automatically)', value: '<path>' },
     ],
     examples: [
       'zotero webdav:config https://dav.example.com user pass',
-      'zotero webdav:config https://dav.example.com user pass /zotero --auto-sync true',
+      'zotero webdav:config https://dav.example.com user pass /mydata --auto-sync true',
       'zotero webdav:config --auto-sync true     # Update existing config',
       'zotero webdav:config --auto-sync false    # Disable auto-sync',
     ],
@@ -1598,6 +1598,7 @@ const commands: Command[] = [
           console.log(`   URL: ${result.config.url}`);
           console.log(`   Username: ${result.config.username}`);
           console.log(`   Base Path: ${result.config.basePath}`);
+          console.log(`   Storage: ${result.config.basePath}/zotero/ (Zotero Desktop compatible)`);
           console.log(`   Auto Sync: ${result.config.autoSync ? 'Enabled' : 'Disabled'}`);
           if (result.config.autoSync) {
             console.log(`\n💡 Auto-sync is enabled. New attachments will be automatically uploaded to WebDAV.`);
@@ -1646,6 +1647,7 @@ const commands: Command[] = [
         console.log(`   URL: ${url}`);
         console.log(`   Username: ${username}`);
         console.log(`   Base Path: ${normalizedBasePath}`);
+        console.log(`   Storage: ${normalizedBasePath}/zotero/ (Zotero Desktop compatible)`);
         console.log(`   Auto Sync: ${autoSync ? 'Enabled' : 'Disabled'}`);
         if (autoSync) {
           console.log(`\n💡 Auto-sync is enabled. New attachments will be automatically uploaded to WebDAV.`);
@@ -1806,6 +1808,7 @@ const commands: Command[] = [
       console.log(`   URL: ${config.url}`);
       console.log(`   Username: ${config.username}`);
       console.log(`   Base Path: ${config.basePath}`);
+      console.log(`   Storage: ${config.basePath}/zotero/ (Zotero Desktop compatible)`);
       console.log(`   Enabled: ${config.enabled ? 'Yes' : 'No'}`);
       console.log(`   Auto Sync: ${config.autoSync ? 'Yes' : 'No'}`);
       console.log(`   Last Sync: ${config.lastSyncAt ? new Date(config.lastSyncAt * 1000).toISOString() : 'Never'}`);
