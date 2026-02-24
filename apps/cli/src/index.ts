@@ -1520,12 +1520,13 @@ const commands: Command[] = [
     description: 'Configure WebDAV server (files stored under <basePath>/zotero/)',
     options: [
       { name: '--auto-sync', description: 'Enable/disable auto-sync for attachments', value: '<true|false>' },
+      { name: '--base-path', description: 'Base path for WebDAV storage (default: /)', value: '<path>' },
     ],
     examples: [
       'zotero webdav:config https://dav.example.com user pass',
       'zotero webdav:config https://dav.example.com user pass /mydata --auto-sync true',
       'zotero webdav:config --auto-sync true     # Update existing config',
-      'zotero webdav:config --auto-sync false    # Disable auto-sync',
+      'zotero webdav:config --base-path /mydata  # Update base path only',
     ],
     execute: async (args) => {
       await initModules();
@@ -1545,6 +1546,10 @@ const commands: Command[] = [
         } else if (arg.startsWith('--auto-sync=')) {
           const val = arg.split('=')[1];
           autoSync = val === 'true' || val === 'yes' || val === '1';
+        } else if (arg === '--base-path') {
+          basePath = args[++i];
+        } else if (arg.startsWith('--base-path=')) {
+          basePath = arg.split('=')[1];
         } else if (arg === '--enabled') {
           i++; // kept for backward compatibility
         } else if (arg.startsWith('--enabled=')) {
