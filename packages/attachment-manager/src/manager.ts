@@ -306,6 +306,85 @@ export class AttachmentManager {
   }
 
   /**
+   * Ensure Zotero attachment item exists on server
+   * This creates/updates the attachment item in Zotero before WebDAV upload
+   */
+  private async ensureZoteroAttachmentItem(
+    attachment: any,
+    libraryId: number
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Get library info for API calls
+      const library = await this.db.select().from(libraries).where(eq(libraries.id, libraryId)).get();
+      if (!library) {
+        return { success: false, error: 'Library not found' };
+      }
+
+      const zoteroId = String(library.zoteroId);
+      const libraryType = library.type as 'user' | 'group';
+
+      // Check if attachment item exists in Zotero
+      try {
+        const existingItem = await zoteroApi.getItem(zoteroId, attachment.key, libraryType);
+        if (existingItem && existingItem.data) {
+          // Attachment exists, update if needed (especially md5/mtime for WebDAV)
+          const needsUpdate =
+            existingItem.data.linkMode !== 'imported_file' ||
+            existingItem.data.contentType !== attachment.contentType ||
+            existingItem.data.filename !== attachment.filename;
+
+          if (needsUpdate) {
+            console.log(`   📝 Updating attachment item ${attachment.key} in Zotero...`);
+            const updateData = {
+              ...existingItem.data,
+              linkMode: 'imported_file',
+              contentType: attachment.contentType || 'application/octet-stream',
+              filename: attachment.filename || 'attachment.zip',
+              title: attachment.title || attachment.filename || 'Attachment',
+              md5: null, // Will be set after WebDAV upload
+              mtime: null, // Will be set after WebDAV upload
+            };
+            await zoteroApi.updateItem(zoteroId, attachment.key, updateData, existingItem.version, libraryType);
+          }
+          return { success: true };
+        }
+      } catch (e: any) {
+        // Item doesn't exist (404), will create below
+        if (!e.message?.includes('404')) {
+          throw e;
+        }
+      }
+
+      // Create new attachment item in Zotero
+      console.log(`   📝 Creating attachment item ${attachment.key} in Zotero...`);
+      const attachmentItem = {
+        itemType: 'attachment',
+        key: attachment.key,
+        parentItem: attachment.parentItemKey,
+        linkMode: 'imported_file',
+        title: attachment.title || attachment.filename || 'Attachment',
+        contentType: attachment.contentType || 'application/octet-stream',
+        charset: '',
+        filename: attachment.filename || 'attachment.zip',
+        md5: null,
+        mtime: null,
+        tags: [],
+        relations: {},
+      };
+
+      const result = await zoteroApi.createItems(zoteroId, [attachmentItem], libraryType);
+      if (!result.successful || !result.successful['0']) {
+        return { success: false, error: 'Failed to create attachment item in Zotero' };
+      }
+
+      return { success: true };
+    } catch (error: any) {
+      console.error(`   ❌ Failed to ensure attachment item:`, error.message);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
    * Sync attachment to WebDAV
    * Zotero's actual structure: /zotero/<item_key>.zip and .prop (XML format)
    */
@@ -333,6 +412,16 @@ export class AttachmentManager {
       if (!attachment.path || !fs.existsSync(attachment.path)) {
         return { success: false, error: `Local file not found: ${attachment.path || '(no path)'}` };
       }
+
+      // Step 1: Ensure Zotero attachment item exists (CRITICAL for Zotero Desktop to recognize it)
+      console.log(`   📎 Ensuring Zotero attachment item exists for ${attachmentKey}...`);
+      const itemResult = await this.ensureZoteroAttachmentItem(attachment, attachment.libraryId);
+      if (!itemResult.success) {
+        return { success: false, error: `Failed to create Zotero attachment item: ${itemResult.error}` };
+      }
+
+      // Step 2: Upload to WebDAV
+      console.log(`   ☁️  Uploading to WebDAV...`);
 
       // Calculate WebDAV paths - Zotero's actual structure
       // Files are at root: /zotero/<item_key>.zip and /zotero/<item_key>.prop
@@ -389,9 +478,49 @@ export class AttachmentManager {
         fs.unlinkSync(tempZip);
       }
 
+      // Step 3: Update Zotero attachment item with md5 and mtime
+      console.log(`   📝 Updating attachment metadata in Zotero...`);
+      const mtimeMs = zipStats.mtime.getTime();
+      await this.updateAttachmentMetadata(attachment, zipMd5, mtimeMs, attachment.libraryId);
+
       return { success: true };
     } catch (error: any) {
       return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Update Zotero attachment item metadata after WebDAV upload
+   */
+  private async updateAttachmentMetadata(
+    attachment: any,
+    md5: string,
+    mtime: number,
+    libraryId: number
+  ): Promise<void> {
+    try {
+      const library = await this.db.select().from(libraries).where(eq(libraries.id, libraryId)).get();
+      if (!library) return;
+
+      const zoteroId = String(library.zoteroId);
+      const libraryType = library.type as 'user' | 'group';
+
+      // Get current item
+      const existingItem = await zoteroApi.getItem(zoteroId, attachment.key, libraryType);
+      if (!existingItem || !existingItem.data) return;
+
+      // Update with md5 and mtime (required for Zotero to recognize WebDAV file)
+      const updateData = {
+        ...existingItem.data,
+        md5: md5,
+        mtime: mtime,
+      };
+
+      await zoteroApi.updateItem(zoteroId, attachment.key, updateData, existingItem.version, libraryType);
+      console.log(`   ✅ Updated attachment metadata (md5: ${md5.slice(0, 8)}..., mtime: ${mtime})`);
+    } catch (error: any) {
+      console.warn(`   ⚠️  Failed to update attachment metadata: ${error.message}`);
+      // Don't fail the whole operation if metadata update fails
     }
   }
 
