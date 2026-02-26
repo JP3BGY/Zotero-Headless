@@ -25,7 +25,8 @@ export class ProgressBar {
    * Update progress
    */
   update(current: number, label?: string): void {
-    this.current = Math.min(current, this.total);
+    // Clamp current to valid range [0, total]
+    this.current = Math.max(0, Math.min(current, this.total));
     if (label) this.label = label;
     this.render();
   }

@@ -243,6 +243,16 @@ export function htmlToMarkdown(html: string): string {
   
   let markdown = turndownService.turndown(html);
   
+  // Unescape common markdown characters that were escaped by turndown
+  // This fixes citations like [1] which turndown escapes to \[1\]
+  markdown = markdown
+    .replace(/\\\[/g, '[')
+    .replace(/\\\]/g, ']')
+    .replace(/\\\(/g, '(')
+    .replace(/\\\)/g, ')')
+    .replace(/\\#/g, '#')
+    .replace(/\\-/g, '-');
+  
   markdown = markdown
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -315,7 +325,7 @@ export function validateHtml(html: string): { valid: boolean; issues: string[] }
   
   const nestedBlockquotes = doc.body.querySelectorAll('blockquote blockquote');
   if (nestedBlockquotes.length > 0) {
-    issues.push('Nested blockquotes are not supported');
+    issues.push('nested blockquotes are not supported');
   }
   
   return { valid: issues.length === 0, issues };

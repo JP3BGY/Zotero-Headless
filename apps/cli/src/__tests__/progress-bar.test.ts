@@ -6,19 +6,26 @@ import { ProgressBar } from '../progress-bar.js';
 
 describe('ProgressBar', () => {
   let stdoutWrite: any;
+  let consoleLog: any;
   let stdoutOutput: string[];
+  let consoleOutput: string[];
   
   beforeEach(() => {
     stdoutOutput = [];
+    consoleOutput = [];
     stdoutWrite = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
       stdoutOutput.push(chunk.toString());
       return true;
+    });
+    consoleLog = vi.spyOn(console, 'log').mockImplementation((...args) => {
+      consoleOutput.push(args.join(' '));
     });
     vi.useFakeTimers();
   });
   
   afterEach(() => {
     stdoutWrite.mockRestore();
+    consoleLog.mockRestore();
     vi.useRealTimers();
   });
   
@@ -143,8 +150,8 @@ describe('ProgressBar', () => {
       const pb = new ProgressBar({ total: 100 });
       pb.complete('Download finished!');
       
-      const lastOutput = stdoutOutput[stdoutOutput.length - 1];
-      expect(lastOutput).toContain('Download finished!');
+      // Message goes to console.log
+      expect(consoleOutput[0]).toContain('Download finished!');
     });
     
     it('should handle complete without message', () => {

@@ -37,16 +37,16 @@ export class DataConverter {
     }));
 
     // 解析日期
-    const publicationDate = this.parseCrossRefDate(data);
+    const publicationDate = DataConverter.parseCrossRefDate(data);
 
     // 解析期刊名称
     const journal = data['container-title']?.[0] || '';
 
     // 清理摘要（CrossRef 使用 HTML 标签）
-    const abstract = this.stripHTML(data.abstract || '');
+    const abstract = DataConverter.stripHTML(data.abstract || '');
 
     return {
-      itemType: this.mapCrossRefType(data.type),
+      itemType: DataConverter.mapCrossRefType(data.type),
       title: data.title?.[0] || data.title || '',
       DOI: identifier,
       url: data.URL || `https://doi.org/${identifier}`,
@@ -60,7 +60,7 @@ export class DataConverter {
       isbn: data.ISBN ? (Array.isArray(data.ISBN) ? data.ISBN[0] : data.ISBN) : null,
       issn: data.ISSN ? (Array.isArray(data.ISSN) ? data.ISSN[0] : data.ISSN) : null,
       doi: identifier,
-      creators: JSON.stringify(creators),
+      creators, // Keep as array for Zotero API compatibility
       tags: JSON.stringify([]),
       extra: JSON.stringify({}),
       collectionKeys: JSON.stringify([]),

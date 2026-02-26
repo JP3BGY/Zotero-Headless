@@ -38,27 +38,30 @@ export async function promptConflictResolution(
   
   return new Promise((resolve) => {
     rl.question(t('conflict.prompt'), (answer) => {
-      const choice = answer.trim().toLowerCase();
+      const choice = answer.trim();
+      const lowerChoice = choice.toLowerCase();
       
-      switch (choice) {
-        case 'r':
-          resolve('remote');
-          break;
-        case 'l':
-          resolve('local');
-          break;
-        case 's':
-          resolve('skip');
-          break;
-        case 'R':
-          resolve('all-remote');
-          break;
-        case 'L':
-          resolve('all-local');
-          break;
-        default:
-          console.log(t('errors.invalidKey'));
-          resolve('skip');
+      // Check for global strategies first (uppercase)
+      if (choice === 'R') {
+        resolve('all-remote');
+      } else if (choice === 'L') {
+        resolve('all-local');
+      } else {
+        // Individual choices (lowercase)
+        switch (lowerChoice) {
+          case 'r':
+            resolve('remote');
+            break;
+          case 'l':
+            resolve('local');
+            break;
+          case 's':
+            resolve('skip');
+            break;
+          default:
+            console.log(t('errors.invalidKey'));
+            resolve('skip');
+        }
       }
     });
   });
@@ -78,13 +81,14 @@ export function createPrompt(): readline.Interface {
  * Batch resolve conflicts interactively
  */
 export async function resolveConflictsInteractive(
-  conflicts: ConflictItem[]
+  conflicts: ConflictItem[],
+  rl?: readline.Interface
 ): Promise<Map<string, 'remote' | 'local' | 'skip'>> {
   if (conflicts.length === 0) {
     return new Map();
   }
   
-  const rl = createPrompt();
+  const inputRl = rl || createPrompt();
   const resolutions = new Map<string, 'remote' | 'local' | 'skip'>();
   let globalStrategy: 'remote' | 'local' | null = null;
   
@@ -99,7 +103,7 @@ export async function resolveConflictsInteractive(
     }
     
     // Prompt for resolution
-    const resolution = await promptConflictResolution(item, rl);
+    const resolution = await promptConflictResolution(item, inputRl);
     
     switch (resolution) {
       case 'all-remote':
@@ -127,7 +131,7 @@ export async function resolveConflictsInteractive(
     }
   }
   
-  rl.close();
+  inputRl.close();
   console.log('');
   
   return resolutions;
