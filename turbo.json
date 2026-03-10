@@ -10,6 +10,10 @@
       "dependsOn": ["@zotero-headless/cli#build", "^build"],
       "outputs": ["dist/**"]
     },
+    "bundle": {
+      "dependsOn": ["build"],
+      "outputs": ["bundle/**"]
+    },
     "dev": {
       "cache": false,
       "persistent": true

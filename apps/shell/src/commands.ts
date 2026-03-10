@@ -1,7 +1,4 @@
-// Import CLI commands using relative path for npm package compatibility
-// In development: uses workspace link
-// In npm package: CLI is at ../../../apps/cli/dist/index.js
-import { commands, type Command } from '../../cli/dist/index.js';
+import { commands, type Command } from '@zotero-headless/cli';
 import { getRawSQLite } from '@zotero-headless/database';
 
 import type { ItemKeySuggestion } from './types.js';

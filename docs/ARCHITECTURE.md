@@ -190,9 +190,12 @@ CLI (spawn) → Shell Process (独立 TUI)
 | 语言 | TypeScript | 类型安全 |
 | ORM | Drizzle | 轻量、类型安全 |
 | 数据库 | SQLite | 零配置、单文件 |
-| CLI | 原生 process.argv | 零依赖、简单 |
-| HTTP | Node.js fetch | 原生支持 |
+| CLI | Commander.js | 成熟、功能完善 |
+| TUI | Ink + React | 声明式终端 UI |
+| HTTP | Axios | 稳定、拦截器支持 |
 | 测试 | Vitest | 快速、ESM 支持 |
+| 构建编排 | Turborepo | 增量构建、依赖感知 |
+| 打包 | tsup (esbuild) | 零配置、极速打包 |
 
 ## 代码约定
 
@@ -212,10 +215,12 @@ const timestamp = Math.floor(Date.now() / 1000);
 
 ### 目录结构约定
 
-- `apps/` - 可执行应用
-- `packages/` - 可复用库
+- `apps/` - 可执行应用（cli、shell、agent-api）
+- `packages/` - 可复用库（api、core、database、sync-engine 等）
+- `scripts/` - 构建与打包脚本
 - `docs/` - 文档（只有规范和指南，无临时文件）
-- 每个包独立管理依赖
+- `tsconfig.base.json` - 所有包共享的 TypeScript 基础配置
+- 每个包独立管理依赖，tsconfig 通过 `extends` 继承基础配置
 
 ## 性能考虑
 
@@ -231,6 +236,49 @@ const timestamp = Math.floor(Date.now() / 1000);
 ### 内存优化
 - 使用生成器处理大结果集
 - 避免加载整个库到内存
+
+## 构建与打包系统
+
+### 构建流程
+
+```
+pnpm build     →  Turborepo 按依赖顺序 tsc 编译所有包
+pnpm bundle    →  tsup 打包 CLI 和 Shell 为单文件
+pnpm package   →  收集 bundle 产物 + 生成 package.json → .tgz
+```
+
+### tsconfig 继承
+
+所有包的 `tsconfig.json` 通过 `extends: "../../tsconfig.base.json"` 继承共享配置，只覆盖 `outDir`、`rootDir` 等包级选项。
+
+### tsup 打包
+
+用 [tsup](https://tsup.egoist.dev/)（基于 esbuild）将 monorepo 代码打包为可分发的单文件：
+
+| 应用 | 入口 | 产物 | 格式 | 说明 |
+|------|------|------|------|------|
+| CLI | `apps/cli/src/index.ts` | `apps/cli/bundle/zotero.cjs` | CJS | 内联所有 `@zotero-headless/*`，外置 `better-sqlite3`/`sql.js` |
+| Shell | `apps/shell/src/index.tsx` | `apps/shell/bundle/shell.mjs` | ESM | 内联所有 `@zotero-headless/*`，外置 ink/react/native 模块 |
+
+配置文件为各自目录下的 `tsup.config.ts`。
+
+### Turborepo 任务
+
+| 任务 | 依赖 | 产物 |
+|------|------|------|
+| `build` | `^build`（先构建依赖包） | `dist/**` |
+| `bundle` | `build` | `bundle/**` |
+| `typecheck` | `^build` | — |
+| `test` | `build` | — |
+
+### 打包脚本
+
+`scripts/package-for-npm.js` 负责：
+1. 运行 `turbo bundle`
+2. 将 CLI 和 Shell 的 bundle 产物复制到 `dist-package/`
+3. 从 workspace 各 `package.json` 提取外部依赖版本（不硬编码）
+4. 生成发布用 `package.json`（含 `bin` 入口）
+5. 打包为 `.tgz`
 
 ## 扩展点
 

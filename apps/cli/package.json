@@ -13,6 +13,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "bundle": "tsup",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
     "lint": "echo 'No lint configured'"

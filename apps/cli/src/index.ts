@@ -3740,7 +3740,8 @@ function showCommandHelp(cmd: Command, invokedName: string) {
 }
 
 // Only run main if this file is executed directly
-// @ts-ignore
-if (require.main === module) {
+import { fileURLToPath } from 'url';
+import { realpathSync } from 'fs';
+if (process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])) {
   main();
 }
