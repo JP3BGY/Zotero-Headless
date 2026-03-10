@@ -7,6 +7,8 @@ import { useTerminalLayout } from './useScroll.js';
 import { executeCommand, highlightSearchResult, parseCommand } from '../commands.js';
 import { t } from '../i18n.js';
 
+const DELETE_COMMANDS = ['delete', 'rm', 'del', 'remove'];
+
 export function useKeyHandler() {
   const { exit } = useApp();
   const { state, dispatch, addLine } = useShellState();
@@ -14,38 +16,14 @@ export function useKeyHandler() {
   const completions = useCompletions();
   const { maxScrollOffset } = useTerminalLayout(state.lines.length);
 
-  const handleExecute = useCallback(async (cmd: string) => {
-    if (!cmd.trim() || state.mode === 'executing') return;
-
-    dispatch({ type: 'SET_MODE', mode: 'executing' });
-    history.add(cmd);
-    addLine('input', `> ${cmd}`);
+  const runCliCommand = useCallback(async (parsedCmd: string, args: string[], originalInput: string) => {
+    dispatch({ type: 'START_COMMAND', command: originalInput });
+    addLine('input', `> ${originalInput}`);
 
     let hasRealtimeOutput = false;
+    let exitCode = 0;
 
     try {
-      const { cmd: parsedCmd, args } = parseCommand(cmd);
-
-      // Builtin commands
-      if (parsedCmd === 'clear' || parsedCmd === 'cls') {
-        dispatch({ type: 'CLEAR_LINES' });
-        dispatch({ type: 'SET_MODE', mode: 'idle' });
-        return;
-      }
-      if (parsedCmd === 'exit' || parsedCmd === 'quit' || parsedCmd === 'q') {
-        addLine('info', t.goodbye);
-        setTimeout(() => exit(), 500);
-        dispatch({ type: 'SET_MODE', mode: 'idle' });
-        return;
-      }
-      if (parsedCmd === 'help') {
-        addLine('info', t.help);
-        dispatch({ type: 'RESET_INPUT' });
-        dispatch({ type: 'SET_MODE', mode: 'idle' });
-        return;
-      }
-
-      // CLI command execution
       const result = await executeCommand(parsedCmd, args, (chunk) => {
         if (chunk && chunk.trim()) {
           hasRealtimeOutput = true;
@@ -53,10 +31,11 @@ export function useKeyHandler() {
         }
       });
 
+      exitCode = result.exitCode;
+
       if (result.exitCode !== 0 && result.stderr) {
         addLine('error', result.stderr);
       } else if (!hasRealtimeOutput) {
-        // Search highlight
         if ((parsedCmd === 'search' || parsedCmd === 'f' || parsedCmd === 'find') && args.length > 0) {
           const highlighted = highlightSearchResult(result.stdout, args);
           addLine(
@@ -71,13 +50,58 @@ export function useKeyHandler() {
         }
       }
     } catch (error) {
+      exitCode = 1;
       const errorMsg = error instanceof Error ? error.message : String(error);
       addLine('error', t.networkError(errorMsg));
     } finally {
+      dispatch({ type: 'END_COMMAND', exitCode });
       dispatch({ type: 'RESET_INPUT' });
-      dispatch({ type: 'SET_MODE', mode: 'idle' });
     }
-  }, [state.mode, dispatch, history, addLine, exit]);
+  }, [dispatch, addLine]);
+
+  const handleExecute = useCallback(async (cmd: string) => {
+    if (!cmd.trim() || state.mode !== 'idle') return;
+
+    history.add(cmd);
+    const { cmd: parsedCmd, args } = parseCommand(cmd);
+
+    // Builtin commands (no group tracking needed)
+    if (parsedCmd === 'clear' || parsedCmd === 'cls') {
+      dispatch({ type: 'CLEAR_LINES' });
+      return;
+    }
+    if (parsedCmd === 'exit' || parsedCmd === 'quit' || parsedCmd === 'q') {
+      addLine('info', t.goodbye);
+      setTimeout(() => exit(), 500);
+      return;
+    }
+    if (parsedCmd === 'help') {
+      addLine('input', `> ${cmd}`);
+      addLine('info', t.help);
+      dispatch({ type: 'RESET_INPUT' });
+      return;
+    }
+
+    // Delete commands need confirmation
+    if (DELETE_COMMANDS.includes(parsedCmd) && args.length > 0) {
+      const target = args[0];
+      const msg = t.confirmDelete?.(target) ??
+        `Delete item "${target}"? This cannot be undone.`;
+      dispatch({
+        type: 'SET_CONFIRM',
+        message: msg,
+        onConfirm: () => { runCliCommand(parsedCmd, args, cmd); },
+        onCancel: () => {
+          addLine('info', t.cancelled ?? 'Cancelled.');
+          dispatch({ type: 'RESET_INPUT' });
+        },
+      });
+      return;
+    }
+
+    // Regular CLI command
+    await runCliCommand(parsedCmd, args, cmd);
+  }, [state.mode, dispatch, history, addLine, exit, runCliCommand]);
 
   const handleTab = useCallback(() => {
     const { input } = state;
@@ -136,7 +160,8 @@ export function useKeyHandler() {
   }, [completions, dispatch]);
 
   useInput((value, key) => {
-    if (state.mode === 'executing') return;
+    // Confirming mode is handled by ConfirmPrompt component
+    if (state.mode === 'executing' || state.mode === 'confirming') return;
 
     if (key.return) {
       handleExecute(state.input);

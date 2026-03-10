@@ -14,6 +14,10 @@ export const t = {
   execError: (msg: string) => isEnglish ? `❌ Execution error: ${msg}` : `❌ 执行错误: ${msg}`,
   noResult: isEnglish ? 'No results' : '无结果',
   commandDone: isEnglish ? 'Command completed' : '命令执行完成',
+  confirmDelete: (key: string) => isEnglish
+    ? `Delete item "${key}"? This cannot be undone.`
+    : `确认删除 "${key}"？此操作不可撤销。`,
+  cancelled: isEnglish ? 'Cancelled.' : '已取消。',
   help: isEnglish ? `
 📚 Zotero Shell Help
 

@@ -1,11 +1,14 @@
 import React from 'react';
-import { Box } from 'ink';
-import { Header, ShortcutHints, Divider } from './components/Header.js';
+import { Box, Text } from 'ink';
+import { StatusLine } from './components/StatusLine.js';
+import { Divider } from './components/Header.js';
 import { OutputArea } from './components/OutputArea.js';
 import { InputPrompt } from './components/InputPrompt.js';
 import { CompletionList } from './components/CompletionList.js';
+import { ConfirmPrompt } from './components/ConfirmPrompt.js';
 import { ShellContext, useShellReducer } from './hooks/useShellState.js';
 import { useKeyHandler } from './hooks/useKeyHandler.js';
+import { t } from './i18n.js';
 
 function ShellUI() {
   const { state } = React.useContext(ShellContext)!;
@@ -13,11 +16,15 @@ function ShellUI() {
 
   return (
     <Box flexDirection="column" height="100%">
-      <Header />
-      <ShortcutHints />
+      <StatusLine />
+      <Text color="gray">{t.subtitle}</Text>
       {state.lines.length > 0 && <Divider />}
       <OutputArea />
-      <InputPrompt onInputChange={updateSuggestions} />
+      {state.mode === 'confirming' ? (
+        <ConfirmPrompt />
+      ) : (
+        <InputPrompt onInputChange={updateSuggestions} />
+      )}
       <CompletionList />
     </Box>
   );
