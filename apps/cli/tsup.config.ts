@@ -8,7 +8,7 @@ export default defineConfig({
   platform: 'node',
   banner: { js: '#!/usr/bin/env node' },
   external: ['better-sqlite3', 'sql.js'],
-  noExternal: [/^@zotero-headless\//],
+  noExternal: [/^(?!better-sqlite3|sql\.js).*/],
   splitting: false,
   clean: true,
   define: { 'process.env.BUNDLED': '"true"' },
