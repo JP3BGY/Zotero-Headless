@@ -4,12 +4,10 @@
 import { commands, type Command } from '../../cli/dist/index.js';
 import { getRawSQLite } from '@zotero-headless/database';
 
-// Item 信息类型
-export type ItemInfo = {
-  key: string;
-  title: string;
-  itemType: string;
-};
+import type { ItemKeySuggestion } from './types.js';
+
+// Re-export for backward compatibility
+export type ItemInfo = ItemKeySuggestion;
 
 // 需要 Item Key 的命令列表
 const ITEM_KEY_COMMANDS = [
