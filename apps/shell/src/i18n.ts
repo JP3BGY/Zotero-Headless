@@ -2,16 +2,16 @@ const lang = process.env.ZOTERO_LANG || 'zh';
 const isEnglish = lang === 'en';
 
 export const t = {
-  welcome: '📚 Zotero Shell v1.0.0',
+  welcome: 'Zotero Shell v1.0.0',
   subtitle: isEnglish ? 'Type "help" for commands, or "exit" to quit' : '输入 "help" 查看可用命令，或 "exit" 退出',
   shortcuts: isEnglish ? 'Tab=complete, ↑↓=history, PgUp/PgDn=scroll, Ctrl+C=exit' : 'Tab=补全, ↑↓=历史, PgUp/PgDn=滚动, Ctrl+C=退出',
   scrollHint: isEnglish ? '... Press PageDown to scroll ...' : '... 按 PageDown 滚动 ...',
   executing: isEnglish ? 'Executing...' : '执行中...',
   moreMatches: (n: number) => isEnglish ? `... ${n} more matches` : `... 还有 ${n} 个匹配`,
-  goodbye: isEnglish ? '👋 Goodbye!' : '👋 再见!',
-  unknownCommand: (cmd: string) => isEnglish ? `❌ Unknown command: ${cmd}` : `❌ 未知命令: ${cmd}`,
-  networkError: (msg: string) => isEnglish ? `⚠️ Network error: ${msg}\nPlease check your connection and try again.` : `⚠️ 网络错误: ${msg}\n请检查网络连接后重试。`,
-  execError: (msg: string) => isEnglish ? `❌ Execution error: ${msg}` : `❌ 执行错误: ${msg}`,
+  goodbye: isEnglish ? 'Goodbye!' : '再见!',
+  unknownCommand: (cmd: string) => isEnglish ? `Unknown command: ${cmd}` : `未知命令: ${cmd}`,
+  networkError: (msg: string) => isEnglish ? `Network error: ${msg}\nPlease check your connection and try again.` : `网络错误: ${msg}\n请检查网络连接后重试。`,
+  execError: (msg: string) => isEnglish ? `Execution error: ${msg}` : `执行错误: ${msg}`,
   noResult: isEnglish ? 'No results' : '无结果',
   commandDone: isEnglish ? 'Command completed' : '命令执行完成',
   confirmDelete: (key: string) => isEnglish
@@ -19,7 +19,7 @@ export const t = {
     : `确认删除 "${key}"？此操作不可撤销。`,
   cancelled: isEnglish ? 'Cancelled.' : '已取消。',
   help: isEnglish ? `
-📚 Zotero Shell Help
+Zotero Shell Help
 
 Item Management:
   ls, list                List items
@@ -46,7 +46,7 @@ Shortcuts:
   PgUp/PgDn               Scroll output up/down
   Ctrl+C                  Exit shell
       `.trim() : `
-📚 Zotero Shell 帮助
+Zotero Shell 帮助
 
 文献管理:
   ls, list                列出文献

@@ -132,7 +132,7 @@ export async function executeCommand(
   if (!command) {
     return {
       stdout: '',
-      stderr: `❌ Unknown command: ${cmd}`,
+      stderr: `Unknown command: ${cmd}`,
       exitCode: 1
     };
   }
@@ -147,7 +147,7 @@ export async function executeCommand(
     const errorMsg = error instanceof Error ? error.message : String(error);
     return {
       stdout: '',
-      stderr: `⚠️ 命令执行失败: ${errorMsg}`,
+      stderr: `命令执行失败: ${errorMsg}`,
       exitCode: 1
     };
   }

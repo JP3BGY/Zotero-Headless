@@ -18,10 +18,9 @@ export function useKeyHandler() {
 
   const runCliCommand = useCallback(async (parsedCmd: string, args: string[], originalInput: string) => {
     dispatch({ type: 'START_COMMAND', command: originalInput });
-    addLine('input', `> ${originalInput}`);
 
     let hasRealtimeOutput = false;
-    let exitCode = 0;
+    let success = true;
 
     try {
       const result = await executeCommand(parsedCmd, args, (chunk) => {
@@ -31,7 +30,7 @@ export function useKeyHandler() {
         }
       });
 
-      exitCode = result.exitCode;
+      success = result.exitCode === 0;
 
       if (result.exitCode !== 0 && result.stderr) {
         addLine('error', result.stderr);
@@ -50,11 +49,11 @@ export function useKeyHandler() {
         }
       }
     } catch (error) {
-      exitCode = 1;
+      success = false;
       const errorMsg = error instanceof Error ? error.message : String(error);
       addLine('error', t.networkError(errorMsg));
     } finally {
-      dispatch({ type: 'END_COMMAND', exitCode });
+      dispatch({ type: 'END_COMMAND', success });
       dispatch({ type: 'RESET_INPUT' });
     }
   }, [dispatch, addLine]);
@@ -76,7 +75,6 @@ export function useKeyHandler() {
       return;
     }
     if (parsedCmd === 'help') {
-      addLine('input', `> ${cmd}`);
       addLine('info', t.help);
       dispatch({ type: 'RESET_INPUT' });
       return;
