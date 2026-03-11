@@ -33,7 +33,7 @@ mkdirSync(distDir, { recursive: true });
 // Run turbo bundle (builds everything in correct order)
 console.log('Running turbo bundle...');
 try {
-  execSync('pnpm run bundle -- --force', { cwd: rootDir, stdio: 'inherit' });
+  execSync('npx turbo run bundle --filter=@zotero-headless/cli --filter=@zotero-headless/shell --force', { cwd: rootDir, stdio: 'inherit' });
 } catch (error) {
   console.error('Bundling failed:', error.message);
   process.exit(1);
