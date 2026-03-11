@@ -5,7 +5,7 @@ import * as os from 'os';
 
 interface HistoryEntry {
   id: number;
-  type: 'item' | 'search' | 'command';
+  type: 'item' | 'search' | 'command' | 'shell_command';
   key?: string;
   query?: string;
   command?: string;
@@ -18,7 +18,7 @@ const HISTORY_FILE = path.join(os.homedir(), '.local', 'share', 'zotero-headless
 
 export class HistoryManager {
   private entries: HistoryEntry[] = [];
-  private maxEntries: number = 100;
+  private maxEntries: number = 500;
 
   constructor() {
     this.load();
@@ -55,7 +55,7 @@ export class HistoryManager {
    * Record an entry
    */
   record(entry: {
-    type: 'item' | 'search' | 'command';
+    type: 'item' | 'search' | 'command' | 'shell_command';
     key?: string;
     query?: string;
     command?: string;
@@ -64,10 +64,11 @@ export class HistoryManager {
     const now = Date.now();
     
     // Check if already exists
-    const existing = this.entries.find(e => 
-      e.type === entry.type && 
+    const existing = this.entries.find(e =>
+      e.type === entry.type &&
       ((entry.key && e.key === entry.key) ||
-       (entry.query && e.query === entry.query))
+       (entry.query && e.query === entry.query) ||
+       (entry.command && e.command === entry.command))
     );
 
     if (existing) {
@@ -103,6 +104,17 @@ export class HistoryManager {
       .filter(e => e.type === 'item' && e.key)
       .slice(0, limit)
       .map(e => e.key!);
+  }
+
+  /**
+   * Get recent shell commands (oldest first, for arrow-key navigation)
+   */
+  getRecentCommands(limit: number = 100): string[] {
+    return this.entries
+      .filter(e => e.type === 'shell_command' && e.command)
+      .slice(0, limit)
+      .reverse()
+      .map(e => e.command!);
   }
 
   /**

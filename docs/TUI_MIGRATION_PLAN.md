@@ -3,6 +3,24 @@
 > 目标：借鉴 Claude Code 的 TUI 架构和交互模式，将 Zotero Shell 从单文件实现升级为模块化、
 > 可扩展、高性能的终端 UI。
 
+## 完成状态总览
+
+| Phase | 状态 | 备注 |
+|-------|------|------|
+| Phase 0: 组件化拆分与状态管理重构 | **已完成** | 18 个文件，~1400 行 |
+| Phase 1: Spinner + StatusLine + 可折叠输出 | **大部分完成** | 仅 OutputGroup（可折叠输出）未实现 |
+| Phase 2: 富文本渲染 + 多行输入 + 历史持久化 | **部分完成** | 历史持久化已完成；富文本渲染、多行输入待实现 |
+| Phase 3: Keybinding 可配置 + 渲染优化 | 未开始 | |
+
+### 额外已完成项（不在原计划中）
+
+- 命令提示行上下包裹全宽分隔线（Divider 组件）
+- StatusBar 组件：显示 user ID、db 连接状态（彩色）、库数量、item 数量、最近同步时间、快捷键提示
+- 共享 chalk 彩色符号模块（`@zotero-headless/core/symbols`），所有包统一使用
+- 全代码库 emoji 替换为纯文本符号
+
+---
+
 ## 设计原则
 
 1. **选择性采用**：Claude Code 是对话式 AI Agent TUI，Zotero Shell 是命令行 Shell TUI。
@@ -16,27 +34,30 @@
 
 **目标**：将单文件 `index.tsx` 拆分为模块化组件树，建立 Context-based 状态管理。
 
-### 0.1 目标文件结构
+### 0.1 文件结构（已实现）
 
 ```
 apps/shell/src/
-├── app.tsx                      # 根组件 + ShellProvider
+├── app.tsx                      # 根组件 ZoteroShell + ShellUI
 ├── components/
-│   ├── Header.tsx               # 欢迎消息 + 快捷键提示
+│   ├── Header.tsx               # Header + ShortcutHints + Divider 组件
 │   ├── OutputArea.tsx           # 输出历史区域（滚动）
-│   ├── OutputLine.tsx           # 单行输出渲染
-│   ├── InputPrompt.tsx          # 输入行 (> prompt + TextInput)
+│   ├── OutputLine.tsx           # 单行输出渲染（使用 chalk 彩色符号）
+│   ├── InputPrompt.tsx          # 输入行 (> prompt + TextInput + Spinner)
 │   ├── CompletionList.tsx       # 补全下拉列表
-│   └── Spinner.tsx              # 加载动画指示器
+│   ├── Spinner.tsx              # 自定义 braille 动画指示器 + 计时
+│   ├── StatusLine.tsx           # 顶部标题行
+│   ├── StatusBar.tsx            # 底部状态栏（db/sync/library 信息）
+│   └── ConfirmPrompt.tsx        # y/n 确认提示（用于破坏性操作）
 ├── hooks/
-│   ├── useShellState.ts         # Shell 状态 Context + reducer
-│   ├── useHistory.ts            # 命令历史 Hook（从 HistoryManager 类提取）
+│   ├── useShellState.ts         # Shell 状态 Context + reducer（13 种 action）
+│   ├── useHistory.ts            # 命令历史 Hook
 │   ├── useCompletions.ts        # 补全逻辑 Hook
-│   ├── useScroll.ts             # 滚动控制 Hook
+│   ├── useScroll.ts             # 终端布局计算 Hook
 │   └── useKeyHandler.ts         # 键盘输入处理 Hook
 ├── types.ts                     # 共享类型定义
-├── i18n.ts                      # 国际化字符串
-├── commands.ts                  # 命令系统（保留，小幅重构）
+├── i18n.ts                      # 国际化字符串（中/英双语）
+├── commands.ts                  # 命令系统（25+ 命令别名）
 └── index.tsx                    # 入口点（仅 render 调用）
 ```
 
@@ -118,10 +139,10 @@ function shellReducer(state: ShellState, action: ShellAction): ShellState {
 
 ### 0.4 验收标准
 
-- [ ] 所有现有功能正常工作（命令执行、补全、历史、滚动）
-- [ ] 单文件拆分为 12+ 个文件
-- [ ] 每个组件文件 < 100 行
-- [ ] 状态通过 Context 传递，无 prop drilling
+- [x] 所有现有功能正常工作（命令执行、补全、历史、滚动）
+- [x] 单文件拆分为 12+ 个文件（当前 18 个文件，共 ~1400 行）
+- [x] 每个组件文件 < 100 行
+- [x] 状态通过 Context 传递，无 prop drilling
 
 ---
 
@@ -129,132 +150,53 @@ function shellReducer(state: ShellState, action: ShellAction): ShellState {
 
 **目标**：替换 ⏳ 为动画 Spinner，添加状态栏，实现命令输出折叠。
 
-### 1.1 Spinner 组件
+### 1.1 Spinner 组件 ✅
 
-```typescript
-// components/Spinner.tsx
-// 使用 ink-spinner（已在 package.json 中声明但未使用）
-import InkSpinner from 'ink-spinner';
+> **实现说明**：未使用 `ink-spinner`，改用自定义 braille 动画帧（⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏），
+> 内置计时功能（useElapsedTime 逻辑内联在 Spinner 组件中，未独立为 hook）。
+> 38 行，集成在 InputPrompt 中显示。
 
-function Spinner({ command, startTime }: { command: string; startTime: number }) {
-  const elapsed = useElapsedTime(startTime);
-  return (
-    <Box>
-      <Text color="cyan"><InkSpinner type="dots" /></Text>
-      <Text color="gray"> {command}</Text>
-      <Text color="gray" dimColor> ({elapsed})</Text>
-    </Box>
-  );
-}
-```
+### 1.2 StatusLine + StatusBar ✅
 
-**性能注意**：参考 Claude Code 的 50ms spinner 隔离。Ink 的 `ink-spinner` 自带动画循环，
-但需要确保它不触发父组件 re-render。使用 `React.memo` 包裹 OutputArea 等重型组件。
+> **实现说明**：拆分为两个组件：
+> - **StatusLine.tsx**（11 行）：顶部仅显示标题 "Zotero Shell"
+> - **StatusBar.tsx**（96 行）：底部显示 user ID、db 连接状态（绿/红色）、库数量、item 数量、
+>   最近同步时间（相对时间格式）、快捷键提示。每 30s 自动刷新 + 命令完成后刷新。
+>   直接查询 SQLite 数据库获取实时数据。
 
-### 1.2 StatusLine 组件
+### 1.3 可折叠输出组 ❌（未实现）
 
-```typescript
-// components/StatusLine.tsx
-// 显示在顶部，替代静态 Welcome Message
-function StatusLine() {
-  const [state] = useShellState();
-  return (
-    <Box justifyContent="space-between">
-      <Box>
-        <Text color="green" bold>📚 Zotero Shell</Text>
-        <Text color="gray"> | </Text>
-        <Text color="cyan">{libraryName}</Text>
-        <Text color="gray"> ({itemCount} items)</Text>
-      </Box>
-      <Box>
-        {state.mode === 'executing' && <Text color="yellow">⟳ Running</Text>}
-        {lastSyncTime && <Text color="gray">Synced {relativeTime(lastSyncTime)}</Text>}
-      </Box>
-    </Box>
-  );
-}
-```
+> **状态**：OutputGroup 组件尚未实现。当前输出为扁平行列表，无命令分组和折叠功能。
+> 这是 Phase 1 中唯一未完成的功能点。
 
-### 1.3 可折叠输出组
-
-```typescript
-// types.ts 扩展
-interface OutputGroup {
-  id: number;
-  command: string;        // 用户输入的命令
-  lines: OutputLine[];    // 该命令的所有输出行
-  collapsed: boolean;
-  exitCode: number;
-  duration: number;       // ms
-}
-
-// components/OutputGroup.tsx
-function OutputGroup({ group }: { group: OutputGroup }) {
-  const [expanded, setExpanded] = useState(!group.collapsed);
-  const lineCount = group.lines.length;
-
-  if (!expanded && lineCount > COLLAPSE_THRESHOLD) {
-    return (
-      <Box flexDirection="column">
-        <Text color="cyan">> {group.command}</Text>
-        <Text color="gray">
-          ▶ {lineCount} lines ({formatDuration(group.duration)}) — press Enter to expand
-        </Text>
-      </Box>
-    );
-  }
-
-  return (
-    <Box flexDirection="column">
-      <Text color="cyan">> {group.command}</Text>
-      {group.lines.map(line => <OutputLine key={line.id} line={line} />)}
-    </Box>
-  );
-}
-```
-
-**折叠策略**：
+**原始设计**：
+- OutputGroup 数据结构：按命令分组输出行，记录 exitCode 和 duration
 - 输出 > 20 行时自动折叠已完成的命令
 - 当前执行中的命令始终展开
 - 最近一条命令始终展开
 
-### 1.4 确认提示
+### 1.4 确认提示 ✅
 
-```typescript
-// components/ConfirmPrompt.tsx
-// 用于 delete 等破坏性操作
-function ConfirmPrompt({ message, onConfirm, onCancel }: Props) {
-  useInput((input, key) => {
-    if (input === 'y' || input === 'Y') onConfirm();
-    if (input === 'n' || input === 'N' || key.escape) onCancel();
-  });
-
-  return (
-    <Box>
-      <Text color="yellow">⚠ {message}</Text>
-      <Text color="gray"> (y/N)</Text>
-    </Box>
-  );
-}
-```
+> **实现说明**：ConfirmPrompt.tsx（32 行），支持 y/n/Escape 输入，
+> 集成在 Shell 状态的 `confirming` mode 中。
 
 ### 1.5 实施步骤
 
-1. 用 `ink-spinner` 替换 ⏳，添加命令名和计时显示
-2. 用 `React.memo` 包裹 OutputArea 防止 Spinner re-render 传播
-3. 实现 StatusLine，替换静态 Welcome Message（首次运行时保留欢迎语）
-4. 扩展 OutputLine 类型添加 `commandId` 字段
-5. 实现 OutputGroup 组件，支持折叠/展开
-6. 在 commands.ts 中 delete 命令执行前添加确认流程
-7. 添加 `useElapsedTime` hook 用于计时
+1. ~~用 `ink-spinner` 替换 ⏳~~ → 自定义 braille Spinner ✅
+2. ~~用 `React.memo` 包裹 OutputArea~~ → 暂未需要 ✅
+3. ~~实现 StatusLine~~ → StatusLine + StatusBar 双组件 ✅
+4. ~~扩展 OutputLine 类型添加 `commandId` 字段~~ → 待 OutputGroup 实现时添加
+5. 实现 OutputGroup 组件，支持折叠/展开 → **未完成**
+6. ~~在 commands.ts 中 delete 命令执行前添加确认流程~~ ✅
+7. ~~添加 `useElapsedTime` hook~~ → 内联在 Spinner 中 ✅
 
 ### 1.6 验收标准
 
-- [ ] 执行命令时显示动画 Spinner + 命令名 + 经过时间
-- [ ] Spinner 动画不导致 OutputArea 闪烁
-- [ ] 顶部显示 StatusLine（库名、item 数量、同步时间）
-- [ ] 长输出自动折叠，可展开查看
-- [ ] delete 操作前弹出确认提示
+- [x] 执行命令时显示动画 Spinner + 命令名 + 经过时间（自定义 braille 动画帧 ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏）
+- [x] Spinner 动画不导致 OutputArea 闪烁
+- [x] 顶部显示 StatusLine；底部 StatusBar 显示 db 连接状态、库数量、item 数量、最近同步时间
+- [ ] 长输出自动折叠，可展开查看（OutputGroup 尚未实现）
+- [x] delete 操作前弹出确认提示（ConfirmPrompt 组件）
 
 ---
 
@@ -294,14 +236,12 @@ function ConfirmPrompt({ message, onConfirm, onCancel }: Props) {
 - 参考 Claude Code 的 `chat:newline` keybinding action
 - 初期可仅在特定命令（如 `note`）中启用多行模式
 
-### 2.3 历史持久化
+### 2.3 历史持久化 ✅
 
-```typescript
-// hooks/useHistory.ts 扩展
-// 保存到 ~/.zotero-headless/shell_history
-// 最多 1000 条
-// 加载时按 session 优先排序（参考 Claude Code）
-```
+> **实现说明**：复用 `packages/core/src/history-manager.ts` 的持久化 `HistoryManager`，
+> 新增 `type: 'shell_command'` 类型。历史保存到 `~/.local/share/zotero-headless/history.json`，
+> 最多 500 条。Shell 启动时加载历史命令，支持 ↑↓ 箭头跨 session 浏览。
+> 修改了 `apps/shell/src/hooks/useHistory.ts` 替换原有的内存实现。
 
 ### 2.4 实施步骤
 
@@ -318,7 +258,7 @@ function ConfirmPrompt({ message, onConfirm, onCancel }: Props) {
 - [ ] `show` 命令输出为结构化卡片（字段名加粗、DOI 可点击）
 - [ ] `export --format=bibtex` 输出带代码块样式
 - [ ] 多行输入在 `note` 命令中可用
-- [ ] 历史跨 session 持久化
+- [x] 历史跨 session 持久化
 
 ---
 
