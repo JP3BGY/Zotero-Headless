@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { useInput, useApp } from 'ink';
 import { useShellState } from './useShellState.js';
 import { useHistory } from './useHistory.js';
@@ -9,10 +9,12 @@ import { executeCommand, highlightSearchResult, parseCommand } from '../commands
 import { t } from '../i18n.js';
 
 const DELETE_COMMANDS = ['delete', 'rm', 'del', 'remove'];
+const CTRL_C_WINDOW = 2000; // ms
 
 export function useKeyHandler() {
   const { exit } = useApp();
   const { state, dispatch, addLine } = useShellState();
+  const lastCtrlCTime = useRef(0);
   const history = useHistory();
   const completions = useCompletions();
   const { maxScrollOffset } = useTerminalLayout(state.lines.length);
@@ -164,7 +166,45 @@ export function useKeyHandler() {
     }
   }, [completions, dispatch]);
 
+  const handleCtrlC = useCallback(() => {
+    const now = Date.now();
+    const isDoublePress = now - lastCtrlCTime.current < CTRL_C_WINDOW;
+
+    if (isDoublePress) {
+      addLine('info', t.goodbye);
+      setTimeout(() => exit(), 200);
+      return;
+    }
+
+    lastCtrlCTime.current = now;
+
+    if (state.mode === 'executing') {
+      // Cancel running command
+      dispatch({ type: 'END_COMMAND', success: false });
+      dispatch({ type: 'RESET_INPUT' });
+      addLine('info', t.ctrlCHint);
+    } else if (state.mode === 'confirming') {
+      dispatch({ type: 'CLEAR_CONFIRM' });
+      addLine('info', t.ctrlCHint);
+    } else if (state.mode === 'config') {
+      dispatch({ type: 'EXIT_CONFIG' });
+      addLine('info', t.ctrlCHint);
+    } else if (state.input.trim()) {
+      // Clear current input
+      dispatch({ type: 'RESET_INPUT' });
+      addLine('info', t.ctrlCHint);
+    } else {
+      addLine('info', t.ctrlCHint);
+    }
+  }, [state.mode, state.input, dispatch, addLine, exit]);
+
   useInput((input, key) => {
+    // Ctrl+C: handle in all modes
+    if (input === 'c' && key.ctrl) {
+      handleCtrlC();
+      return;
+    }
+
     // Confirming mode is handled by ConfirmPrompt component
     // Config mode is handled by ConfigPanel component
     if (state.mode === 'executing' || state.mode === 'confirming' || state.mode === 'config') return;

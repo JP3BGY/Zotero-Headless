@@ -4,11 +4,12 @@ const isEnglish = lang === 'en';
 export const t = {
   welcome: 'Zotero Shell v1.0.0',
   subtitle: isEnglish ? 'Type "help" for commands, or "exit" to quit' : '输入 "help" 查看可用命令，或 "exit" 退出',
-  shortcuts: isEnglish ? 'Tab=complete, ↑↓=history, PgUp/PgDn=scroll, Ctrl+C=exit' : 'Tab=补全, ↑↓=历史, PgUp/PgDn=滚动, Ctrl+C=退出',
+  shortcuts: isEnglish ? 'Tab=complete, ↑↓=history, PgUp/PgDn=scroll, Ctrl+C×2=exit' : 'Tab=补全, ↑↓=历史, PgUp/PgDn=滚动, Ctrl+C×2=退出',
   scrollHint: isEnglish ? '... Press PageDown to scroll ...' : '... 按 PageDown 滚动 ...',
   executing: isEnglish ? 'Executing...' : '执行中...',
   moreMatches: (n: number) => isEnglish ? `... ${n} more matches` : `... 还有 ${n} 个匹配`,
   goodbye: isEnglish ? 'Goodbye!' : '再见!',
+  ctrlCHint: isEnglish ? 'Press Ctrl+C again to exit.' : '再按一次 Ctrl+C 退出。',
   unknownCommand: (cmd: string) => isEnglish ? `Unknown command: ${cmd}` : `未知命令: ${cmd}`,
   networkError: (msg: string) => isEnglish ? `Network error: ${msg}\nPlease check your connection and try again.` : `网络错误: ${msg}\n请检查网络连接后重试。`,
   execError: (msg: string) => isEnglish ? `Execution error: ${msg}` : `执行错误: ${msg}`,
@@ -49,7 +50,7 @@ Shortcuts:
   Tab                     Autocomplete commands/options
   ↑/↓                     Browse command history
   PgUp/PgDn               Scroll output up/down
-  Ctrl+C                  Exit shell
+  Ctrl+C                  Cancel / press twice to exit
       `.trim() : `
 Zotero Shell 帮助
 
@@ -76,6 +77,6 @@ Zotero Shell 帮助
   Tab                     自动补全命令/选项
   ↑/↓                     浏览历史命令
   PgUp/PgDn               向上/向下滚动输出
-  Ctrl+C                  退出
+  Ctrl+C                  取消 / 连按两次退出
       `.trim(),
 };
