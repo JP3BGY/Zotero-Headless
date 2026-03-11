@@ -59,7 +59,7 @@ describe('CLI List Command Filtering', () => {
       
       // If items are shown, they should all be journalArticle type
       const calls = mockConsoleLog.mock.calls.flat().join('\n');
-      if (calls.includes('📚 Items')) {
+      if (calls.includes('Items')) {
         // Type should be shown in output
         expect(calls).toContain('journalArticle');
       }
@@ -322,7 +322,7 @@ describe('CLI List Command Filtering', () => {
       
       // Output should show filter description
       const calls = mockConsoleLog.mock.calls.flat().join('\n');
-      if (calls.includes('📚 Items')) {
+      if (calls.includes('Items')) {
         expect(calls).toContain('filtered');
       }
     });

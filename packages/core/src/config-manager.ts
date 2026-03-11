@@ -118,7 +118,7 @@ export class ConfigManager {
   init(): void {
     if (!fs.existsSync(this.configPath)) {
       this.save();
-      console.log(`✅ Created default config at ${this.configPath}`);
+      console.log(`✔ Created default config at ${this.configPath}`);
     }
   }
 

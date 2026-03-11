@@ -25,7 +25,7 @@ export async function promptConflictResolution(
   item: ConflictItem,
   rl: readline.Interface
 ): Promise<ConflictResolution> {
-  console.log(`\n📄 ${t('conflict.title')}: ${item.title || item.key}`);
+  console.log(`\n${t('conflict.title')}: ${item.title || item.key}`);
   console.log(`   ${t('conflict.local')}: ${item.localVersion} (${item.localModified?.toLocaleString() || t('common.unknown')})`);
   console.log(`   ${t('conflict.remote')}: ${item.remoteVersion} (${item.remoteModified?.toLocaleString() || t('common.unknown')})`);
   console.log('');
@@ -92,7 +92,7 @@ export async function resolveConflictsInteractive(
   const resolutions = new Map<string, 'remote' | 'local' | 'skip'>();
   let globalStrategy: 'remote' | 'local' | null = null;
   
-  console.log(`\n⚠️  ${conflicts.length} ${t('conflict.title')}\n`);
+  console.log(`\n!  ${conflicts.length} ${t('conflict.title')}\n`);
   
   for (const item of conflicts) {
     // Skip if already resolved via global strategy

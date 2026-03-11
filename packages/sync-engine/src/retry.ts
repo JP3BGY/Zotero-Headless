@@ -54,7 +54,7 @@ export async function withRetry<T>(
       );
       const jitter = Math.random() * 1000;
       
-      console.log(`   ⏳ Retrying in ${delay + jitter}ms (attempt ${attempt + 1}/${opts.maxRetries})...`);
+      console.log(`   Retrying in ${delay + jitter}ms (attempt ${attempt + 1}/${opts.maxRetries})...`);
       await sleep(delay + jitter);
     }
   }

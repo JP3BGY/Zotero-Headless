@@ -334,7 +334,7 @@ export class AttachmentManager {
             existingItem.data.filename !== attachment.filename;
 
           if (needsUpdate) {
-            console.log(`   📝 Updating attachment item ${attachment.key} in Zotero...`);
+            console.log(`   Updating attachment item ${attachment.key} in Zotero...`);
             
             // Extract fields from rawJson if available
             let attachmentTitle = existingItem.data.title || 'Attachment';
@@ -382,17 +382,17 @@ export class AttachmentManager {
       }
 
       // Create new attachment item in Zotero
-      console.log(`   📝 Creating attachment item ${attachment.key} in Zotero...`);
+      console.log(`   Creating attachment item ${attachment.key} in Zotero...`);
       
       // Check if parent item exists in Zotero first
       if (attachment.parentItemKey) {
         try {
           await zoteroApi.getItem(zoteroId, attachment.parentItemKey, libraryType);
-          console.log(`   ✅ Parent item ${attachment.parentItemKey} exists`);
+          console.log(`   ✔ Parent item ${attachment.parentItemKey} exists`);
         } catch (e: any) {
           if (e.message?.includes('404')) {
-            console.warn(`   ⚠️  Parent item ${attachment.parentItemKey} not found in Zotero`);
-            console.warn(`   ⚠️  Skipping attachment creation - will retry after parent syncs`);
+            console.warn(`   !  Parent item ${attachment.parentItemKey} not found in Zotero`);
+            console.warn(`   !  Skipping attachment creation - will retry after parent syncs`);
             return { 
               success: false, 
               error: `Parent item ${attachment.parentItemKey} not found. Please sync the parent item first.` 
@@ -441,24 +441,24 @@ export class AttachmentManager {
       }
 
       const result = await zoteroApi.createItems(zoteroId, [attachmentItem], libraryType);
-      console.log(`   📥 API Response:`, JSON.stringify(result, null, 2));
+      console.log(`   API Response:`, JSON.stringify(result, null, 2));
       
       // Check for success
       if (result.failed && result.failed['0']) {
         const errorMsg = result.failed['0'].message || 'Unknown error';
-        console.error(`   ❌ Attachment creation failed: ${errorMsg}`);
+        console.error(`   ✘ Attachment creation failed: ${errorMsg}`);
         return { success: false, error: errorMsg };
       }
       
       if (result.successful && result.successful['0']) {
-        console.log(`   ✅ Created attachment item: ${result.successful['0']}`);
+        console.log(`   ✔ Created attachment item: ${result.successful['0']}`);
         return { success: true };
       }
 
-      console.error(`   ❌ Unexpected API response`);
+      console.error(`   ✘ Unexpected API response`);
       return { success: false, error: 'Failed to create attachment item in Zotero' };
     } catch (error: any) {
-      console.error(`   ❌ Failed to ensure attachment item:`, error.message);
+      console.error(`   ✘ Failed to ensure attachment item:`, error.message);
       return { success: false, error: error.message };
     }
   }
@@ -493,14 +493,14 @@ export class AttachmentManager {
       }
 
       // Step 1: Ensure Zotero attachment item exists (CRITICAL for Zotero Desktop to recognize it)
-      console.log(`   📎 Ensuring Zotero attachment item exists for ${attachmentKey}...`);
+      console.log(`   Ensuring Zotero attachment item exists for ${attachmentKey}...`);
       const itemResult = await this.ensureZoteroAttachmentItem(attachment, attachment.libraryId);
       if (!itemResult.success) {
         return { success: false, error: `Failed to create Zotero attachment item: ${itemResult.error}` };
       }
 
       // Step 2: Upload to WebDAV
-      console.log(`   ☁️  Uploading to WebDAV...`);
+      console.log(`    Uploading to WebDAV...`);
 
       // Calculate WebDAV paths - Zotero's actual structure
       // Files are at root: /zotero/<item_key>.zip and /zotero/<item_key>.prop
@@ -558,7 +558,7 @@ export class AttachmentManager {
       }
 
       // Step 3: Update Zotero attachment item with md5 and mtime
-      console.log(`   📝 Updating attachment metadata in Zotero...`);
+      console.log(`   Updating attachment metadata in Zotero...`);
       const mtimeMs = zipStats.mtime.getTime();
       await this.updateAttachmentMetadata(attachment, zipMd5, mtimeMs, attachment.libraryId);
 
@@ -596,9 +596,9 @@ export class AttachmentManager {
       };
 
       await zoteroApi.updateItem(zoteroId, attachment.key, updateData, existingItem.version, libraryType);
-      console.log(`   ✅ Updated attachment metadata (md5: ${md5.slice(0, 8)}..., mtime: ${mtime})`);
+      console.log(`   ✔ Updated attachment metadata (md5: ${md5.slice(0, 8)}..., mtime: ${mtime})`);
     } catch (error: any) {
-      console.warn(`   ⚠️  Failed to update attachment metadata: ${error.message}`);
+      console.warn(`   !  Failed to update attachment metadata: ${error.message}`);
       // Don't fail the whole operation if metadata update fails
     }
   }

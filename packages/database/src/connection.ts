@@ -45,7 +45,7 @@ export function initializeDatabase(): Database {
   const dbDir = path.dirname(dbPath);
   if (!fs.existsSync(dbDir)) {
     fs.mkdirSync(dbDir, { recursive: true });
-    console.log(`📁 Created database directory: ${dbDir}`);
+    console.log(`Created database directory: ${dbDir}`);
   }
   
   // Open database connection
@@ -188,16 +188,16 @@ export function initializeDatabase(): Database {
     const hasWebdavSynced = columns.some(col => col.name === 'webdav_synced');
     
     if (!hasWebdavSynced) {
-      console.log('🔄 Migrating database: Adding WebDAV columns to attachments...');
+      console.log('Migrating database: Adding WebDAV columns to attachments...');
       sqliteInstance.exec(`
         ALTER TABLE attachments ADD COLUMN webdav_synced INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE attachments ADD COLUMN webdav_path TEXT;
         ALTER TABLE attachments ADD COLUMN webdav_synced_at INTEGER;
       `);
-      console.log('✅ Migration complete');
+      console.log('✔ Migration complete');
     }
   } catch (e) {
-    console.warn('⚠️ Database migration warning:', e);
+    console.warn('! Database migration warning:', e);
   }
   
   console.log(`📂 Database initialized: ${dbPath}`);

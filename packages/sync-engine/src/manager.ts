@@ -73,12 +73,12 @@ export class SyncManager extends EventEmitter {
     while (attempt < maxRetries) {
       if (attempt > 0) {
         const delay = Math.min(1000 * Math.pow(2, attempt - 1), 8000); // Exponential backoff: 1s, 2s, 4s, max 8s
-        console.log(`   ⏳ Retrying sync in ${delay}ms (attempt ${attempt + 1}/${maxRetries})...`);
+        console.log(`   Retrying sync in ${delay}ms (attempt ${attempt + 1}/${maxRetries})...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
 
       try {
-        console.log('🔑 Verifying API key...');
+        console.log('Verifying API key...');
         const keyInfo = await this.apiClient.verifyKey();
         console.log(`   Logged in as: ${keyInfo.username}`);
 
@@ -88,13 +88,13 @@ export class SyncManager extends EventEmitter {
         const zoteroId = String(library?.zoteroId ?? keyInfo.userID);
         const remoteVersion = await this.apiClient.getLibraryVersion(zoteroId, 'user');
 
-        console.log(`📊 Versions - Local: ${localVersion}, Remote: ${remoteVersion}`);
+        console.log(`Versions - Local: ${localVersion}, Remote: ${remoteVersion}`);
 
         const unsyncedItems = await this.getUnsyncedItems(libraryId);
         const hasUnsyncedChanges = unsyncedItems.length > 0;
 
         if (remoteVersion <= localVersion && !options.fullSync && !hasUnsyncedChanges) {
-          console.log('✅ Library is up to date!');
+          console.log('✔ Library is up to date!');
           return { success: true, updated: 0, deleted: 0, errors: [] };
         }
 
@@ -108,11 +108,11 @@ export class SyncManager extends EventEmitter {
         if (result.updated > 0) parts.push(`${result.updated} updated`);
         if (result.deleted > 0) parts.push(`${result.deleted} deleted`);
         if (parts.length === 0) parts.push('no changes');
-        console.log(`✅ Sync complete: ${parts.join(', ')}`);
+        console.log(`✔ Sync complete: ${parts.join(', ')}`);
 
         // If we had conflicts but succeeded overall, report partial success
         if (result.conflicts && result.conflicts.length > 0) {
-          console.log(`   ⚠️  ${result.conflicts.length} conflict(s) resolved automatically`);
+          console.log(`   !  ${result.conflicts.length} conflict(s) resolved automatically`);
         }
 
         return result;
@@ -123,13 +123,13 @@ export class SyncManager extends EventEmitter {
         // Check if this is a 412 error that warrants a retry
         if (message.includes('412') || message.includes('Precondition Failed')) {
           attempt++;
-          console.log(`   ⚠️  Sync conflict detected (412), will retry...`);
+          console.log(`   !  Sync conflict detected (412), will retry...`);
           
           // Refresh library version before retry
           try {
             const zoteroId = String((await this.getLibrary(options.libraryId ?? 1))?.zoteroId ?? '1');
             const freshVersion = await this.apiClient.getLibraryVersion(zoteroId, 'user');
-            console.log(`   🔄 Remote version updated, restarting sync...`);
+            console.log(`   Remote version updated, restarting sync...`);
           } catch (e) {
             // Ignore version check errors
           }
@@ -139,14 +139,14 @@ export class SyncManager extends EventEmitter {
           }
         } else {
           // Non-412 error, fail immediately
-          console.error('❌ Sync failed:', message);
+          console.error('✘ Sync failed:', message);
           return { success: false, updated: 0, deleted: 0, errors: [message] };
         }
       }
     }
 
     // All retries exhausted
-    console.error(`❌ Sync failed after ${maxRetries} attempts:`, lastError?.message);
+    console.error(`✘ Sync failed after ${maxRetries} attempts:`, lastError?.message);
     return { 
       success: false, 
       updated: 0, 
@@ -169,7 +169,7 @@ export class SyncManager extends EventEmitter {
     this.emit('sync:start', { ...options, libraryType: 'group', groupId });
 
     try {
-      console.log(`📚 Syncing group library: ${groupId}`);
+      console.log(`Syncing group library: ${groupId}`);
       
       // Get group details
       const groupInfo = await this.apiClient.getGroup(groupId);
@@ -180,13 +180,13 @@ export class SyncManager extends EventEmitter {
       const localVersion = library?.version ?? 0;
       const remoteVersion = await this.apiClient.getLibraryVersion(groupId, 'group');
 
-      console.log(`📊 Versions - Local: ${localVersion}, Remote: ${remoteVersion}`);
+      console.log(`Versions - Local: ${localVersion}, Remote: ${remoteVersion}`);
 
       const unsyncedItems = await this.getUnsyncedItems(libraryId);
       const hasUnsyncedChanges = unsyncedItems.length > 0;
 
       if (remoteVersion <= localVersion && !options.fullSync && !hasUnsyncedChanges) {
-        console.log('✅ Group library is up to date!');
+        console.log('✔ Group library is up to date!');
         return { success: true, updated: 0, deleted: 0, errors: [] };
       }
 
@@ -200,12 +200,12 @@ export class SyncManager extends EventEmitter {
       if (result.updated > 0) parts.push(`${result.updated} updated`);
       if (result.deleted > 0) parts.push(`${result.deleted} deleted`);
       if (parts.length === 0) parts.push('no changes');
-      console.log(`✅ Group sync complete: ${parts.join(', ')}`);
+      console.log(`✔ Group sync complete: ${parts.join(', ')}`);
 
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error('❌ Group sync failed:', message);
+      console.error('✘ Group sync failed:', message);
       return { success: false, updated: 0, deleted: 0, errors: [message] };
     }
   }
@@ -217,7 +217,7 @@ export class SyncManager extends EventEmitter {
     this.emit('sync:start', { ...options, syncAll: true });
 
     try {
-      console.log('🔑 Verifying API key...');
+      console.log('Verifying API key...');
       const keyInfo = await this.apiClient.verifyKey();
       console.log(`   Logged in as: ${keyInfo.username}`);
 
@@ -226,20 +226,20 @@ export class SyncManager extends EventEmitter {
       const allErrors: string[] = [];
 
       // 1. Sync user library first
-      console.log('\n📚 === Syncing User Library ===');
+      console.log('\n=== Syncing User Library ===');
       const userResult = await this.syncUserLibrary({ ...options, syncAll: false });
       totalUpdated += userResult.updated;
       totalDeleted += userResult.deleted;
       allErrors.push(...userResult.errors);
 
       // 2. Get user's groups
-      console.log('\n📚 === Fetching Groups ===');
+      console.log('\n=== Fetching Groups ===');
       const groups = await this.getUserGroups();
       console.log(`   Found ${groups.length} groups`);
 
       // 3. Sync each group library
       for (const group of groups) {
-        console.log(`\n📚 === Syncing Group: ${group.name} (${group.groupId}) ===`);
+        console.log(`\n=== Syncing Group: ${group.name} (${group.groupId}) ===`);
         const groupResult = await this.syncGroupLibrary(group.groupId, { ...options, syncAll: false });
         totalUpdated += groupResult.updated;
         totalDeleted += groupResult.deleted;
@@ -254,12 +254,12 @@ export class SyncManager extends EventEmitter {
       };
 
       this.emit('sync:complete', overallResult);
-      console.log(`\n✅ All libraries synced: ${totalUpdated} updated, ${totalDeleted} deleted`);
+      console.log(`\n✔ All libraries synced: ${totalUpdated} updated, ${totalDeleted} deleted`);
       
       return overallResult;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error('❌ Sync all failed:', message);
+      console.error('✘ Sync all failed:', message);
       return { success: false, updated: 0, deleted: 0, errors: [message] };
     }
   }
@@ -295,13 +295,13 @@ export class SyncManager extends EventEmitter {
           // Ensure group library exists in local DB
           await this.ensureLibrary(groupId, 'group', groupDetails.name);
         } catch (e) {
-          console.warn(`   ⚠️  Failed to get group details for ${groupId}`);
+          console.warn(`   !  Failed to get group details for ${groupId}`);
         }
       }
 
       return groups;
     } catch (error) {
-      console.error('❌ Failed to get user groups:', error);
+      console.error('✘ Failed to get user groups:', error);
       return [];
     }
   }
@@ -325,7 +325,7 @@ export class SyncManager extends EventEmitter {
 
     // ===== PHASE 1: Download from remote =====
     if (!skipDownload) {
-      console.log('\n📥 Phase 1: Downloading from remote...');
+      console.log('\nPhase 1: Downloading from remote...');
       const sinceVersion = fullSync ? 0 : localVersion;
       const downloadResult = await this.downloadUpdates(libraryId, zoteroId, libraryType, sinceVersion);
       totalUpdated += downloadResult.updated;
@@ -333,11 +333,11 @@ export class SyncManager extends EventEmitter {
       errors.push(...downloadResult.errors);
       conflicts.push(...downloadResult.conflicts);
     } else {
-      console.log('\n📥 Phase 1: Skipped (local changes only)');
+      console.log('\nPhase 1: Skipped (local changes only)');
     }
 
     // ===== PHASE 2: Upload to remote =====
-    console.log('\n📤 Phase 2: Uploading local changes...');
+    console.log('\nPhase 2: Uploading local changes...');
     const uploadResult = await this.uploadChanges(libraryId, zoteroId, libraryType, remoteVersion);
     totalUpdated += uploadResult.updated;
     totalDeleted += uploadResult.deleted;
@@ -347,20 +347,20 @@ export class SyncManager extends EventEmitter {
     // ===== PHASE 3: WebDAV sync (if autoSync enabled) =====
     const webdavConfig = await this.getWebDAVConfig();
     if (webdavConfig?.enabled && webdavConfig?.autoSync) {
-      console.log('\n☁️ Phase 3: Syncing attachments to WebDAV (autoSync enabled)...');
+      console.log('\nPhase 3: Syncing attachments to WebDAV (autoSync enabled)...');
       try {
         const { AttachmentManager } = await import('@zotero-headless/attachment-manager');
         const attachmentManager = new AttachmentManager();
         const webdavResult = await attachmentManager.syncAllToWebDAV();
         
         if (webdavResult.success) {
-          console.log(`   ✅ WebDAV sync complete: ${webdavResult.synced} attachments synced`);
+          console.log(`   ✔ WebDAV sync complete: ${webdavResult.synced} attachments synced`);
         } else {
-          console.log(`   ⚠️ WebDAV sync completed with issues:`);
+          console.log(`   ! WebDAV sync completed with issues:`);
           webdavResult.errors.forEach(err => console.log(`      - ${err}`));
         }
       } catch (e: any) {
-        console.log(`   ⚠️ WebDAV sync failed: ${e.message}`);
+        console.log(`   ! WebDAV sync failed: ${e.message}`);
         console.log(`      Run "zotero webdav:sync" manually to retry`);
       }
     }
@@ -418,7 +418,7 @@ export class SyncManager extends EventEmitter {
               
               if (localItem && !localItem.synced) {
                 // Conflict detected
-                console.log(`   ⚠️  Conflict: ${apiItem.key}`);
+                console.log(`   !  Conflict: ${apiItem.key}`);
                 conflicts.push(apiItem.key);
                 
                 if (this.config.conflictStrategy === 'remote') {
@@ -431,7 +431,7 @@ export class SyncManager extends EventEmitter {
                 updated++;
               }
             } catch (e) {
-              console.error(`   ❌ Failed: ${apiItem.key}:`, e);
+              console.error(`   ✘ Failed: ${apiItem.key}:`, e);
             }
           }));
         }
@@ -625,7 +625,7 @@ export class SyncManager extends EventEmitter {
         // Validate key format
         const keyPattern = /^[23456789ABCDEFGHIJKLMNPQRSTUVWXYZ]{8}$/;
         if (!keyPattern.test(data.key)) {
-          console.warn(`⚠️  WARNING: Key format may be invalid: ${data.key}`);
+          console.warn(`!  WARNING: Key format may be invalid: ${data.key}`);
           console.warn(`   Expected format: 8 chars from [23456789ABCDEFGHIJKLMNPQRSTUVWXYZ]`);
         }
 
@@ -634,17 +634,17 @@ export class SyncManager extends EventEmitter {
           let deletedFromRemote = false;
           try {
             await this.apiClient.deleteItem(zoteroId, item.key, item.version, libraryType);
-            console.log(`   🗑️  Deleted ${item.key} from remote`);
+            console.log(`    Deleted ${item.key} from remote`);
             deletedFromRemote = true;
           } catch (e: any) {
             if (e.message?.includes('404')) {
               // Item already deleted on remote, treat as success
-              console.log(`   🗑️  Item ${item.key} already deleted on remote (404)`);
+              console.log(`    Item ${item.key} already deleted on remote (404)`);
               deletedFromRemote = true;
             } else if (e.message?.includes('412') || e.statusCode === 412) {
               // Version conflict - remote has been modified
               // Zotero Desktop behavior: Check if remote also deleted the item
-              console.log(`   ⚠️  Version conflict for ${item.key}, checking remote state...`);
+              console.log(`   !  Version conflict for ${item.key}, checking remote state...`);
               
               try {
                 // Get current remote deleted items
@@ -653,11 +653,11 @@ export class SyncManager extends EventEmitter {
                 
                 if (isRemoteDeleted) {
                   // Remote also deleted this item - treat as success (Zotero Desktop behavior)
-                  console.log(`   ✅ Remote already deleted ${item.key}, treating as success`);
+                  console.log(`   ✔ Remote already deleted ${item.key}, treating as success`);
                   deletedFromRemote = true;
                 } else {
                   // Remote still exists and was modified - handle based on strategy
-                  console.log(`   ⚠️  Remote modified ${item.key}, resolving conflict...`);
+                  console.log(`   !  Remote modified ${item.key}, resolving conflict...`);
                   
                   if (this.config.conflictStrategy === 'remote') {
                     // Cancel local delete, keep remote version
@@ -665,7 +665,7 @@ export class SyncManager extends EventEmitter {
                       .set({ deleted: 0, synced: 1 })
                       .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
                       .run();
-                    console.log(`   ✅ Cancelled delete for ${item.key}, keeping remote version`);
+                    console.log(`   ✔ Cancelled delete for ${item.key}, keeping remote version`);
                   } else if (this.config.conflictStrategy === 'local') {
                     // Get latest version and retry delete
                     const remoteItem = await this.apiClient.getItem(zoteroId, item.key, libraryType);
@@ -673,12 +673,12 @@ export class SyncManager extends EventEmitter {
                     
                     try {
                       await this.apiClient.deleteItem(zoteroId, item.key, remoteVersion, libraryType);
-                      console.log(`   🗑️  Force deleted ${item.key} with updated version`);
+                      console.log(`    Force deleted ${item.key} with updated version`);
                       deletedFromRemote = true;
                     } catch (retryError: any) {
                       if (retryError.message?.includes('404')) {
                         // Item was deleted between our check and delete attempt
-                        console.log(`   ✅ Item ${item.key} was already deleted (404 on retry)`);
+                        console.log(`   ✔ Item ${item.key} was already deleted (404 on retry)`);
                         deletedFromRemote = true;
                       } else {
                         throw retryError;
@@ -691,7 +691,7 @@ export class SyncManager extends EventEmitter {
                   }
                 }
               } catch (checkError: any) {
-                console.error(`   ❌ Failed to check remote state for ${item.key}:`, checkError.message);
+                console.error(`   ✘ Failed to check remote state for ${item.key}:`, checkError.message);
                 conflicts.push(item.key);
               }
             } else {
@@ -717,15 +717,15 @@ export class SyncManager extends EventEmitter {
           }
         } else if (item.version === 0) {
           // Create new item
-          console.log(`   📤 Uploading new item with key: ${data.key || '(none)'}`);
+          console.log(`   Uploading new item with key: ${data.key || '(none)'}`);
           const result = await this.apiClient.createItems(zoteroId, [data], libraryType);
           if (result.successful && result.successful['0']) {
             const newKey = result.successful['0'].key || result.successful['0'];
-            console.log(`   ✅ Created new item ${newKey}`);
+            console.log(`   ✔ Created new item ${newKey}`);
             
             // 如果 key 改变了，先更新本地数据库中的 key
             if (newKey !== item.key) {
-              console.warn(`   ⚠️  WARNING: Server reassigned key for item ${item.key} -> ${newKey}`);
+              console.warn(`   !  WARNING: Server reassigned key for item ${item.key} -> ${newKey}`);
               console.warn(`      This may indicate key collision or invalid key format.`);
               
               // 使用事务确保一致性
@@ -746,7 +746,7 @@ export class SyncManager extends EventEmitter {
                   .run();
                 
                 if (attachmentCount?.rowsAffected > 0) {
-                  console.log(`   📝 Updated ${attachmentCount.rowsAffected} attachment(s) parent reference`);
+                  console.log(`   Updated ${attachmentCount.rowsAffected} attachment(s) parent reference`);
                 }
                 
                 // 3. 更新作为 parent 的 notes 的 rawJson 中的 parentItem
@@ -777,23 +777,23 @@ export class SyncManager extends EventEmitter {
                 }
                 
                 if (childNotes.length > 0) {
-                  console.log(`   📝 Updated ${childNotes.length} note(s) parent reference`);
+                  console.log(`   Updated ${childNotes.length} note(s) parent reference`);
                 }
               });
               
-              console.log(`   📝 Updated local key: ${item.key} -> ${newKey}`);
+              console.log(`   Updated local key: ${item.key} -> ${newKey}`);
             }
             
             // 使用新的 key 标记为已同步
             await this.markAsSynced(newKey, libraryId);
           } else if (result.failed && result.failed['0']) {
-            console.log(`   ❌ Failed to create item: ${result.failed['0'].message}`);
+            console.log(`   ✘ Failed to create item: ${result.failed['0'].message}`);
           }
           updated++;
         } else {
           // Update existing item
           await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
-          console.log(`   ✅ Updated ${item.key}`);
+          console.log(`   ✔ Updated ${item.key}`);
           updated++;
           
           // Mark as synced
@@ -802,7 +802,7 @@ export class SyncManager extends EventEmitter {
       } catch (e: any) {
         if (e.message?.includes('412')) {
           // Conflict - remote was modified
-          console.log(`   ⚠️  Conflict for ${item.key} (remote modified)`);
+          console.log(`   !  Conflict for ${item.key} (remote modified)`);
           
           if (this.config.conflictStrategy === 'remote') {
             // Fetch remote version and apply to local
@@ -810,10 +810,10 @@ export class SyncManager extends EventEmitter {
               const remoteItem = await this.apiClient.getItem(zoteroId, item.key, libraryType);
               if (remoteItem) {
                 await this.upsertItem(remoteItem, libraryId);
-                console.log(`   ✅ Applied remote version for ${item.key}`);
+                console.log(`   ✔ Applied remote version for ${item.key}`);
               }
             } catch (fetchError) {
-              console.error(`   ❌ Failed to fetch remote version for ${item.key}:`, fetchError);
+              console.error(`   ✘ Failed to fetch remote version for ${item.key}:`, fetchError);
               conflicts.push(item.key);
             }
           } else if (this.config.conflictStrategy === 'local') {
@@ -823,10 +823,10 @@ export class SyncManager extends EventEmitter {
               const remoteVersion = remoteItem?.data?.version || item.version;
               await this.apiClient.updateItem(zoteroId, item.key, data, remoteVersion, libraryType);
               await this.markAsSynced(item.key, libraryId);
-              console.log(`   ✅ Force updated ${item.key} with local changes`);
+              console.log(`   ✔ Force updated ${item.key} with local changes`);
               updated++;
             } catch (forceError) {
-              console.error(`   ❌ Failed to force update ${item.key}:`, forceError);
+              console.error(`   ✘ Failed to force update ${item.key}:`, forceError);
               conflicts.push(item.key);
             }
           } else {
@@ -872,7 +872,7 @@ export class SyncManager extends EventEmitter {
               .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
               .run();
             deleted++;
-            console.log(`   🗑️  Deleted attachment ${item.key}`);
+            console.log(`    Deleted attachment ${item.key}`);
           } catch (e: any) {
             if (e.message?.includes('404')) {
               // Already deleted
@@ -886,12 +886,12 @@ export class SyncManager extends EventEmitter {
           }
         } else if (item.version === 0) {
           // Create new attachment item
-          console.log(`   📤 Creating attachment item: ${data.key} (parent: ${data.parentItem})`);
+          console.log(`   Creating attachment item: ${data.key} (parent: ${data.parentItem})`);
           try {
             const result = await this.apiClient.createItems(zoteroId, [data], libraryType);
             if (result.successful && result.successful['0']) {
               const newKey = result.successful['0'].key || result.successful['0'];
-              console.log(`   ✅ Created attachment ${newKey}`);
+              console.log(`   ✔ Created attachment ${newKey}`);
               
               // Update local key if server reassigned
               if (newKey !== item.key) {
@@ -905,18 +905,18 @@ export class SyncManager extends EventEmitter {
               updated++;
             } else if (result.failed && result.failed['0']) {
               const errorMsg = result.failed['0'].message || 'Unknown error';
-              console.error(`   ❌ Failed to create attachment ${item.key}: ${errorMsg}`);
+              console.error(`   ✘ Failed to create attachment ${item.key}: ${errorMsg}`);
               
               // Check if parent item doesn't exist
               if (errorMsg.includes('Parent item') && errorMsg.includes('not found')) {
-                console.log(`   ⚠️  Parent item not synced yet, will retry on next sync`);
+                console.log(`   !  Parent item not synced yet, will retry on next sync`);
                 // Don't mark as error, just skip for now
               } else {
                 errors.push(`Create attachment ${item.key} failed: ${errorMsg}`);
               }
             }
           } catch (e: any) {
-            console.error(`   ❌ Failed to create attachment ${item.key}:`, e.message);
+            console.error(`   ✘ Failed to create attachment ${item.key}:`, e.message);
             errors.push(`Create attachment ${item.key} failed: ${e}`);
           }
         } else {
@@ -926,7 +926,7 @@ export class SyncManager extends EventEmitter {
             await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
             await this.markAsSynced(item.key, libraryId);
             updated++;
-            console.log(`   ✅ Updated attachment ${item.key}`);
+            console.log(`   ✔ Updated attachment ${item.key}`);
           } catch (e: any) {
             errors.push(`Update attachment ${item.key} failed: ${e}`);
           }
@@ -1045,7 +1045,7 @@ export class SyncManager extends EventEmitter {
         .all();
       
       if (childAttachments.length > 0) {
-        console.log(`   🗑️  Cascading delete: ${childAttachments.length} attachment(s) of ${parentKey}`);
+        console.log(`    Cascading delete: ${childAttachments.length} attachment(s) of ${parentKey}`);
         await this.db.update(items)
           .set({ deleted: true, updatedAt: Math.floor(Date.now() / 1000), synced: false })
           .where(and(

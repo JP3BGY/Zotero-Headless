@@ -52,7 +52,7 @@ export abstract class BaseFetcher {
           if (response.status === 429) {
             // 速率限制，等待后重试
             const retryAfter = parseInt(response.headers.get('Retry-After') || '5', 10);
-            console.log(`   ⏳ 速率限制，等待 ${retryAfter} 秒...`);
+            console.log(`   速率限制，等待 ${retryAfter} 秒...`);
             await this.sleep(retryAfter * 1000);
             continue;
           }
@@ -69,7 +69,7 @@ export abstract class BaseFetcher {
         // 如果是网络错误或超时，等待后重试
         if (attempt < this.config.retries) {
           const delay = Math.pow(2, attempt) * 1000;  // 指数退避
-          console.log(`   ⏳ 请求失败，${delay/1000} 秒后重试...`);
+          console.log(`   请求失败，${delay/1000} 秒后重试...`);
           await this.sleep(delay);
         }
       }

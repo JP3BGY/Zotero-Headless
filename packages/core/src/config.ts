@@ -181,7 +181,7 @@ export function loadConfig(): Config {
   const result = ConfigSchema.safeParse(rawConfig);
 
   if (!result.success) {
-    console.error('❌ Configuration error:');
+    console.error('✘ Configuration error:');
     // Handle different Zod error formats
     const errors = result.error.errors || result.error.issues || [];
     if (errors.length > 0) {
