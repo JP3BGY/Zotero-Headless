@@ -4,6 +4,7 @@ import { z } from 'zod';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import { symbols } from './symbols.js';
 
 // 查找 .env 文件的优先级顺序（由高到低）：
 // 1. ZOTERO_ENV_PATH 环境变量指定的路径
@@ -181,7 +182,7 @@ export function loadConfig(): Config {
   const result = ConfigSchema.safeParse(rawConfig);
 
   if (!result.success) {
-    console.error('✘ Configuration error:');
+    console.error(`${symbols.error} Configuration error:`);
     // Handle different Zod error formats
     const errors = result.error.errors || result.error.issues || [];
     if (errors.length > 0) {

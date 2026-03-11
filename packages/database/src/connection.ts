@@ -6,7 +6,7 @@ import path from 'path';
 import BetterSQLite3 from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema.js';
-import { appConfig } from '@zotero-headless/core';
+import { appConfig, symbols } from '@zotero-headless/core';
 
 // Re-export schema
 export * from './schema.js';
@@ -194,13 +194,13 @@ export function initializeDatabase(): Database {
         ALTER TABLE attachments ADD COLUMN webdav_path TEXT;
         ALTER TABLE attachments ADD COLUMN webdav_synced_at INTEGER;
       `);
-      console.log('✔ Migration complete');
+      console.log(`${symbols.success} Migration complete`);
     }
   } catch (e) {
-    console.warn('! Database migration warning:', e);
+    console.warn(`${symbols.warning} Database migration warning:`, e);
   }
   
-  console.log(`📂 Database initialized: ${dbPath}`);
+  console.log(`${symbols.success} Database initialized: ${dbPath}`);
   
   return db;
 }
@@ -223,7 +223,7 @@ export function closeDatabase(): void {
     sqliteInstance.close();
     sqliteInstance = null;
     db = null;
-    console.log('📂 Database connection closed');
+    console.log('Database connection closed');
   }
 }
 

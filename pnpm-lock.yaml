@@ -183,6 +183,9 @@ importers:
       '@zotero-headless/api':
         specifier: workspace:*
         version: link:../api
+      '@zotero-headless/core':
+        specifier: workspace:*
+        version: link:../core
       '@zotero-headless/database':
         specifier: workspace:*
         version: link:../database
@@ -214,6 +217,9 @@ importers:
       '@zotero-headless/types':
         specifier: workspace:*
         version: link:../types
+      chalk:
+        specifier: ^5.4.1
+        version: 5.6.2
       dotenv:
         specifier: ^17.3.1
         version: 17.3.1
@@ -3505,6 +3511,7 @@ packages:
     name: '@zotero-headless/attachment-manager'
     dependencies:
       '@zotero-headless/api': link:packages/api
+      '@zotero-headless/core': link:packages/core
       '@zotero-headless/database': link:packages/database
       '@zotero-headless/webdav-client': link:packages/webdav-client
       adm-zip: 0.5.16

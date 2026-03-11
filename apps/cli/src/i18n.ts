@@ -1,6 +1,8 @@
 // i18n Internationalization Support
 // Multi-language support for Zotero-Headless CLI
 
+import { symbols } from '@zotero-headless/core';
+
 export type Language = 'en' | 'zh';
 
 export interface Translations {
@@ -176,7 +178,7 @@ const zh: Translations = {
       groupSingle: (group: string) => `   (同步群组: ${group})`,
       quiet: '   (静默模式 - 无进度输出)',
       interactive: '   (交互模式 - 提示冲突解决)',
-      completed: '✔ 同步完成！',
+      completed: `${symbols.success} 同步完成！`,
       stats: (updated: number, errors: number) => 
         `同步统计：更新 ${updated} 个，错误 ${errors} 个`,
       downloading: (concurrency: number) => 
@@ -217,22 +219,22 @@ const zh: Translations = {
       error: '导出失败',
     },
     webdav: {
-      configured: '✔ WebDAV 配置成功',
+      configured: `${symbols.success} WebDAV 配置成功`,
       testing: '测试 WebDAV 连接...',
-      connected: '✔ WebDAV 连接成功',
-      failed: '✘ WebDAV 连接失败',
+      connected: `${symbols.success} WebDAV 连接成功`,
+      failed: `${symbols.error} WebDAV 连接失败`,
       syncing: '同步附件到 WebDAV...',
       synced: (count: number) => `已同步 ${count} 个附件`,
     },
   },
   errors: {
-    noLibrary: '✘ 未找到库。请先配置: zotero config',
-    noConfig: '✘ 未找到配置',
-    invalidKey: '✘ 无效的文献 Key',
-    networkError: '✘ 网络错误 - 请检查连接',
-    apiError: (code: number) => `✘ API 错误: ${code}`,
-    fileNotFound: (path: string) => `✘ 文件未找到: ${path}`,
-    permissionDenied: '✘ 权限被拒绝',
+    noLibrary: `${symbols.error} 未找到库。请先配置: zotero config`,
+    noConfig: `${symbols.error} 未找到配置`,
+    invalidKey: `${symbols.error} 无效的文献 Key`,
+    networkError: `${symbols.error} 网络错误 - 请检查连接`,
+    apiError: (code: number) => `${symbols.error} API 错误: ${code}`,
+    fileNotFound: (path: string) => `${symbols.error} 文件未找到: ${path}`,
+    permissionDenied: `${symbols.error} 权限被拒绝`,
   },
   fields: {
     title: '标题',

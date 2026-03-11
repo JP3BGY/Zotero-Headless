@@ -3,6 +3,7 @@
 
 import { getDatabase, attachments, libraries, webdavConfig, items } from '@zotero-headless/database';
 import { zoteroApi } from '@zotero-headless/api';
+import { symbols } from '@zotero-headless/core';
 import { WebDAVClient, createWebDAVClient } from '@zotero-headless/webdav-client';
 import { eq, and, or, desc, sql, isNull, isNotNull } from 'drizzle-orm';
 import * as path from 'path';
@@ -388,7 +389,7 @@ export class AttachmentManager {
       if (attachment.parentItemKey) {
         try {
           await zoteroApi.getItem(zoteroId, attachment.parentItemKey, libraryType);
-          console.log(`   ✔ Parent item ${attachment.parentItemKey} exists`);
+          console.log(`   ${symbols.success} Parent item ${attachment.parentItemKey} exists`);
         } catch (e: any) {
           if (e.message?.includes('404')) {
             console.warn(`   !  Parent item ${attachment.parentItemKey} not found in Zotero`);
@@ -446,19 +447,19 @@ export class AttachmentManager {
       // Check for success
       if (result.failed && result.failed['0']) {
         const errorMsg = result.failed['0'].message || 'Unknown error';
-        console.error(`   ✘ Attachment creation failed: ${errorMsg}`);
+        console.error(`   ${symbols.error} Attachment creation failed: ${errorMsg}`);
         return { success: false, error: errorMsg };
       }
       
       if (result.successful && result.successful['0']) {
-        console.log(`   ✔ Created attachment item: ${result.successful['0']}`);
+        console.log(`   ${symbols.success} Created attachment item: ${result.successful['0']}`);
         return { success: true };
       }
 
-      console.error(`   ✘ Unexpected API response`);
+      console.error(`   ${symbols.error} Unexpected API response`);
       return { success: false, error: 'Failed to create attachment item in Zotero' };
     } catch (error: any) {
-      console.error(`   ✘ Failed to ensure attachment item:`, error.message);
+      console.error(`   ${symbols.error} Failed to ensure attachment item:`, error.message);
       return { success: false, error: error.message };
     }
   }
@@ -596,7 +597,7 @@ export class AttachmentManager {
       };
 
       await zoteroApi.updateItem(zoteroId, attachment.key, updateData, existingItem.version, libraryType);
-      console.log(`   ✔ Updated attachment metadata (md5: ${md5.slice(0, 8)}..., mtime: ${mtime})`);
+      console.log(`   ${symbols.success} Updated attachment metadata (md5: ${md5.slice(0, 8)}..., mtime: ${mtime})`);
     } catch (error: any) {
       console.warn(`   !  Failed to update attachment metadata: ${error.message}`);
       // Don't fail the whole operation if metadata update fails

@@ -5,7 +5,7 @@
 import { EventEmitter } from 'events';
 import { getDatabase, getRawSQLite, libraries, items, collections, itemTags, syncLogs, attachments, webdavConfig, type Database } from '@zotero-headless/database';
 import { ZoteroAPIClient } from '@zotero-headless/api';
-import { appConfig } from '@zotero-headless/core';
+import { appConfig, symbols } from '@zotero-headless/core';
 import { ConflictResolver, conflictResolver } from './conflict.js';
 import { PayloadBuilder } from './payload-builder.js';
 import type { SyncOptions, SyncResult, Library, Item } from '@zotero-headless/types';
@@ -94,7 +94,7 @@ export class SyncManager extends EventEmitter {
         const hasUnsyncedChanges = unsyncedItems.length > 0;
 
         if (remoteVersion <= localVersion && !options.fullSync && !hasUnsyncedChanges) {
-          console.log('✔ Library is up to date!');
+          console.log(`${symbols.success} Library is up to date!`);
           return { success: true, updated: 0, deleted: 0, errors: [] };
         }
 
@@ -108,7 +108,7 @@ export class SyncManager extends EventEmitter {
         if (result.updated > 0) parts.push(`${result.updated} updated`);
         if (result.deleted > 0) parts.push(`${result.deleted} deleted`);
         if (parts.length === 0) parts.push('no changes');
-        console.log(`✔ Sync complete: ${parts.join(', ')}`);
+        console.log(`${symbols.success} Sync complete: ${parts.join(', ')}`);
 
         // If we had conflicts but succeeded overall, report partial success
         if (result.conflicts && result.conflicts.length > 0) {
@@ -139,14 +139,14 @@ export class SyncManager extends EventEmitter {
           }
         } else {
           // Non-412 error, fail immediately
-          console.error('✘ Sync failed:', message);
+          console.error(`${symbols.error} Sync failed:`, message);
           return { success: false, updated: 0, deleted: 0, errors: [message] };
         }
       }
     }
 
     // All retries exhausted
-    console.error(`✘ Sync failed after ${maxRetries} attempts:`, lastError?.message);
+    console.error(`${symbols.error} Sync failed after ${maxRetries} attempts:`, lastError?.message);
     return { 
       success: false, 
       updated: 0, 
@@ -186,7 +186,7 @@ export class SyncManager extends EventEmitter {
       const hasUnsyncedChanges = unsyncedItems.length > 0;
 
       if (remoteVersion <= localVersion && !options.fullSync && !hasUnsyncedChanges) {
-        console.log('✔ Group library is up to date!');
+        console.log(`${symbols.success} Group library is up to date!`);
         return { success: true, updated: 0, deleted: 0, errors: [] };
       }
 
@@ -200,12 +200,12 @@ export class SyncManager extends EventEmitter {
       if (result.updated > 0) parts.push(`${result.updated} updated`);
       if (result.deleted > 0) parts.push(`${result.deleted} deleted`);
       if (parts.length === 0) parts.push('no changes');
-      console.log(`✔ Group sync complete: ${parts.join(', ')}`);
+      console.log(`${symbols.success} Group sync complete: ${parts.join(', ')}`);
 
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error('✘ Group sync failed:', message);
+      console.error(`${symbols.error} Group sync failed:`, message);
       return { success: false, updated: 0, deleted: 0, errors: [message] };
     }
   }
@@ -254,12 +254,12 @@ export class SyncManager extends EventEmitter {
       };
 
       this.emit('sync:complete', overallResult);
-      console.log(`\n✔ All libraries synced: ${totalUpdated} updated, ${totalDeleted} deleted`);
+      console.log(`\n${symbols.success} All libraries synced: ${totalUpdated} updated, ${totalDeleted} deleted`);
       
       return overallResult;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error('✘ Sync all failed:', message);
+      console.error(`${symbols.error} Sync all failed:`, message);
       return { success: false, updated: 0, deleted: 0, errors: [message] };
     }
   }
@@ -301,7 +301,7 @@ export class SyncManager extends EventEmitter {
 
       return groups;
     } catch (error) {
-      console.error('✘ Failed to get user groups:', error);
+      console.error(`${symbols.error} Failed to get user groups:`, error);
       return [];
     }
   }
@@ -354,7 +354,7 @@ export class SyncManager extends EventEmitter {
         const webdavResult = await attachmentManager.syncAllToWebDAV();
         
         if (webdavResult.success) {
-          console.log(`   ✔ WebDAV sync complete: ${webdavResult.synced} attachments synced`);
+          console.log(`${symbols.success} WebDAV sync complete: ${webdavResult.synced} attachments synced`);
         } else {
           console.log(`   ! WebDAV sync completed with issues:`);
           webdavResult.errors.forEach(err => console.log(`      - ${err}`));
@@ -431,7 +431,7 @@ export class SyncManager extends EventEmitter {
                 updated++;
               }
             } catch (e) {
-              console.error(`   ✘ Failed: ${apiItem.key}:`, e);
+              console.error(`${symbols.error} Failed: ${apiItem.key}:`, e);
             }
           }));
         }
@@ -653,7 +653,7 @@ export class SyncManager extends EventEmitter {
                 
                 if (isRemoteDeleted) {
                   // Remote also deleted this item - treat as success (Zotero Desktop behavior)
-                  console.log(`   ✔ Remote already deleted ${item.key}, treating as success`);
+                  console.log(`${symbols.success} Remote already deleted ${item.key}, treating as success`);
                   deletedFromRemote = true;
                 } else {
                   // Remote still exists and was modified - handle based on strategy
@@ -665,7 +665,7 @@ export class SyncManager extends EventEmitter {
                       .set({ deleted: 0, synced: 1 })
                       .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
                       .run();
-                    console.log(`   ✔ Cancelled delete for ${item.key}, keeping remote version`);
+                    console.log(`${symbols.success} Cancelled delete for ${item.key}, keeping remote version`);
                   } else if (this.config.conflictStrategy === 'local') {
                     // Get latest version and retry delete
                     const remoteItem = await this.apiClient.getItem(zoteroId, item.key, libraryType);
@@ -678,7 +678,7 @@ export class SyncManager extends EventEmitter {
                     } catch (retryError: any) {
                       if (retryError.message?.includes('404')) {
                         // Item was deleted between our check and delete attempt
-                        console.log(`   ✔ Item ${item.key} was already deleted (404 on retry)`);
+                        console.log(`${symbols.success} Item ${item.key} was already deleted (404 on retry)`);
                         deletedFromRemote = true;
                       } else {
                         throw retryError;
@@ -691,7 +691,7 @@ export class SyncManager extends EventEmitter {
                   }
                 }
               } catch (checkError: any) {
-                console.error(`   ✘ Failed to check remote state for ${item.key}:`, checkError.message);
+                console.error(`${symbols.error} Failed to check remote state for ${item.key}:`, checkError.message);
                 conflicts.push(item.key);
               }
             } else {
@@ -721,7 +721,7 @@ export class SyncManager extends EventEmitter {
           const result = await this.apiClient.createItems(zoteroId, [data], libraryType);
           if (result.successful && result.successful['0']) {
             const newKey = result.successful['0'].key || result.successful['0'];
-            console.log(`   ✔ Created new item ${newKey}`);
+            console.log(`${symbols.success} Created new item ${newKey}`);
             
             // 如果 key 改变了，先更新本地数据库中的 key
             if (newKey !== item.key) {
@@ -787,13 +787,13 @@ export class SyncManager extends EventEmitter {
             // 使用新的 key 标记为已同步
             await this.markAsSynced(newKey, libraryId);
           } else if (result.failed && result.failed['0']) {
-            console.log(`   ✘ Failed to create item: ${result.failed['0'].message}`);
+            console.log(`${symbols.error} Failed to create item: ${result.failed['0'].message}`);
           }
           updated++;
         } else {
           // Update existing item
           await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
-          console.log(`   ✔ Updated ${item.key}`);
+          console.log(`${symbols.success} Updated ${item.key}`);
           updated++;
           
           // Mark as synced
@@ -810,10 +810,10 @@ export class SyncManager extends EventEmitter {
               const remoteItem = await this.apiClient.getItem(zoteroId, item.key, libraryType);
               if (remoteItem) {
                 await this.upsertItem(remoteItem, libraryId);
-                console.log(`   ✔ Applied remote version for ${item.key}`);
+                console.log(`${symbols.success} Applied remote version for ${item.key}`);
               }
             } catch (fetchError) {
-              console.error(`   ✘ Failed to fetch remote version for ${item.key}:`, fetchError);
+              console.error(`${symbols.error} Failed to fetch remote version for ${item.key}:`, fetchError);
               conflicts.push(item.key);
             }
           } else if (this.config.conflictStrategy === 'local') {
@@ -823,10 +823,10 @@ export class SyncManager extends EventEmitter {
               const remoteVersion = remoteItem?.data?.version || item.version;
               await this.apiClient.updateItem(zoteroId, item.key, data, remoteVersion, libraryType);
               await this.markAsSynced(item.key, libraryId);
-              console.log(`   ✔ Force updated ${item.key} with local changes`);
+              console.log(`${symbols.success} Force updated ${item.key} with local changes`);
               updated++;
             } catch (forceError) {
-              console.error(`   ✘ Failed to force update ${item.key}:`, forceError);
+              console.error(`${symbols.error} Failed to force update ${item.key}:`, forceError);
               conflicts.push(item.key);
             }
           } else {
@@ -891,7 +891,7 @@ export class SyncManager extends EventEmitter {
             const result = await this.apiClient.createItems(zoteroId, [data], libraryType);
             if (result.successful && result.successful['0']) {
               const newKey = result.successful['0'].key || result.successful['0'];
-              console.log(`   ✔ Created attachment ${newKey}`);
+              console.log(`${symbols.success} Created attachment ${newKey}`);
               
               // Update local key if server reassigned
               if (newKey !== item.key) {
@@ -905,7 +905,7 @@ export class SyncManager extends EventEmitter {
               updated++;
             } else if (result.failed && result.failed['0']) {
               const errorMsg = result.failed['0'].message || 'Unknown error';
-              console.error(`   ✘ Failed to create attachment ${item.key}: ${errorMsg}`);
+              console.error(`${symbols.error} Failed to create attachment ${item.key}: ${errorMsg}`);
               
               // Check if parent item doesn't exist
               if (errorMsg.includes('Parent item') && errorMsg.includes('not found')) {
@@ -916,7 +916,7 @@ export class SyncManager extends EventEmitter {
               }
             }
           } catch (e: any) {
-            console.error(`   ✘ Failed to create attachment ${item.key}:`, e.message);
+            console.error(`${symbols.error} Failed to create attachment ${item.key}:`, e.message);
             errors.push(`Create attachment ${item.key} failed: ${e}`);
           }
         } else {
@@ -926,7 +926,7 @@ export class SyncManager extends EventEmitter {
             await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
             await this.markAsSynced(item.key, libraryId);
             updated++;
-            console.log(`   ✔ Updated attachment ${item.key}`);
+            console.log(`${symbols.success} Updated attachment ${item.key}`);
           } catch (e: any) {
             errors.push(`Update attachment ${item.key} failed: ${e}`);
           }

@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'js-yaml';
+import { symbols } from './symbols.js';
 
 export interface ZoteroConfig {
   // Default settings
@@ -118,7 +119,7 @@ export class ConfigManager {
   init(): void {
     if (!fs.existsSync(this.configPath)) {
       this.save();
-      console.log(`✔ Created default config at ${this.configPath}`);
+      console.log(`${symbols.success} Created default config at ${this.configPath}`);
     }
   }
 
