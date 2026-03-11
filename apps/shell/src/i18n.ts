@@ -18,6 +18,11 @@ export const t = {
     ? `Delete item "${key}"? This cannot be undone.`
     : `确认删除 "${key}"？此操作不可撤销。`,
   cancelled: isEnglish ? 'Cancelled.' : '已取消。',
+  configTitle: isEnglish ? 'Zotero Shell Configuration' : 'Zotero Shell 配置',
+  configHint: isEnglish ? '↑↓=navigate  Enter=edit  Esc=back' : '↑↓=导航  Enter=编辑  Esc=返回',
+  configRestartTag: isEnglish ? 'restart to apply' : '重启生效',
+  configRestartHint: isEnglish ? '⚠ Some changes require a restart to take effect.' : '⚠ 部分配置修改需要重启后生效。',
+  configSaved: isEnglish ? 'Configuration saved' : '配置已保存',
   help: isEnglish ? `
 Zotero Shell Help
 

@@ -166,6 +166,9 @@ export function getCommandDescriptions(): Map<string, string> {
   descriptions.set('q', '退出 shell');
   descriptions.set('clear', '清除屏幕');
   descriptions.set('cls', '清除屏幕');
+  descriptions.set('config', '配置管理');
+  descriptions.set('/config', '配置管理');
+  descriptions.set('cfg', '配置管理');
   
   // 从 CLI 命令中提取描述
   commands.forEach((cmd: Command) => {
@@ -201,7 +204,7 @@ export function getAvailableCommands(): string[] {
   
   // 添加 shell 内置命令
   const builtinCommands = [
-    'help', 'exit', 'quit', 'q', 'clear', 'cls'
+    'help', 'exit', 'quit', 'q', 'clear', 'cls', 'config', '/config', 'cfg'
   ];
   builtinCommands.forEach(cmd => commandNames.add(cmd));
   
@@ -259,7 +262,7 @@ export async function getItemsForCompletion(): Promise<ItemInfo[]> {
   }
 
   try {
-    const db = getRawSQLite();
+    const db = getRawSQLite({ quiet: true });
     if (!db) {
       return cachedItems; // 返回旧缓存
     }

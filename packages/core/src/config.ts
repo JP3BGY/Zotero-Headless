@@ -76,7 +76,7 @@ export function hasZoteroConfig(envPath: string): boolean {
 function loadAllEnvFiles(): string[] {
   // 特殊处理：如果设置了 ZOTERO_ENV_PATH，只加载该文件
   if (process.env.ZOTERO_ENV_PATH && fs.existsSync(process.env.ZOTERO_ENV_PATH)) {
-    config({ path: process.env.ZOTERO_ENV_PATH });
+    config({ path: process.env.ZOTERO_ENV_PATH, quiet: true });
     return [process.env.ZOTERO_ENV_PATH];
   }
 
@@ -87,7 +87,7 @@ function loadAllEnvFiles(): string[] {
   for (const envPath of allEnvFiles) {
     // 优先加载明确包含 Zotero 配置的文件
     // 或者在没有找到任何 Zotero 配置时加载所有
-    config({ path: envPath, override: true });
+    config({ path: envPath, override: true, quiet: true });
     loadedFiles.push(envPath);
   }
 
@@ -95,7 +95,7 @@ function loadAllEnvFiles(): string[] {
   if (!process.env.ZOTERO_API_KEY) {
     const zoteroConfigFile = allEnvFiles.find(hasZoteroConfig);
     if (zoteroConfigFile && !loadedFiles.includes(zoteroConfigFile)) {
-      config({ path: zoteroConfigFile, override: true });
+      config({ path: zoteroConfigFile, override: true, quiet: true });
       loadedFiles.push(zoteroConfigFile);
     }
   }
@@ -204,3 +204,57 @@ export function loadConfig(): Config {
 
 // 导出单例配置
 export const appConfig = loadConfig();
+
+// Env key mapping for config fields
+const ENV_KEY_MAP: Record<string, string> = {
+  'zotero.apiKey': 'ZOTERO_API_KEY',
+  'zotero.userId': 'ZOTERO_USER_ID',
+  'database.path': 'DATABASE_PATH',
+  'log.level': 'LOG_LEVEL',
+};
+
+/**
+ * Get the .env file path used for writing config changes.
+ * Priority: ZOTERO_ENV_PATH > first loaded file with Zotero config > default ~/.config/zotero-headless/.env
+ */
+export function getEnvFilePath(): string {
+  if (process.env.ZOTERO_ENV_PATH && fs.existsSync(process.env.ZOTERO_ENV_PATH)) {
+    return process.env.ZOTERO_ENV_PATH;
+  }
+  const zoteroFile = loadedEnvFiles.find(hasZoteroConfig);
+  if (zoteroFile) return zoteroFile;
+  // Fallback: default config dir
+  return path.join(os.homedir(), '.config', 'zotero-headless', '.env');
+}
+
+/**
+ * Update a value in the .env file.
+ * @param configKey Dotted key like 'zotero.apiKey', 'log.level', etc.
+ * @param value New value to set
+ */
+export function updateEnvConfig(configKey: string, value: string): void {
+  const envKey = ENV_KEY_MAP[configKey];
+  if (!envKey) {
+    throw new Error(`Unknown env config key: ${configKey}`);
+  }
+
+  const envPath = getEnvFilePath();
+  const dir = path.dirname(envPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  let content = '';
+  if (fs.existsSync(envPath)) {
+    content = fs.readFileSync(envPath, 'utf-8');
+  }
+
+  const regex = new RegExp(`^${envKey}=.*$`, 'm');
+  if (regex.test(content)) {
+    content = content.replace(regex, `${envKey}=${value}`);
+  } else {
+    content = content.trimEnd() + (content.length > 0 ? '\n' : '') + `${envKey}=${value}\n`;
+  }
+
+  fs.writeFileSync(envPath, content, 'utf-8');
+}

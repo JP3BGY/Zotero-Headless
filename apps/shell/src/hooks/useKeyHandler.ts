@@ -81,6 +81,11 @@ export function useKeyHandler() {
       dispatch({ type: 'RESET_INPUT' });
       return;
     }
+    if (parsedCmd === '/config' || parsedCmd === 'config' || parsedCmd === 'cfg') {
+      dispatch({ type: 'ENTER_CONFIG' });
+      dispatch({ type: 'RESET_INPUT' });
+      return;
+    }
 
     // Delete commands need confirmation
     if (DELETE_COMMANDS.includes(parsedCmd) && args.length > 0) {
@@ -161,7 +166,8 @@ export function useKeyHandler() {
 
   useInput((input, key) => {
     // Confirming mode is handled by ConfirmPrompt component
-    if (state.mode === 'executing' || state.mode === 'confirming') return;
+    // Config mode is handled by ConfigPanel component
+    if (state.mode === 'executing' || state.mode === 'confirming' || state.mode === 'config') return;
 
     if (kb.match('submit', input, key)) {
       handleExecute(state.input);

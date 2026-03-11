@@ -21,9 +21,9 @@ let sqliteInstance: BetterSQLite3.Database | null = null;
 /**
  * Get raw SQLite instance for executing raw SQL
  */
-export function getRawSQLite(): BetterSQLite3.Database {
+export function getRawSQLite(options?: { quiet?: boolean }): BetterSQLite3.Database {
   if (!sqliteInstance) {
-    initializeDatabase();
+    initializeDatabase(options);
   }
   if (!sqliteInstance) {
     throw new Error('Failed to initialize SQLite instance');
@@ -34,10 +34,11 @@ export function getRawSQLite(): BetterSQLite3.Database {
 /**
  * Initialize database connection
  */
-export function initializeDatabase(): Database {
+export function initializeDatabase(options?: { quiet?: boolean }): Database {
   if (db) {
     return db;
   }
+  const quiet = options?.quiet ?? false;
 
   const dbPath = appConfig.database.path;
   
@@ -200,8 +201,10 @@ export function initializeDatabase(): Database {
     console.warn(`${symbols.warning} Database migration warning:`, e);
   }
   
-  console.log(`${symbols.success} Database initialized: ${dbPath}`);
-  
+  if (!quiet) {
+    console.log(`${symbols.success} Database initialized: ${dbPath}`);
+  }
+
   return db;
 }
 

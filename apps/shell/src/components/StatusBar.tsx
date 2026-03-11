@@ -21,7 +21,7 @@ function loadStatusInfo(): StatusInfo {
   };
 
   try {
-    const db = getRawSQLite();
+    const db = getRawSQLite({ quiet: true });
     if (!db) return info;
     info.dbConnected = true;
 

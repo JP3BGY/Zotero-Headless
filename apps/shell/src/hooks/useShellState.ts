@@ -2,7 +2,7 @@ import React, { createContext, useContext, useReducer, useCallback } from 'react
 import type { OutputLine, CommandSuggestion, ItemKeySuggestion } from '../types.js';
 
 export interface ShellState {
-  mode: 'idle' | 'executing' | 'confirming';
+  mode: 'idle' | 'executing' | 'confirming' | 'config';
   input: string;
   inputKey: number;
   lines: OutputLine[];
@@ -32,7 +32,9 @@ export type ShellAction =
   | { type: 'START_COMMAND'; command: string }
   | { type: 'END_COMMAND'; success: boolean }
   | { type: 'SET_CONFIRM'; message: string; onConfirm: () => void; onCancel: () => void }
-  | { type: 'CLEAR_CONFIRM' };
+  | { type: 'CLEAR_CONFIRM' }
+  | { type: 'ENTER_CONFIG' }
+  | { type: 'EXIT_CONFIG' };
 
 let lineIdCounter = 0;
 
@@ -139,6 +141,12 @@ function shellReducer(state: ShellState, action: ShellAction): ShellState {
         confirmCallback: null,
         confirmCancelCallback: null,
       };
+
+    case 'ENTER_CONFIG':
+      return { ...state, mode: 'config' };
+
+    case 'EXIT_CONFIG':
+      return { ...state, mode: 'idle' };
 
     default:
       return state;

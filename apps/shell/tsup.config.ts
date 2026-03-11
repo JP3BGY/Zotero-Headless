@@ -71,6 +71,16 @@ export default defineConfig({
       /try\s*\{\s*const\s+currentFile\s*=\s*realpathSync\(fileURLToPath\(import\.meta\.url\)\);[\s\S]*?const\s+entryFile\s*=\s*process\.argv\[1\]\s*\?\s*realpathSync\(process\.argv\[1\]\)\s*:\s*"";[\s\S]*?if\s*\(currentFile\s*===\s*entryFile\)\s*\{\s*main\(\);\s*\}\s*\}\s*catch\s*\{\s*\}/g,
       '/* main() call removed for ESM bundle */'
     );
+    // Strip: if (process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])) { main(); }
+    content = content.replace(
+      /if\s*\(process\.argv\[1\]\s*&&\s*realpathSync\(fileURLToPath\(import\.meta\.url\)\)\s*===\s*realpathSync\(process\.argv\[1\]\)\)\s*\{\s*main\(\);\s*\}/g,
+      '/* main() call removed for ESM bundle */'
+    );
+    // Strip: if (import.meta.url === `file://${process.argv[1]}`) { ... }
+    content = content.replace(
+      /if\s*\(import\.meta\.url\s*===\s*`file:\/\/\$\{process\.argv\[1\]\}`\)\s*\{[^}]*\}/g,
+      '/* entry-point guard removed for ESM bundle */'
+    );
 
     content = '#!/usr/bin/env node\n' + content;
     writeFileSync(outputFile, content);
