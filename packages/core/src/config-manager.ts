@@ -31,6 +31,18 @@ export interface ZoteroConfig {
   
   // Shortcuts for common queries
   shortcuts?: Record<string, string>;
+
+  // Shell keybindings
+  keybindings?: {
+    submit?: string;       // default: "enter"
+    historyUp?: string;    // default: "up"
+    historyDown?: string;  // default: "down"
+    scrollUp?: string;     // default: "pageup"
+    scrollDown?: string;   // default: "pagedown"
+    complete?: string;     // default: "tab"
+    clear?: string;        // default: "ctrl+l"
+    exit?: string;         // default: "ctrl+d"
+  };
 }
 
 const DEFAULT_CONFIG: ZoteroConfig = {
@@ -48,6 +60,16 @@ const DEFAULT_CONFIG: ZoteroConfig = {
     defaultDir: path.join(os.homedir(), '.local', 'share', 'zotero-headless', 'downloads'),
   },
   shortcuts: {},
+  keybindings: {
+    submit: 'enter',
+    historyUp: 'up',
+    historyDown: 'down',
+    scrollUp: 'pageup',
+    scrollDown: 'pagedown',
+    complete: 'tab',
+    clear: 'ctrl+l',
+    exit: 'ctrl+d',
+  },
 };
 
 export class ConfigManager {

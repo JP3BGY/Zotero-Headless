@@ -4,6 +4,7 @@ import { useShellState } from './useShellState.js';
 import { useHistory } from './useHistory.js';
 import { useCompletions } from './useCompletions.js';
 import { useTerminalLayout } from './useScroll.js';
+import { useKeybindings } from './useKeybindings.js';
 import { executeCommand, highlightSearchResult, parseCommand } from '../commands.js';
 import { t } from '../i18n.js';
 
@@ -15,6 +16,7 @@ export function useKeyHandler() {
   const history = useHistory();
   const completions = useCompletions();
   const { maxScrollOffset } = useTerminalLayout(state.lines.length);
+  const kb = useKeybindings();
 
   const runCliCommand = useCallback(async (parsedCmd: string, args: string[], originalInput: string) => {
     dispatch({ type: 'START_COMMAND', command: originalInput });
@@ -157,38 +159,49 @@ export function useKeyHandler() {
     }
   }, [completions, dispatch]);
 
-  useInput((value, key) => {
+  useInput((input, key) => {
     // Confirming mode is handled by ConfirmPrompt component
     if (state.mode === 'executing' || state.mode === 'confirming') return;
 
-    if (key.return) {
+    if (kb.match('submit', input, key)) {
       handleExecute(state.input);
       return;
     }
 
-    if (key.upArrow) {
+    if (kb.match('clear', input, key)) {
+      dispatch({ type: 'CLEAR_LINES' });
+      return;
+    }
+
+    if (kb.match('exit', input, key)) {
+      addLine('info', t.goodbye);
+      setTimeout(() => exit(), 500);
+      return;
+    }
+
+    if (kb.match('historyUp', input, key)) {
       const prev = history.previous();
       if (prev !== null) dispatch({ type: 'SET_INPUT', value: prev });
       return;
     }
 
-    if (key.downArrow) {
+    if (kb.match('historyDown', input, key)) {
       const next = history.next();
       dispatch({ type: 'SET_INPUT', value: next ?? '' });
       return;
     }
 
-    if (key.pageUp) {
+    if (kb.match('scrollUp', input, key)) {
       dispatch({ type: 'SCROLL', delta: 5, maxOffset: maxScrollOffset });
       return;
     }
 
-    if (key.pageDown) {
+    if (kb.match('scrollDown', input, key)) {
       dispatch({ type: 'SCROLL', delta: -5, maxOffset: maxScrollOffset });
       return;
     }
 
-    if (key.tab) {
+    if (kb.match('complete', input, key)) {
       handleTab();
       return;
     }

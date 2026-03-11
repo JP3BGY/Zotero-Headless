@@ -10,7 +10,7 @@
 | Phase 0: 组件化拆分与状态管理重构 | **已完成** | 18 个文件，~1400 行 |
 | Phase 1: Spinner + StatusLine + 可折叠输出 | **大部分完成** | 仅 OutputGroup（可折叠输出）未实现 |
 | Phase 2: 富文本渲染 + 多行输入 + 历史持久化 | **部分完成** | 历史持久化已完成；富文本渲染、多行输入待实现 |
-| Phase 3: Keybinding 可配置 + 渲染优化 | 未开始 | |
+| Phase 3: Keybinding 可配置 + 渲染优化 | **已完成** | Keybinding 通过 ~/.zoterrc 配置；渲染优化（React.memo + 窗口化）已就绪 |
 
 ### 额外已完成项（不在原计划中）
 
@@ -299,9 +299,9 @@ function shellReducer(state: ShellState, action: ShellAction): ShellState {
 
 ### 3.4 验收标准
 
-- [ ] 用户可通过 JSON 文件自定义按键
-- [ ] 1000+ 行输出无性能退化
-- [ ] 长时间运行 session 无内存泄漏
+- [x] 用户可通过 ~/.zoterrc (YAML) 自定义按键（`keybindings` 字段，集成在 ConfigManager 中）
+- [x] 1000+ 行输出无性能退化（OutputArea 使用 React.memo + 窗口化渲染）
+- [ ] 长时间运行 session 无内存泄漏（待验证）
 
 ---
 
