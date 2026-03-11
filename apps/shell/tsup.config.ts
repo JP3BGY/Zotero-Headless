@@ -1,6 +1,7 @@
 import { defineConfig } from 'tsup';
 import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { workspaceResolvePlugin } from '../../scripts/esbuild-workspace-plugin.mjs';
 
 export default defineConfig({
   entry: { shell: 'src/index.tsx' },
@@ -34,6 +35,7 @@ export default defineConfig({
     options.jsxFragment = 'React.Fragment';
   },
   esbuildPlugins: [
+    workspaceResolvePlugin,
     {
       name: 'strip-shebang',
       setup(build) {
@@ -54,31 +56,23 @@ export default defineConfig({
     },
   ],
   async onSuccess() {
-    // Post-process: add shebang and remove bundled main() calls
     const outputFile = join('bundle', 'shell.mjs');
     let content = readFileSync(outputFile, 'utf-8');
 
-    // Remove require.main === module checks (CJS pattern that doesn't work in ESM)
     content = content.replace(
       /if\s*\(__require\.main\s*===\s*module\)\s*\{[^}]*\}/g,
       '/* require.main check removed for ESM bundle */'
     );
-
-    // Remove import.meta.url main() auto-invocation from bundled CLI code
     content = content.replace(
       /if\s*\(\s*__import_meta_url\s*===\s*`file:\/\/\$\{process\.argv\[1\]\}`\s*\)\s*\{\s*main\(\);\s*\}/g,
       '/* main() call removed for ESM bundle */'
     );
-
-    // Remove try-catch version with realpathSync
     content = content.replace(
       /try\s*\{\s*const\s+currentFile\s*=\s*realpathSync\(fileURLToPath\(import\.meta\.url\)\);[\s\S]*?const\s+entryFile\s*=\s*process\.argv\[1\]\s*\?\s*realpathSync\(process\.argv\[1\]\)\s*:\s*"";[\s\S]*?if\s*\(currentFile\s*===\s*entryFile\)\s*\{\s*main\(\);\s*\}\s*\}\s*catch\s*\{\s*\}/g,
       '/* main() call removed for ESM bundle */'
     );
 
-    // Ensure shebang is at the very top
     content = '#!/usr/bin/env node\n' + content;
-
     writeFileSync(outputFile, content);
   },
 });

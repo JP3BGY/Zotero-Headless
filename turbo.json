@@ -1,17 +1,20 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": ["**/.env.*local"],
+  "globalDependencies": ["**/.env.*local", "tsconfig.base.json"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "inputs": ["src/**", "tsconfig.json", "package.json"],
       "outputs": ["dist/**"]
     },
     "@zotero-headless/shell#build": {
       "dependsOn": ["@zotero-headless/cli#build", "^build"],
+      "inputs": ["src/**", "tsconfig.json", "package.json"],
       "outputs": ["dist/**"]
     },
     "bundle": {
       "dependsOn": ["build"],
+      "inputs": ["src/**", "tsup.config.ts", "package.json", "../../scripts/esbuild-workspace-plugin.mjs"],
       "outputs": ["bundle/**"]
     },
     "dev": {

@@ -1,4 +1,5 @@
 import { defineConfig } from 'tsup';
+import { workspaceResolvePlugin } from '../../scripts/esbuild-workspace-plugin.mjs';
 
 export default defineConfig({
   entry: { zotero: 'src/index.ts' },
@@ -13,6 +14,7 @@ export default defineConfig({
   clean: true,
   define: { 'process.env.BUNDLED': '"true"' },
   esbuildPlugins: [
+    workspaceResolvePlugin,
     {
       // Strip shebangs from source files so only the banner shebang remains
       // and polyfill import.meta.url for CJS output
