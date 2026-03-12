@@ -7,6 +7,13 @@ export const CompletionList = React.memo(function CompletionList() {
   const { suggestions, itemKeySuggestions, mode } = state;
   const isExecuting = mode === 'executing';
 
+  const nameWidth = suggestions.length > 0
+    ? Math.max(...suggestions.map(s => s.name.length)) + 2
+    : 0;
+  const keyWidth = itemKeySuggestions.length > 0
+    ? Math.max(...itemKeySuggestions.map(s => s.key.length)) + 2
+    : 0;
+
   return (
     <Box flexDirection="column">
       {suggestions.length > 0 && !isExecuting && (
@@ -14,7 +21,7 @@ export const CompletionList = React.memo(function CompletionList() {
           {suggestions.map((suggestion) => (
             <Box key={suggestion.name}>
               <Text color="gray">  </Text>
-              <Text color="green" bold>{suggestion.name.padEnd(12)}</Text>
+              <Text color="green" bold>{suggestion.name.padEnd(nameWidth)}</Text>
               <Text color="gray">{suggestion.description}</Text>
             </Box>
           ))}
@@ -25,7 +32,7 @@ export const CompletionList = React.memo(function CompletionList() {
           {itemKeySuggestions.map((item) => (
             <Box key={item.key}>
               <Text color="gray">  </Text>
-              <Text color="cyan" bold>{item.key.padEnd(12)}</Text>
+              <Text color="cyan" bold>{item.key.padEnd(keyWidth)}</Text>
               <Text color="white">{item.title}</Text>
               <Text color="gray"> ({item.itemType})</Text>
             </Box>
