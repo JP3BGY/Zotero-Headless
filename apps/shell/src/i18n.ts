@@ -4,8 +4,7 @@ const isEnglish = lang === 'en';
 export const t = {
   welcome: 'Zotero Shell v1.0.0',
   subtitle: isEnglish ? 'Type "help" for commands, or "exit" to quit' : '输入 "help" 查看可用命令，或 "exit" 退出',
-  shortcuts: isEnglish ? 'Tab=complete, ↑↓=history, PgUp/PgDn=scroll, Ctrl+C×2=exit' : 'Tab=补全, ↑↓=历史, PgUp/PgDn=滚动, Ctrl+C×2=退出',
-  scrollHint: isEnglish ? '... Press PageDown to scroll ...' : '... 按 PageDown 滚动 ...',
+  shortcuts: isEnglish ? 'Tab=complete, ↑↓=history, Ctrl+C×2=exit' : 'Tab=补全, ↑↓=历史, Ctrl+C×2=退出',
   executing: isEnglish ? 'Executing...' : '执行中...',
   moreMatches: (n: number) => isEnglish ? `... ${n} more matches` : `... 还有 ${n} 个匹配`,
   goodbye: isEnglish ? 'Goodbye!' : '再见!',
@@ -24,6 +23,7 @@ export const t = {
   configRestartTag: isEnglish ? 'restart to apply' : '重启生效',
   configRestartHint: isEnglish ? '⚠ Some changes require a restart to take effect.' : '⚠ 部分配置修改需要重启后生效。',
   configSaved: isEnglish ? 'Configuration saved' : '配置已保存',
+  collapsedLines: (n: number) => isEnglish ? `▸ ${n} lines collapsed` : `▸ ${n} 行已折叠`,
   help: isEnglish ? `
 Zotero Shell Help
 
@@ -49,7 +49,6 @@ Others:
 Shortcuts:
   Tab                     Autocomplete commands/options
   ↑/↓                     Browse command history
-  PgUp/PgDn               Scroll output up/down
   Ctrl+C                  Cancel / press twice to exit
       `.trim() : `
 Zotero Shell 帮助
@@ -76,7 +75,6 @@ Zotero Shell 帮助
 快捷键:
   Tab                     自动补全命令/选项
   ↑/↓                     浏览历史命令
-  PgUp/PgDn               向上/向下滚动输出
   Ctrl+C                  取消 / 连按两次退出
       `.trim(),
 };

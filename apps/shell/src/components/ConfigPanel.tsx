@@ -124,6 +124,14 @@ function buildConfigItems(): ConfigItem[] {
     source: 'zoterrc',
   });
   items.push({
+    key: 'display.collapseOutput',
+    value: String(cfg.display?.collapseOutput ?? true),
+    type: 'boolean',
+    editable: true,
+    configPath: { section: 'display', field: 'collapseOutput' },
+    source: 'zoterrc',
+  });
+  items.push({
     key: 'download.defaultDir',
     value: cfg.download?.defaultDir || '~/.local/share/zotero-headless/downloads',
     type: 'string',

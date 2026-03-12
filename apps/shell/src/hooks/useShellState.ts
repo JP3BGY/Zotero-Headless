@@ -1,12 +1,12 @@
 import React, { createContext, useContext, useReducer, useCallback } from 'react';
-import type { OutputLine, CommandSuggestion, ItemKeySuggestion } from '../types.js';
+import type { OutputLine, CommandSuggestion, ItemKeySuggestion, LogLevel } from '../types.js';
+import { t } from '../i18n.js';
 
 export interface ShellState {
-  mode: 'idle' | 'executing' | 'confirming' | 'config';
+  mode: 'idle' | 'executing' | 'confirming' | 'config' | 'exiting';
   input: string;
   inputKey: number;
   lines: OutputLine[];
-  scrollOffset: number;
   suggestions: CommandSuggestion[];
   itemKeySuggestions: ItemKeySuggestion[];
   // Executing command info (for spinner)
@@ -18,25 +18,38 @@ export interface ShellState {
   confirmMessage: string | null;
   confirmCallback: (() => void) | null;
   confirmCancelCallback: (() => void) | null;
+  // Collapsed command groups (set of groupIds)
+  collapsedGroups: Record<number, true>;
 }
 
 export type ShellAction =
   | { type: 'SET_INPUT'; value: string }
-  | { type: 'ADD_LINE'; lineType: OutputLine['type']; content: string }
+  | { type: 'ADD_LINE'; lineType: OutputLine['type']; content: string; logLevel?: LogLevel }
   | { type: 'CLEAR_LINES' }
   | { type: 'SET_MODE'; mode: ShellState['mode'] }
-  | { type: 'SCROLL'; delta: number; maxOffset: number }
   | { type: 'SET_SUGGESTIONS'; suggestions: CommandSuggestion[] }
   | { type: 'SET_ITEM_SUGGESTIONS'; suggestions: ItemKeySuggestion[] }
   | { type: 'RESET_INPUT' }
   | { type: 'START_COMMAND'; command: string }
-  | { type: 'END_COMMAND'; success: boolean }
+  | { type: 'END_COMMAND'; success: boolean; autoCollapse?: boolean }
   | { type: 'SET_CONFIRM'; message: string; onConfirm: () => void; onCancel: () => void }
   | { type: 'CLEAR_CONFIRM' }
   | { type: 'ENTER_CONFIG' }
-  | { type: 'EXIT_CONFIG' };
+  | { type: 'EXIT_CONFIG' }
+  | { type: 'TOGGLE_GROUP'; groupId: number }
+  | { type: 'EXPAND_ALL' }
+  | { type: 'COLLAPSE_ALL' };
 
 let lineIdCounter = 0;
+
+/** Derive default logLevel from line type */
+function defaultLogLevel(lineType: OutputLine['type']): LogLevel {
+  switch (lineType) {
+    case 'error': return 'error';
+    case 'info': return 'info';
+    default: return 'info';
+  }
+}
 
 function shellReducer(state: ShellState, action: ShellAction): ShellState {
   switch (action.type) {
@@ -48,8 +61,11 @@ function shellReducer(state: ShellState, action: ShellAction): ShellState {
         id: lineIdCounter++,
         type: action.lineType,
         content: action.content,
+        logLevel: action.logLevel ?? defaultLogLevel(action.lineType),
+        // Attach to current command group if executing
+        groupId: state.currentInputLineId ?? undefined,
       };
-      return { ...state, lines: [...state.lines, line], scrollOffset: 0 };
+      return { ...state, lines: [...state.lines, line] };
     }
 
     case 'CLEAR_LINES':
@@ -59,19 +75,11 @@ function shellReducer(state: ShellState, action: ShellAction): ShellState {
         input: '',
         suggestions: [],
         itemKeySuggestions: [],
+        collapsedGroups: {},
       };
 
     case 'SET_MODE':
       return { ...state, mode: action.mode };
-
-    case 'SCROLL':
-      return {
-        ...state,
-        scrollOffset: Math.max(0, Math.min(
-          state.scrollOffset + action.delta,
-          action.maxOffset,
-        )),
-      };
 
     case 'SET_SUGGESTIONS':
       return { ...state, suggestions: action.suggestions, itemKeySuggestions: [] };
@@ -95,6 +103,8 @@ function shellReducer(state: ShellState, action: ShellAction): ShellState {
         type: 'input',
         content: action.command,
         status: 'pending',
+        groupId: inputLineId,
+        logLevel: 'info',
       };
       return {
         ...state,
@@ -103,7 +113,6 @@ function shellReducer(state: ShellState, action: ShellAction): ShellState {
         executingStartTime: Date.now(),
         currentInputLineId: inputLineId,
         lines: [...state.lines, inputLine],
-        scrollOffset: 0,
       };
     }
 
@@ -114,6 +123,19 @@ function shellReducer(state: ShellState, action: ShellAction): ShellState {
             l.id === state.currentInputLineId ? { ...l, status: finalStatus } : l
           )
         : state.lines;
+
+      // Auto-collapse the finished group if requested
+      let collapsedGroups = state.collapsedGroups;
+      if (action.autoCollapse && state.currentInputLineId !== null) {
+        // Only collapse if the group has output lines
+        const hasOutput = lines.some(
+          l => l.groupId === state.currentInputLineId && l.type !== 'input'
+        );
+        if (hasOutput) {
+          collapsedGroups = { ...collapsedGroups, [state.currentInputLineId]: true };
+        }
+      }
+
       return {
         ...state,
         mode: 'idle',
@@ -121,6 +143,7 @@ function shellReducer(state: ShellState, action: ShellAction): ShellState {
         executingStartTime: null,
         currentInputLineId: null,
         lines,
+        collapsedGroups,
       };
     }
 
@@ -148,18 +171,51 @@ function shellReducer(state: ShellState, action: ShellAction): ShellState {
     case 'EXIT_CONFIG':
       return { ...state, mode: 'idle' };
 
+    case 'TOGGLE_GROUP': {
+      const groups = { ...state.collapsedGroups };
+      if (groups[action.groupId]) {
+        delete groups[action.groupId];
+      } else {
+        groups[action.groupId] = true;
+      }
+      return { ...state, collapsedGroups: groups };
+    }
+
+    case 'EXPAND_ALL':
+      return { ...state, collapsedGroups: {} };
+
+    case 'COLLAPSE_ALL': {
+      const allGroups: Record<number, true> = {};
+      const seen = new Set<number>();
+      for (const line of state.lines) {
+        if (line.type === 'input' && line.groupId != null && !seen.has(line.groupId)) {
+          seen.add(line.groupId);
+          const hasChildren = state.lines.some(
+            l => l.groupId === line.groupId && l.type !== 'input'
+          );
+          if (hasChildren) {
+            allGroups[line.groupId] = true;
+          }
+        }
+      }
+      return { ...state, collapsedGroups: allGroups };
+    }
+
     default:
       return state;
   }
 }
 
 export function createInitialState(): ShellState {
+  const welcomeLines: OutputLine[] = [
+    { id: lineIdCounter++, type: 'welcome', content: '', logLevel: 'info' },
+  ];
+
   return {
     mode: 'idle',
     input: '',
     inputKey: 0,
-    lines: [],
-    scrollOffset: 0,
+    lines: welcomeLines,
     suggestions: [],
     itemKeySuggestions: [],
     executingCommand: null,
@@ -168,13 +224,14 @@ export function createInitialState(): ShellState {
     confirmMessage: null,
     confirmCallback: null,
     confirmCancelCallback: null,
+    collapsedGroups: {},
   };
 }
 
 type ShellContextValue = {
   state: ShellState;
   dispatch: React.Dispatch<ShellAction>;
-  addLine: (type: OutputLine['type'], content: string) => void;
+  addLine: (type: OutputLine['type'], content: string, logLevel?: LogLevel) => void;
 };
 
 const ShellContext = createContext<ShellContextValue | null>(null);
@@ -187,8 +244,8 @@ export function useShellState(): ShellContextValue {
 
 export function useShellReducer() {
   const [state, dispatch] = useReducer(shellReducer, undefined, createInitialState);
-  const addLine = useCallback((type: OutputLine['type'], content: string) => {
-    dispatch({ type: 'ADD_LINE', lineType: type, content });
+  const addLine = useCallback((type: OutputLine['type'], content: string, logLevel?: LogLevel) => {
+    dispatch({ type: 'ADD_LINE', lineType: type, content, logLevel });
   }, []);
   return { state, dispatch, addLine };
 }

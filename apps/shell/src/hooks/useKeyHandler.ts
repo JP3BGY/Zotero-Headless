@@ -3,10 +3,11 @@ import { useInput, useApp } from 'ink';
 import { useShellState } from './useShellState.js';
 import { useHistory } from './useHistory.js';
 import { useCompletions } from './useCompletions.js';
-import { useTerminalLayout } from './useScroll.js';
 import { useKeybindings } from './useKeybindings.js';
 import { executeCommand, highlightSearchResult, parseCommand } from '../commands.js';
+import { configManager, appConfig } from '@zotero-headless/core';
 import { t } from '../i18n.js';
+import type { LogLevel } from '../types.js';
 
 const DELETE_COMMANDS = ['delete', 'rm', 'del', 'remove'];
 const CTRL_C_WINDOW = 2000; // ms
@@ -17,7 +18,6 @@ export function useKeyHandler() {
   const lastCtrlCTime = useRef(0);
   const history = useHistory();
   const completions = useCompletions();
-  const { maxScrollOffset } = useTerminalLayout(state.lines.length);
   const kb = useKeybindings();
 
   const runCliCommand = useCallback(async (parsedCmd: string, args: string[], originalInput: string) => {
@@ -27,17 +27,17 @@ export function useKeyHandler() {
     let success = true;
 
     try {
-      const result = await executeCommand(parsedCmd, args, (chunk) => {
+      const result = await executeCommand(parsedCmd, args, (chunk: string, logLevel: LogLevel) => {
         if (chunk && chunk.trim()) {
           hasRealtimeOutput = true;
-          addLine('output', chunk);
+          addLine('output', chunk, logLevel);
         }
       });
 
       success = result.exitCode === 0;
 
       if (result.exitCode !== 0 && result.stderr) {
-        addLine('error', result.stderr);
+        addLine('error', result.stderr, 'error');
       } else if (!hasRealtimeOutput) {
         if ((parsedCmd === 'search' || parsedCmd === 'f' || parsedCmd === 'find') && args.length > 0) {
           const highlighted = highlightSearchResult(result.stdout, args);
@@ -55,9 +55,12 @@ export function useKeyHandler() {
     } catch (error) {
       success = false;
       const errorMsg = error instanceof Error ? error.message : String(error);
-      addLine('error', t.networkError(errorMsg));
+      addLine('error', t.networkError(errorMsg), 'error');
     } finally {
-      dispatch({ type: 'END_COMMAND', success });
+      // Auto-collapse if collapseOutput is enabled and log level is not debug
+      const shouldCollapse = configManager.get('display')?.collapseOutput === true
+        && appConfig.log.level !== 'debug';
+      dispatch({ type: 'END_COMMAND', success, autoCollapse: shouldCollapse });
       dispatch({ type: 'RESET_INPUT' });
     }
   }, [dispatch, addLine]);
@@ -75,7 +78,8 @@ export function useKeyHandler() {
     }
     if (parsedCmd === 'exit' || parsedCmd === 'quit' || parsedCmd === 'q') {
       addLine('info', t.goodbye);
-      setTimeout(() => exit(), 500);
+      dispatch({ type: 'SET_MODE', mode: 'exiting' });
+      setTimeout(() => exit(), 100);
       return;
     }
     if (parsedCmd === 'help') {
@@ -172,7 +176,8 @@ export function useKeyHandler() {
 
     if (isDoublePress) {
       addLine('info', t.goodbye);
-      setTimeout(() => exit(), 200);
+      dispatch({ type: 'SET_MODE', mode: 'exiting' });
+      setTimeout(() => exit(), 100);
       return;
     }
 
@@ -221,7 +226,8 @@ export function useKeyHandler() {
 
     if (kb.match('exit', input, key)) {
       addLine('info', t.goodbye);
-      setTimeout(() => exit(), 500);
+      dispatch({ type: 'SET_MODE', mode: 'exiting' });
+      setTimeout(() => exit(), 100);
       return;
     }
 
@@ -234,16 +240,6 @@ export function useKeyHandler() {
     if (kb.match('historyDown', input, key)) {
       const next = history.next();
       dispatch({ type: 'SET_INPUT', value: next ?? '' });
-      return;
-    }
-
-    if (kb.match('scrollUp', input, key)) {
-      dispatch({ type: 'SCROLL', delta: 5, maxOffset: maxScrollOffset });
-      return;
-    }
-
-    if (kb.match('scrollDown', input, key)) {
-      dispatch({ type: 'SCROLL', delta: -5, maxOffset: maxScrollOffset });
       return;
     }
 

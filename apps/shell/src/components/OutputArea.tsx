@@ -1,28 +1,51 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, Static } from 'ink';
 import { OutputLineItem } from './OutputLine.js';
 import { useShellState } from '../hooks/useShellState.js';
-import { useTerminalLayout } from '../hooks/useScroll.js';
+import { useVisibleLines, type VisibleLine } from '../hooks/useVisibleLines.js';
 import { t } from '../i18n.js';
+
+function RenderVisibleLine({ vl, isGroupStart }: { vl: VisibleLine; isGroupStart: boolean }) {
+  if (vl.kind === 'collapsed') {
+    return (
+      <Box>
+        <Text color="gray" dimColor>{t.collapsedLines(vl.collapsedCount!)}</Text>
+      </Box>
+    );
+  }
+  // Add a blank line before command groups to visually separate them
+  if (isGroupStart) {
+    return (
+      <Box flexDirection="column">
+        <Text>{' '}</Text>
+        <OutputLineItem line={vl.line!} />
+      </Box>
+    );
+  }
+  return <OutputLineItem line={vl.line!} />;
+}
 
 export const OutputArea = React.memo(function OutputArea() {
   const { state } = useShellState();
-  const { lines, scrollOffset } = state;
-  const { outputHeight } = useTerminalLayout(lines.length);
+  const visibleLines = useVisibleLines(state);
 
-  const visibleLines = lines.slice(
-    Math.max(0, lines.length - outputHeight - scrollOffset),
-    lines.length - scrollOffset,
-  );
+  // Determine which lines are group starts (input lines preceded by other content)
+  const isGroupStart = (vl: VisibleLine, idx: number): boolean => {
+    if (vl.kind !== 'line' || vl.line?.type !== 'input') return false;
+    return idx > 0;
+  };
 
+  // ALL lines go through <Static> — Ink's Static internally tracks how many items
+  // have been rendered and only renders the new ones (items.slice(prevLength)).
+  // This prevents duplication caused by long output overflowing the terminal viewport
+  // in a dynamic rendering area.
   return (
-    <Box flexDirection="column" flexGrow={1} overflow="hidden">
-      {visibleLines.map(line => (
-        <OutputLineItem key={line.id} line={line} />
-      ))}
-      {scrollOffset > 0 && (
-        <Text color="gray">{t.scrollHint}</Text>
+    <Static items={visibleLines}>
+      {(vl, idx) => (
+        <Box key={vl.key}>
+          <RenderVisibleLine vl={vl} isGroupStart={isGroupStart(vl, idx)} />
+        </Box>
       )}
-    </Box>
+    </Static>
   );
 });

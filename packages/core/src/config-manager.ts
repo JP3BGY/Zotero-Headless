@@ -22,6 +22,7 @@ export interface ZoteroConfig {
   display?: {
     defaultLimit?: number;
     showAttachments?: boolean;
+    collapseOutput?: boolean;
   };
   
   // Download settings
@@ -55,6 +56,7 @@ const DEFAULT_CONFIG: ZoteroConfig = {
   display: {
     defaultLimit: 20,
     showAttachments: true,
+    collapseOutput: true,
   },
   download: {
     defaultDir: path.join(os.homedir(), '.local', 'share', 'zotero-headless', 'downloads'),

@@ -1,7 +1,7 @@
 import { commands, type Command } from '@zotero-headless/cli';
 import { getRawSQLite } from '@zotero-headless/database';
 
-import type { ItemKeySuggestion } from './types.js';
+import type { ItemKeySuggestion, LogLevel } from './types.js';
 
 // Re-export for backward compatibility
 export type ItemInfo = ItemKeySuggestion;
@@ -74,30 +74,39 @@ export interface ExecuteResult {
 }
 
 // 捕获 console 输出
-function captureConsoleOutput(fn: () => Promise<void>, onOutput?: (data: string) => void): Promise<ExecuteResult> {
+function captureConsoleOutput(
+  fn: () => Promise<void>,
+  onOutput?: (data: string, logLevel: LogLevel) => void,
+): Promise<ExecuteResult> {
   const originalLog = console.log;
   const originalError = console.error;
+  const originalWarn = console.warn;
+  const originalDebug = console.debug;
   let stdout = '';
   let stderr = '';
 
   console.log = (...args: any[]) => {
     const line = args.map(a => String(a)).join(' ') + '\n';
     stdout += line;
-    originalLog.apply(console, args);
-    // 实时输出
-    if (onOutput) {
-      onOutput(line);
-    }
+    if (onOutput) onOutput(line, 'info');
   };
 
   console.error = (...args: any[]) => {
     const line = args.map(a => String(a)).join(' ') + '\n';
     stderr += line;
-    originalError.apply(console, args);
-    // 实时输出错误
-    if (onOutput) {
-      onOutput(line);
-    }
+    if (onOutput) onOutput(line, 'error');
+  };
+
+  console.warn = (...args: any[]) => {
+    const line = args.map(a => String(a)).join(' ') + '\n';
+    stdout += line;
+    if (onOutput) onOutput(line, 'warn');
+  };
+
+  console.debug = (...args: any[]) => {
+    const line = args.map(a => String(a)).join(' ') + '\n';
+    stdout += line;
+    if (onOutput) onOutput(line, 'debug');
   };
 
   return fn()
@@ -110,6 +119,8 @@ function captureConsoleOutput(fn: () => Promise<void>, onOutput?: (data: string)
     .finally(() => {
       console.log = originalLog;
       console.error = originalError;
+      console.warn = originalWarn;
+      console.debug = originalDebug;
     });
 }
 
@@ -117,9 +128,9 @@ function captureConsoleOutput(fn: () => Promise<void>, onOutput?: (data: string)
  * 异步执行 zotero 命令
  */
 export async function executeCommand(
-  cmd: string, 
+  cmd: string,
   args: string[],
-  onOutput?: (data: string) => void
+  onOutput?: (data: string, logLevel: LogLevel) => void
 ): Promise<ExecuteResult> {
   // 转换命令别名
   const actualCmd = COMMAND_ALIASES[cmd] || cmd;
