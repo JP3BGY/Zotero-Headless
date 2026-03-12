@@ -126,15 +126,14 @@ zotero shell --lang=en
 
 ---
 
-## 项目结构（基于当前源码）
+## 项目结构
 
 ```text
 zotero-headless/
 ├── apps/
 │   ├── cli/           # 主 CLI（命令定义与执行）
 │   ├── shell/         # Ink + React 交互式 Shell
-│   ├── agent-api/     # 给 Agent/自动化调用的 API
-│   └── cli-bundle/    # CLI 打包脚本
+│   └── agent-api/     # 给 Agent/自动化调用的 API
 ├── packages/
 │   ├── api/               # Zotero Web API 客户端
 │   ├── core/              # 配置、历史等核心模块
@@ -143,8 +142,9 @@ zotero-headless/
 │   ├── attachment-manager/# 附件管理
 │   ├── webdav-client/     # WebDAV 客户端
 │   └── types/             # 共享类型定义
+├── scripts/               # 构建与打包脚本
 ├── docs/                  # 用户与开发文档
-└── completions/           # Shell 补全脚本
+└── tsconfig.base.json     # 所有包共享的 TypeScript 基础配置
 ```
 
 ---
@@ -152,10 +152,12 @@ zotero-headless/
 ## 开发命令
 
 ```bash
-pnpm build
-pnpm test
-pnpm typecheck
-pnpm lint
+pnpm build          # TypeScript 编译（所有包）
+pnpm typecheck      # 类型检查
+pnpm test           # 运行测试
+pnpm lint           # 代码检查
+pnpm bundle         # 用 tsup 打包 CLI 和 Shell
+pnpm package        # 构建 npm 发布包（.tgz）
 ```
 
 ---
@@ -171,9 +173,17 @@ pnpm lint
 
 ---
 
+## 构建系统
+
+- **Monorepo**: pnpm workspace + Turborepo 编排
+- **TypeScript 编译**: 所有包 `extends` `tsconfig.base.json`，用 `tsc` 编译
+- **Bundling**: 用 [tsup](https://tsup.egoist.dev/)（基于 esbuild）将 CLI 和 Shell 打包为单文件
+  - CLI → `apps/cli/bundle/zotero.cjs`（CJS，内联所有 workspace 包）
+  - Shell → `apps/shell/bundle/shell.mjs`（ESM，ink/react 保持 external）
+- **发布**: `pnpm package` 生成可直接 `npm install -g` 的 `.tgz`
+
 ## 备注
 
-- 当前仓库为 monorepo（workspace: `apps/*`, `packages/*`）。
 - CLI 命令较多，建议通过 `zotero help` / `zotero help <command>` 查看实时参数。
 - 若用于生产环境，建议将 `.env` 放在受控路径并设置严格权限。
 

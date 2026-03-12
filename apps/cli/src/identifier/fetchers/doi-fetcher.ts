@@ -25,7 +25,7 @@ export class DOIFetcher extends BaseFetcher {
       data = await this.fetchFromCrossRef(doi);
       source = 'crossref';
     } catch (error) {
-      console.log(`   ⚠️ CrossRef 查询失败，尝试 DataCite...`);
+      console.log(`   ! CrossRef 查询失败，尝试 DataCite...`);
       // 回退到 DataCite API
       try {
         data = await this.fetchFromDataCite(doi);

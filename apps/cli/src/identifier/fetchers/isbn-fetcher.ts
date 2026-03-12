@@ -26,7 +26,7 @@ export class ISBNFetcher extends BaseFetcher {
       data = await this.fetchFromOpenLibrary(isbn);
       source = 'openlibrary';
     } catch (error) {
-      console.log(`   ⚠️ Open Library 查询失败，尝试 Google Books...`);
+      console.log(`   ! Open Library 查询失败，尝试 Google Books...`);
       
       // 回退到 Google Books API
       try {

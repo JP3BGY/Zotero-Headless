@@ -5,7 +5,7 @@
 // See Zotero-Headless-Complete-Design.md Section 7
 
 import { existsSync } from 'fs';
-import { appConfig } from '@zotero-headless/core';
+import { appConfig, symbols } from '@zotero-headless/core';
 import { eq, like, desc, asc, count, and, isNull, sql } from 'drizzle-orm';
 import { ProgressBar } from './progress-bar.js';
 import { resolveConflictsInteractive, isInteractive, ConflictItem } from './conflict-resolver.js';
@@ -260,7 +260,7 @@ const commands: Command[] = [
       // Handle conflicts interactively if requested
       if (result.conflicts && result.conflicts.length > 0) {
         if (interactive && isInteractive()) {
-          console.log(`\n⚠️  ${result.conflicts.length} ${t('conflict.title')}`);
+          console.log(`\n!  ${result.conflicts.length} ${t('conflict.title')}`);
 
           // Get database connection
           const db = getDatabase();
@@ -306,9 +306,9 @@ const commands: Command[] = [
             }
           }
 
-          console.log(`\n✅ ${t('common.success')}: ${resolvedCount}`);
+          console.log(`\n${symbols.success} ${t('common.success')}: ${resolvedCount}`);
         } else if (!quiet) {
-          console.log(`\n⚠️  ${result.conflicts.length} conflicts detected.`);
+          console.log(`\n!  ${result.conflicts.length} conflicts detected.`);
           console.log('   Run with --interactive (-i) to resolve manually');
           console.log('   Or use --conflict-strategy=remote|local for auto-resolution');
         }
@@ -316,12 +316,12 @@ const commands: Command[] = [
 
       if (result.success) {
         if (!quiet) {
-          console.log(`\n✅ Sync completed successfully!`);
+          console.log(`\n${symbols.success} Sync completed successfully!`);
           console.log(`   Items updated: ${result.updated}`);
           console.log(`   Items deleted: ${result.deleted}`);
         }
       } else {
-        console.log(`\n⚠️  Sync completed with issues:`);
+        console.log(`\n!  Sync completed with issues:`);
         result.errors.forEach(e => console.log(`   Error: ${e}`));
         if (result.conflicts && result.conflicts.length > 0 && !interactive) {
           console.log(`   Conflicts: ${result.conflicts.length}`);
@@ -347,7 +347,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
       const result = await attachmentManager.downloadFromWebDAV(args[0]);
-      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Downloaded to ${result.localPath}` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -365,7 +365,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
       const result = await attachmentManager.openAttachment(args[0]);
-      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Opened` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -384,13 +384,13 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
-      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      if (!result.success) { console.log(`${symbols.error} ${result.error}`); return; }
       console.log(`Found ${result.duplicates.length} duplicates`);
       if (args.includes('--delete')) {
         for (const g of result.duplicates) {
           await attachmentManager.removeDuplicates(g);
         }
-        console.log('🗑️  Removed');
+        console.log(' Removed');
       }
     }
   },
@@ -413,44 +413,44 @@ const commands: Command[] = [
       const syncIndex = args.indexOf('--sync');
       if (syncIndex >= 0 && args[syncIndex + 1]) {
         const groupId = args[syncIndex + 1];
-        console.log(`🔄 Syncing group library ${groupId}...\n`);
+        console.log(`Syncing group library ${groupId}...\n`);
         
         try {
           const result = await syncManager.syncGroup(groupId);
           if (result.success) {
-            console.log(`✅ Group library synced successfully!`);
+            console.log(`${symbols.success} Group library synced successfully!`);
             console.log(`   Downloaded: ${result.downloaded || 0}`);
             console.log(`   Updated: ${result.updated || 0}`);
           } else {
-            console.log(`❌ Sync failed: ${result.error}`);
+            console.log(`${symbols.error} Sync failed: ${result.error}`);
           }
         } catch (error: any) {
-          console.log(`❌ Error: ${error.message}`);
+          console.log(`${symbols.error} Error: ${error.message}`);
         }
         return;
       }
 
       // List groups
-      console.log('📚 Fetching your groups...');
+      console.log('Fetching your groups...');
       const groups = await syncManager.getUserGroups();
 
       if (groups.length === 0) {
         console.log('   No groups found.');
-        console.log('\n💡 To create a group, visit: https://www.zotero.org/groups/new');
+        console.log('\nTo create a group, visit: https://www.zotero.org/groups/new');
         return;
       }
 
-      console.log(`\n📚 Your Groups (${groups.length}):\n`);
+      console.log(`\nYour Groups (${groups.length}):\n`);
       groups.forEach(group => {
         const accessIcon = group.accessLevel === 'write' ? '✏️' : '👁️';
-        const libraryIcon = group.isLibrary ? '📚' : '👥';
+        const libraryIcon = group.isLibrary ? '' : '👥';
         console.log(`  ${libraryIcon} ${accessIcon} [${group.groupId}] ${group.name}`);
         console.log(`      Access: ${group.accessLevel}`);
         console.log(`      Sync: zotero groups --sync ${group.groupId}`);
         console.log('');
       });
       
-      console.log('💡 To sync a group library:');
+      console.log('To sync a group library:');
       console.log('   zotero groups --sync <group-id>');
     }
   },
@@ -463,7 +463,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
       const result = await attachmentManager.downloadFromWebDAV(args[0]);
-      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Downloaded to ${result.localPath}` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -474,7 +474,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
       const result = await attachmentManager.openAttachment(args[0]);
-      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Opened` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -484,13 +484,13 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
-      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      if (!result.success) { console.log(`${symbols.error} ${result.error}`); return; }
       console.log(`Found ${result.duplicates.length} duplicates`);
       if (args.includes('--delete')) {
         for (const g of result.duplicates) {
           await attachmentManager.removeDuplicates(g);
         }
-        console.log('🗑️  Removed');
+        console.log(' Removed');
       }
     }
   },
@@ -507,7 +507,7 @@ const commands: Command[] = [
       'zotero sync:upload -f',
     ],
     execute: async () => {
-      console.log('📤 This would upload local changes...');
+      console.log('This would upload local changes...');
       // Implementation for upload-only would go here
     }
   },
@@ -520,7 +520,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
       const result = await attachmentManager.downloadFromWebDAV(args[0]);
-      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Downloaded to ${result.localPath}` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -531,7 +531,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
       const result = await attachmentManager.openAttachment(args[0]);
-      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Opened` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -541,13 +541,13 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
-      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      if (!result.success) { console.log(`${symbols.error} ${result.error}`); return; }
       console.log(`Found ${result.duplicates.length} duplicates`);
       if (args.includes('--delete')) {
         for (const g of result.duplicates) {
           await attachmentManager.removeDuplicates(g);
         }
-        console.log('🗑️  Removed');
+        console.log(' Removed');
       }
     }
   },
@@ -636,7 +636,7 @@ const commands: Command[] = [
 
       const library = await db.select().from(libraries).get();
       if (!library) {
-        console.log('❌ No library found. Run "sync" first.');
+        console.log(`${symbols.error} No library found. Run "sync" first.`);
         return;
       }
 
@@ -710,7 +710,7 @@ const commands: Command[] = [
       if (options.sort) filters.push(`sort:${options.sort}(${options.order || 'desc'})`);
 
       const filterDesc = filters.length > 0 ? ` (filtered: ${filters.join(', ')})` : '';
-      console.log(`\n📚 Items (${results.length} shown)${filterDesc}:\n`);
+      console.log(`\nItems (${results.length} shown)${filterDesc}:\n`);
 
       if (results.length === 0) {
         console.log('   No items match the criteria.');
@@ -768,10 +768,10 @@ const commands: Command[] = [
       } else if (isDetailed) {
         // Detailed mode (ll)
         results.forEach(item => {
-          const syncStatus = item.synced ? '✅' : '🔄';
+          const syncStatus = item.synced ? symbols.success : '';
           const delStatus = item.deleted ? ' (deleted)' : '';
           const attCount = Number(item.attachmentCount) || 0;
-          const attIcon = attCount > 0 ? ` 📎${attCount}` : '';
+          const attIcon = attCount > 0 ? ` ${attCount}` : '';
           console.log(`  ${syncStatus} [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}${delStatus}${attIcon}`);
           console.log(`      Type: ${item.itemType} | Updated: ${formatDate(item.updatedAt)} | Key: ${item.key}`);
           console.log();
@@ -779,10 +779,10 @@ const commands: Command[] = [
       } else {
         // Standard mode (ls)
         results.forEach(item => {
-          const syncStatus = item.synced ? '✅' : '🔄';
+          const syncStatus = item.synced ? symbols.success : '';
           const delStatus = item.deleted ? ' (deleted)' : '';
           const attCount = Number(item.attachmentCount) || 0;
-          const attIcon = attCount > 0 ? ` 📎${attCount}` : '';
+          const attIcon = attCount > 0 ? ` ${attCount}` : '';
           console.log(`  ${syncStatus} [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}${delStatus}${attIcon}`);
           console.log(`      Type: ${item.itemType} | Updated: ${formatDate(item.updatedAt)}`);
           console.log();
@@ -799,7 +799,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
       const result = await attachmentManager.downloadFromWebDAV(args[0]);
-      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Downloaded to ${result.localPath}` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -810,7 +810,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
       const result = await attachmentManager.openAttachment(args[0]);
-      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Opened` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -820,13 +820,13 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
-      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      if (!result.success) { console.log(`${symbols.error} ${result.error}`); return; }
       console.log(`Found ${result.duplicates.length} duplicates`);
       if (args.includes('--delete')) {
         for (const g of result.duplicates) {
           await attachmentManager.removeDuplicates(g);
         }
-        console.log('🗑️  Removed');
+        console.log(' Removed');
       }
     }
   },
@@ -847,7 +847,7 @@ const commands: Command[] = [
       const db = getDatabase();
       const library = await db.select().from(libraries).get();
       if (!library) {
-        console.log('❌ No library found. Run "sync" first.');
+        console.log(`${symbols.error} No library found. Run "sync" first.`);
         return;
       }
 
@@ -859,7 +859,7 @@ const commands: Command[] = [
         ))
         .all();
 
-      console.log(`\n🔄 Unsynced items (${results.length}):\n`);
+      console.log(`\nUnsynced items (${results.length}):\n`);
       if (results.length === 0) {
         console.log('   All items are synced!');
       } else {
@@ -878,7 +878,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
       const result = await attachmentManager.downloadFromWebDAV(args[0]);
-      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Downloaded to ${result.localPath}` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -889,7 +889,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
       const result = await attachmentManager.openAttachment(args[0]);
-      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Opened` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -899,13 +899,13 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
-      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      if (!result.success) { console.log(`${symbols.error} ${result.error}`); return; }
       console.log(`Found ${result.duplicates.length} duplicates`);
       if (args.includes('--delete')) {
         for (const g of result.duplicates) {
           await attachmentManager.removeDuplicates(g);
         }
-        console.log('🗑️  Removed');
+        console.log(' Removed');
       }
     }
   },
@@ -960,7 +960,7 @@ const commands: Command[] = [
       options.query = queryParts.join(' ');
 
       if (!options.query) {
-        console.log('❌ Please provide a search query');
+        console.log(`${symbols.error} Please provide a search query`);
         console.log('   Usage: zotero search <query> [options]');
         console.log('   Options:');
         console.log('     --field title|author|tags|note|all  (default: title)');
@@ -980,7 +980,7 @@ const commands: Command[] = [
       const library = await db.select().from(libraries).get();
 
       if (!library) {
-        console.log('❌ No library found. Run "sync" first.');
+        console.log(`${symbols.error} No library found. Run "sync" first.`);
         return;
       }
 
@@ -1068,14 +1068,14 @@ const commands: Command[] = [
       if (options.unsynced) filters.push('unsynced');
 
       const filterDesc = filters.length > 0 ? ` (${filters.join(', ')})` : '';
-      console.log(`\n🔍 Search results for "${options.query}"${filterDesc} (${results.length}):\n`);
+      console.log(`\nSearch results for "${options.query}"${filterDesc} (${results.length}):\n`);
 
       if (results.length === 0) {
         console.log('   No results found.');
       } else {
         results.forEach(item => {
-          const syncStatus = item.synced ? '✅' : '🔄';
-          const itemType = item.itemType === 'note' ? '📝' : '📄';
+          const syncStatus = item.synced ? symbols.success : '';
+          const itemType = item.itemType === 'note' ? '' : '';
           console.log(`  ${itemType} ${syncStatus} [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}`);
           if (options.field === 'author' && item.creators) {
             console.log(`      Authors: ${item.creators.substring(0, 50)}`);
@@ -1108,7 +1108,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
       const result = await attachmentManager.downloadFromWebDAV(args[0]);
-      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Downloaded to ${result.localPath}` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -1119,7 +1119,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
       const result = await attachmentManager.openAttachment(args[0]);
-      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Opened` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -1129,13 +1129,13 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
-      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      if (!result.success) { console.log(`${symbols.error} ${result.error}`); return; }
       console.log(`Found ${result.duplicates.length} duplicates`);
       if (args.includes('--delete')) {
         for (const g of result.duplicates) {
           await attachmentManager.removeDuplicates(g);
         }
-        console.log('🗑️  Removed');
+        console.log(' Removed');
       }
     }
   },
@@ -1156,7 +1156,7 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       if (args.length === 0) {
-        console.log('❌ Please provide an item key');
+        console.log(`${symbols.error} Please provide an item key`);
         console.log('   Usage: zotero get <key>');
         return;
       }
@@ -1166,7 +1166,7 @@ const commands: Command[] = [
       const library = await db.select().from(libraries).get();
 
       if (!library) {
-        console.log('❌ No library found. Run "sync" first.');
+        console.log(`${symbols.error} No library found. Run "sync" first.`);
         return;
       }
 
@@ -1176,11 +1176,11 @@ const commands: Command[] = [
         .get();
 
       if (!item) {
-        console.log(`❌ Item ${key} not found.`);
+        console.log(`${symbols.error} Item ${key} not found.`);
         return;
       }
 
-      console.log(`\n📄 Item: ${key}\n`);
+      console.log(`\nItem: ${key}\n`);
       console.log(`   Title: ${item.title || '(none)'}`);
       console.log(`   Type: ${item.itemType}`);
       console.log(`   DOI: ${item.doi || '(none)'}`);
@@ -1209,7 +1209,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
       const result = await attachmentManager.downloadFromWebDAV(args[0]);
-      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Downloaded to ${result.localPath}` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -1220,7 +1220,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
       const result = await attachmentManager.openAttachment(args[0]);
-      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Opened` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -1230,13 +1230,13 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
-      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      if (!result.success) { console.log(`${symbols.error} ${result.error}`); return; }
       console.log(`Found ${result.duplicates.length} duplicates`);
       if (args.includes('--delete')) {
         for (const g of result.duplicates) {
           await attachmentManager.removeDuplicates(g);
         }
-        console.log('🗑️  Removed');
+        console.log(' Removed');
       }
     }
   },
@@ -1260,7 +1260,7 @@ const commands: Command[] = [
 
       const library = await db.select().from(libraries).get();
       if (!library) {
-        console.log('❌ No library found. Run "sync" first.');
+        console.log(`${symbols.error} No library found. Run "sync" first.`);
         return;
       }
 
@@ -1279,7 +1279,7 @@ const commands: Command[] = [
         .where(and(eq(items.libraryId, library.id), eq(items.synced, false)))
         .get();
 
-      console.log('\n📊 Library Statistics:\n');
+      console.log('\nLibrary Statistics:\n');
       console.log(`   Library: ${library.name || 'My Library'}`);
       console.log(`   Zotero ID: ${library.zoteroId}`);
       console.log(`   Version: ${library.version}`);
@@ -1300,7 +1300,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
       const result = await attachmentManager.downloadFromWebDAV(args[0]);
-      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Downloaded to ${result.localPath}` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -1311,7 +1311,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
       const result = await attachmentManager.openAttachment(args[0]);
-      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Opened` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -1321,13 +1321,13 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
-      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      if (!result.success) { console.log(`${symbols.error} ${result.error}`); return; }
       console.log(`Found ${result.duplicates.length} duplicates`);
       if (args.includes('--delete')) {
         for (const g of result.duplicates) {
           await attachmentManager.removeDuplicates(g);
         }
-        console.log('🗑️  Removed');
+        console.log(' Removed');
       }
     }
   },
@@ -1347,19 +1347,19 @@ const commands: Command[] = [
     ],
     execute: async () => {
       await initModules();
-      console.log('🔑 Verifying API key...\n');
+      console.log('Verifying API key...\n');
       try {
         const keyInfo = await zoteroApi.verifyKey();
-        console.log(`✅ API key is valid!`);
+        console.log(`${symbols.success} API key is valid!`);
         console.log(`   Username: ${keyInfo.username}`);
         console.log(`   User ID: ${keyInfo.userID}`);
         console.log(`\n   Access:`);
-        console.log(`     Library: ${keyInfo.access.user.library ? '✅' : '❌'}`);
-        console.log(`     Files: ${keyInfo.access.user.files ? '✅' : '❌'}`);
-        console.log(`     Notes: ${keyInfo.access.user.notes ? '✅' : '❌'}`);
-        console.log(`     Write: ${keyInfo.access.user.write ? '✅' : '❌'}`);
+        console.log(`     Library: ${keyInfo.access.user.library ? symbols.success : symbols.error}`);
+        console.log(`     Files: ${keyInfo.access.user.files ? symbols.success : symbols.error}`);
+        console.log(`     Notes: ${keyInfo.access.user.notes ? symbols.success : symbols.error}`);
+        console.log(`     Write: ${keyInfo.access.user.write ? symbols.success : symbols.error}`);
       } catch (e) {
-        console.log(`❌ API key verification failed!`);
+        console.log(`${symbols.error} API key verification failed!`);
         console.log(`   Error: ${e}`);
         process.exit(1);
       }
@@ -1374,7 +1374,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
       const result = await attachmentManager.downloadFromWebDAV(args[0]);
-      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Downloaded to ${result.localPath}` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -1385,7 +1385,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
       const result = await attachmentManager.openAttachment(args[0]);
-      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Opened` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -1395,13 +1395,13 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
-      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      if (!result.success) { console.log(`${symbols.error} ${result.error}`); return; }
       console.log(`Found ${result.duplicates.length} duplicates`);
       if (args.includes('--delete')) {
         for (const g of result.duplicates) {
           await attachmentManager.removeDuplicates(g);
         }
-        console.log('🗑️  Removed');
+        console.log(' Removed');
       }
     }
   },
@@ -1443,7 +1443,7 @@ const commands: Command[] = [
       const library = await db.select().from(libraries).get();
 
       if (!library) {
-        console.log('❌ No library found. Run "sync" first.');
+        console.log(`${symbols.error} No library found. Run "sync" first.`);
         return;
       }
 
@@ -1454,14 +1454,14 @@ const commands: Command[] = [
         limit: options.limit,
       });
 
-      console.log(`\n📎 Attachments (${attachmentList.length}):\n`);
+      console.log(`\nAttachments (${attachmentList.length}):\n`);
 
       if (attachmentList.length === 0) {
         console.log('   No attachments found.');
       } else {
         attachmentList.forEach(att => {
-          const webdavStatus = att.webdavSynced ? '☁️' : '📁';
-          const typeIcon = att.attachmentType === 'link' ? '🔗' : '📄';
+          const webdavStatus = att.webdavSynced ? '' : '';
+          const typeIcon = att.attachmentType === 'link' ? '🔗' : '';
           console.log(`  ${webdavStatus} ${typeIcon} [${att.key}] ${att.filename}`);
           console.log(`      Title: ${att.title}`);
           console.log(`      Size: ${att.fileSize ? (att.fileSize / 1024).toFixed(1) + ' KB' : 'N/A'}`);
@@ -1482,7 +1482,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
       const result = await attachmentManager.downloadFromWebDAV(args[0]);
-      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Downloaded to ${result.localPath}` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -1493,7 +1493,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
       const result = await attachmentManager.openAttachment(args[0]);
-      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Opened` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -1503,13 +1503,13 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
-      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      if (!result.success) { console.log(`${symbols.error} ${result.error}`); return; }
       console.log(`Found ${result.duplicates.length} duplicates`);
       if (args.includes('--delete')) {
         for (const g of result.duplicates) {
           await attachmentManager.removeDuplicates(g);
         }
-        console.log('🗑️  Removed');
+        console.log(' Removed');
       }
     }
   },
@@ -1575,36 +1575,36 @@ const commands: Command[] = [
         const existing = await db.select().from(webdavConfig).get();
         
         if (!existing) {
-          console.log('❌ WebDAV not configured');
+          console.log(`${symbols.error} WebDAV not configured`);
           console.log('   Run "zotero webdav:config <url> <username> <password>" first');
           return;
         }
         
-        console.log('🔄 Updating WebDAV configuration...\n');
+        console.log('Updating WebDAV configuration...\n');
         const result = await attachmentManager.updateWebDAVConfig({
           autoSync,
           basePath,
         });
         
         if (result.success) {
-          console.log('✅ Configuration updated!');
+          console.log(`${symbols.success} Configuration updated!`);
           console.log(`   URL: ${result.config.url}`);
           console.log(`   Username: ${result.config.username}`);
           console.log(`   Base Path: ${result.config.basePath}`);
           console.log(`   Storage: ${result.config.basePath}/zotero/ (Zotero Desktop compatible)`);
           console.log(`   Auto Sync: ${result.config.autoSync ? 'Enabled' : 'Disabled'}`);
           if (result.config.autoSync) {
-            console.log(`\n💡 Auto-sync is enabled. New attachments will be automatically uploaded to WebDAV.`);
+            console.log(`\nAuto-sync is enabled. New attachments will be automatically uploaded to WebDAV.`);
           }
         } else {
-          console.log('❌ Update failed!');
+          console.log(`${symbols.error} Update failed!`);
           console.log(`   Error: ${result.error}`);
         }
         return;
       }
       
       if (!hasCredentials) {
-        console.log('❌ Please provide WebDAV configuration');
+        console.log(`${symbols.error} Please provide WebDAV configuration`);
         console.log('');
         console.log('Setup mode (initial configuration):');
         console.log('   zotero webdav:config <url> <username> <password> [basePath] [--auto-sync true]');
@@ -1641,17 +1641,17 @@ const commands: Command[] = [
       });
 
       if (result.success) {
-        console.log('✅ WebDAV configured successfully!');
+        console.log(`${symbols.success} WebDAV configured successfully!`);
         console.log(`   URL: ${url}`);
         console.log(`   Username: ${username}`);
         console.log(`   Base Path: ${normalizedBasePath}`);
         console.log(`   Storage: ${normalizedBasePath}/zotero/ (Zotero Desktop compatible)`);
         console.log(`   Auto Sync: ${autoSync ? 'Enabled' : 'Disabled'}`);
         if (autoSync) {
-          console.log(`\n💡 Auto-sync is enabled. New attachments will be automatically uploaded to WebDAV.`);
+          console.log(`\nAuto-sync is enabled. New attachments will be automatically uploaded to WebDAV.`);
         }
       } else {
-        console.log('❌ WebDAV configuration failed!');
+        console.log(`${symbols.error} WebDAV configuration failed!`);
         console.log(`   Error: ${result.error}`);
         throw new Error(result.error || 'WebDAV configuration failed');
       }
@@ -1666,7 +1666,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
       const result = await attachmentManager.downloadFromWebDAV(args[0]);
-      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Downloaded to ${result.localPath}` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -1677,7 +1677,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
       const result = await attachmentManager.openAttachment(args[0]);
-      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Opened` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -1687,13 +1687,13 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
-      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      if (!result.success) { console.log(`${symbols.error} ${result.error}`); return; }
       console.log(`Found ${result.duplicates.length} duplicates`);
       if (args.includes('--delete')) {
         for (const g of result.duplicates) {
           await attachmentManager.removeDuplicates(g);
         }
-        console.log('🗑️  Removed');
+        console.log(' Removed');
       }
     }
   },
@@ -1715,7 +1715,7 @@ const commands: Command[] = [
       const quiet = args.includes('--quiet') || args.includes('-q');
 
       if (!quiet) {
-        console.log('☁️  Syncing attachments to WebDAV...\n');
+        console.log(' Syncing attachments to WebDAV...\n');
       }
 
       const result = await attachmentManager.syncAllToWebDAV({
@@ -1731,10 +1731,10 @@ const commands: Command[] = [
       }
 
       if (result.success) {
-        console.log(`\n✅ WebDAV sync completed!`);
+        console.log(`\n${symbols.success} WebDAV sync completed!`);
         console.log(`   Attachments synced: ${result.synced}`);
       } else {
-        console.log(`\n⚠️  WebDAV sync completed with errors:`);
+        console.log(`\n!  WebDAV sync completed with errors:`);
         result.errors.forEach(e => console.log(`   Error: ${e}`));
       }
     }
@@ -1748,7 +1748,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
       const result = await attachmentManager.downloadFromWebDAV(args[0]);
-      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Downloaded to ${result.localPath}` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -1759,7 +1759,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
       const result = await attachmentManager.openAttachment(args[0]);
-      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Opened` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -1769,13 +1769,13 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
-      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      if (!result.success) { console.log(`${symbols.error} ${result.error}`); return; }
       console.log(`Found ${result.duplicates.length} duplicates`);
       if (args.includes('--delete')) {
         for (const g of result.duplicates) {
           await attachmentManager.removeDuplicates(g);
         }
-        console.log('🗑️  Removed');
+        console.log(' Removed');
       }
     }
   },
@@ -1797,12 +1797,12 @@ const commands: Command[] = [
       const config = await db.select().from(webdavConfig).get();
 
       if (!config) {
-        console.log('❌ WebDAV not configured');
+        console.log(`${symbols.error} WebDAV not configured`);
         console.log('   Use "zotero webdav:config" to configure');
         return;
       }
 
-      console.log('\n☁️  WebDAV Configuration:\n');
+      console.log('\n WebDAV Configuration:\n');
       console.log(`   URL: ${config.url}`);
       console.log(`   Username: ${config.username}`);
       console.log(`   Base Path: ${config.basePath}`);
@@ -1815,12 +1815,12 @@ const commands: Command[] = [
       }
 
       // Test connection
-      console.log('\n🔍 Testing connection...');
+      console.log('\nTesting connection...');
       const init = await attachmentManager.initWebDAV();
       if (init.success) {
-        console.log('   ✅ Connection successful!');
+        console.log(`   ${symbols.success} Connection successful!`);
       } else {
-        console.log(`   ❌ Connection failed: ${init.error}`);
+        console.log(`   ${symbols.error} Connection failed: ${init.error}`);
       }
       console.log();
     }
@@ -1834,7 +1834,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
       const result = await attachmentManager.downloadFromWebDAV(args[0]);
-      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Downloaded to ${result.localPath}` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -1845,7 +1845,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
       const result = await attachmentManager.openAttachment(args[0]);
-      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Opened` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -1855,13 +1855,13 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
-      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      if (!result.success) { console.log(`${symbols.error} ${result.error}`); return; }
       console.log(`Found ${result.duplicates.length} duplicates`);
       if (args.includes('--delete')) {
         for (const g of result.duplicates) {
           await attachmentManager.removeDuplicates(g);
         }
-        console.log('🗑️  Removed');
+        console.log(' Removed');
       }
     }
   },
@@ -1882,13 +1882,13 @@ const commands: Command[] = [
       const quiet = args.includes('--quiet') || args.includes('-q');
 
       if (!quiet) {
-        console.log('🔍 Scanning WebDAV for Zotero Desktop attachments...\n');
+        console.log('Scanning WebDAV for Zotero Desktop attachments...\n');
       }
 
       const result = await attachmentManager.scanWebDAV();
 
       if (!result.success) {
-        console.log(`❌ Failed to scan WebDAV: ${result.error}`);
+        console.log(`${symbols.error} Failed to scan WebDAV: ${result.error}`);
         return;
       }
 
@@ -1897,7 +1897,7 @@ const commands: Command[] = [
         return;
       }
 
-      console.log(`📂 Found ${result.items.length} item(s) in WebDAV storage:\n`);
+      console.log(`Found ${result.items.length} item(s) in WebDAV storage:\n`);
 
       let totalFiles = 0;
       let withProp = 0;
@@ -1910,8 +1910,8 @@ const commands: Command[] = [
           else withoutProp++;
         });
 
-        const propIcon = item.files[0]?.hasProp ? '✅' : '⚠️ ';
-        console.log(`   📁 ${item.itemKey}/`);
+        const propIcon = item.files[0]?.hasProp ? symbols.success : '! ';
+        console.log(`   ${item.itemKey}/`);
         item.files.forEach(f => {
           console.log(`      ${propIcon} ${f.filename} (${(f.size / 1024).toFixed(1)} KB)`);
         });
@@ -1921,11 +1921,11 @@ const commands: Command[] = [
         console.log(`   ... and ${result.items.length - 20} more items`);
       }
 
-      console.log(`\n📊 Summary:`);
+      console.log(`\nSummary:`);
       console.log(`   Total files: ${totalFiles}`);
       console.log(`   With .prop: ${withProp}`);
       console.log(`   Without .prop: ${withoutProp}`);
-      console.log(`\n💡 Tip: Files without .prop can still be used, but metadata may differ.`);
+      console.log(`\nTip: Files without .prop can still be used, but metadata may differ.`);
       console.log();
     }
   },
@@ -1938,7 +1938,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
       const result = await attachmentManager.downloadFromWebDAV(args[0]);
-      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Downloaded to ${result.localPath}` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -1949,7 +1949,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
       const result = await attachmentManager.openAttachment(args[0]);
-      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Opened` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -1959,13 +1959,13 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
-      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      if (!result.success) { console.log(`${symbols.error} ${result.error}`); return; }
       console.log(`Found ${result.duplicates.length} duplicates`);
       if (args.includes('--delete')) {
         for (const g of result.duplicates) {
           await attachmentManager.removeDuplicates(g);
         }
-        console.log('🗑️  Removed');
+        console.log(' Removed');
       }
     }
   },
@@ -1986,7 +1986,7 @@ const commands: Command[] = [
     ],
     execute: async (args) => {
       await initModules();
-      console.log('📝 Adding new item to library...\n');
+      console.log('Adding new item to library...\n');
 
       // Parse arguments: zotero add <type> <title> [authors...] [-a/--attachment path...]
       const attachmentPaths: string[] = [];
@@ -2007,7 +2007,7 @@ const commands: Command[] = [
       const title = otherArgs[1];
 
       if (!title) {
-        console.log('❌ Usage: zotero add <type> <title> [authors...] [-a/--attachment <path>...]');
+        console.log(`${symbols.error} Usage: zotero add <type> <title> [authors...] [-a/--attachment <path>...]`);
         console.log('   Example: zotero add journalArticle "My Article" "John Doe"');
         console.log('   Example with attachments: zotero add book "My Book" "John Doe" -a /path/to/file1.pdf -a /path/to/file2.pdf');
         console.log('\n   Supported types:');
@@ -2023,7 +2023,7 @@ const commands: Command[] = [
         if (fs.existsSync(attPath)) {
           validAttachments.push(attPath);
         } else {
-          console.log(`⚠️  Attachment not found: ${attPath}`);
+          console.log(`!  Attachment not found: ${attPath}`);
         }
       }
 
@@ -2031,7 +2031,7 @@ const commands: Command[] = [
         // Get library info
         const library = await getDatabase().select().from(libraries).get();
         if (!library) {
-          console.log('❌ No library found. Run "sync" first.');
+          console.log(`${symbols.error} No library found. Run "sync" first.`);
           process.exit(1);
         }
 
@@ -2066,12 +2066,12 @@ const commands: Command[] = [
           rawJson: JSON.stringify({ data: itemData }),
         }).run();
 
-        console.log(`✅ Item created successfully!`);
+        console.log(`${symbols.success} Item created successfully!`);
         console.log(`   Key: ${itemKey}`);
 
         // Create attachments if provided (only in local database)
         if (validAttachments.length > 0) {
-          console.log(`\n📎 Adding ${validAttachments.length} attachment(s) locally...`);
+          console.log(`\nAdding ${validAttachments.length} attachment(s) locally...`);
 
           for (const attPath of validAttachments) {
             const filename = path.basename(attPath);
@@ -2106,13 +2106,13 @@ const commands: Command[] = [
               rawJson: JSON.stringify({ data: attachmentData }),
             }).run();
 
-            console.log(`   ✅ Added locally: ${filename} (${(stats.size / 1024).toFixed(1)} KB)`);
+            console.log(`   ${symbols.success} Added locally: ${filename} (${(stats.size / 1024).toFixed(1)} KB)`);
           }
         }
 
-        console.log(`\n💡 Run "zotero sync" to upload to remote.`);
+        console.log(`\nRun "zotero sync" to upload to remote.`);
       } catch (error) {
-        console.log(`❌ Failed to add item: ${error}`);
+        console.log(`${symbols.error} Failed to add item: ${error}`);
         process.exit(1);
       }
     }
@@ -2126,7 +2126,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
       const result = await attachmentManager.downloadFromWebDAV(args[0]);
-      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Downloaded to ${result.localPath}` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -2137,7 +2137,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
       const result = await attachmentManager.openAttachment(args[0]);
-      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Opened` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -2147,13 +2147,13 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
-      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      if (!result.success) { console.log(`${symbols.error} ${result.error}`); return; }
       console.log(`Found ${result.duplicates.length} duplicates`);
       if (args.includes('--delete')) {
         for (const g of result.duplicates) {
           await attachmentManager.removeDuplicates(g);
         }
-        console.log('🗑️  Removed');
+        console.log(' Removed');
       }
     }
   },
@@ -2172,14 +2172,14 @@ const commands: Command[] = [
     ],
     execute: async (args) => {
       await initModules();
-      console.log('📝 Updating item locally...\n');
+      console.log('Updating item locally...\n');
 
       const key = args[0];
       const field = args[1];
       const value = args.slice(2).join(' ');
 
       if (!key || !field || !value) {
-        console.log('❌ Usage: zotero update <key> <field> <value>');
+        console.log(`${symbols.error} Usage: zotero update <key> <field> <value>`);
         console.log('   Example: zotero update ABCD123 title "New Title"');
         console.log('\n   Available fields:');
         console.log('   title, date, abstract, url, doi');
@@ -2191,7 +2191,7 @@ const commands: Command[] = [
         const library = await db.select().from(libraries).get();
 
         if (!library) {
-          console.log('❌ No library found. Run "sync" first.');
+          console.log(`${symbols.error} No library found. Run "sync" first.`);
           process.exit(1);
         }
 
@@ -2202,7 +2202,7 @@ const commands: Command[] = [
           .get();
 
         if (!item) {
-          console.log(`❌ Item ${key} not found.`);
+          console.log(`${symbols.error} Item ${key} not found.`);
           process.exit(1);
         }
 
@@ -2241,11 +2241,11 @@ const commands: Command[] = [
           .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
           .run();
 
-        console.log(`✅ Item updated locally!`);
+        console.log(`${symbols.success} Item updated locally!`);
         console.log(`   Changed: ${field} "${oldValue}" → "${value}"`);
-        console.log(`\n💡 Run "zotero sync" to upload changes to remote.`);
+        console.log(`\nRun "zotero sync" to upload changes to remote.`);
       } catch (error) {
-        console.log(`❌ Failed to update item: ${error}`);
+        console.log(`${symbols.error} Failed to update item: ${error}`);
         process.exit(1);
       }
     }
@@ -2259,7 +2259,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
       const result = await attachmentManager.downloadFromWebDAV(args[0]);
-      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Downloaded to ${result.localPath}` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -2270,7 +2270,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
       const result = await attachmentManager.openAttachment(args[0]);
-      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Opened` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -2280,13 +2280,13 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
-      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      if (!result.success) { console.log(`${symbols.error} ${result.error}`); return; }
       console.log(`Found ${result.duplicates.length} duplicates`);
       if (args.includes('--delete')) {
         for (const g of result.duplicates) {
           await attachmentManager.removeDuplicates(g);
         }
-        console.log('🗑️  Removed');
+        console.log(' Removed');
       }
     }
   },
@@ -2306,14 +2306,14 @@ const commands: Command[] = [
     ],
     execute: async (args) => {
       await initModules();
-      console.log('🗑️  Deleting item locally...\n');
+      console.log(' Deleting item locally...\n');
 
       const key = args[0];
       const permanent = args.includes('--permanent') || args.includes('-p');
       const force = args.includes('--force') || args.includes('-f');
 
       if (!key) {
-        console.log('❌ Usage: zotero delete <key> [--permanent]');
+        console.log(`${symbols.error} Usage: zotero delete <key> [--permanent]`);
         console.log('   Example: zotero delete ABCD123');
         console.log('   Example: zotero delete ABCD123 --permanent (permanent delete)');
         process.exit(1);
@@ -2324,7 +2324,7 @@ const commands: Command[] = [
         const library = await db.select().from(libraries).get();
 
         if (!library) {
-          console.log('❌ No library found. Run "sync" first.');
+          console.log(`${symbols.error} No library found. Run "sync" first.`);
           process.exit(1);
         }
 
@@ -2335,7 +2335,7 @@ const commands: Command[] = [
           .get();
 
         if (!item) {
-          console.log(`❌ Item ${key} not found.`);
+          console.log(`${symbols.error} Item ${key} not found.`);
           process.exit(1);
         }
 
@@ -2348,7 +2348,7 @@ const commands: Command[] = [
             .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
             .run();
 
-          console.log(`✅ Item marked for permanent deletion!`);
+          console.log(`${symbols.success} Item marked for permanent deletion!`);
         } else {
           // Soft delete (move to trash): mark as deleted locally
           console.log(`   Moving ${key} to trash...`);
@@ -2369,12 +2369,12 @@ const commands: Command[] = [
             .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
             .run();
 
-          console.log(`✅ Item moved to trash locally!`);
+          console.log(`${symbols.success} Item moved to trash locally!`);
         }
 
-        console.log(`\n💡 Run "zotero sync" to sync deletion to remote.`);
+        console.log(`\nRun "zotero sync" to sync deletion to remote.`);
       } catch (error) {
-        console.log(`❌ Failed to delete item: ${error}`);
+        console.log(`${symbols.error} Failed to delete item: ${error}`);
         process.exit(1);
       }
     }
@@ -2388,7 +2388,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
       const result = await attachmentManager.downloadFromWebDAV(args[0]);
-      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Downloaded to ${result.localPath}` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -2399,7 +2399,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
       const result = await attachmentManager.openAttachment(args[0]);
-      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Opened` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -2409,13 +2409,13 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
-      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      if (!result.success) { console.log(`${symbols.error} ${result.error}`); return; }
       console.log(`Found ${result.duplicates.length} duplicates`);
       if (args.includes('--delete')) {
         for (const g of result.duplicates) {
           await attachmentManager.removeDuplicates(g);
         }
-        console.log('🗑️  Removed');
+        console.log(' Removed');
       }
     }
   },
@@ -2434,7 +2434,7 @@ const commands: Command[] = [
     ],
     execute: async (args) => {
       await initModules();
-      console.log('📤 Exporting items...\n');
+      console.log('Exporting items...\n');
 
       try {
         // Parse arguments
@@ -2444,7 +2444,7 @@ const commands: Command[] = [
 
         const validFormats = ['bibtex', 'ris', 'csv', 'json'];
         if (!validFormats.includes(format)) {
-          console.log(`❌ Invalid format: ${format}`);
+          console.log(`${symbols.error} Invalid format: ${format}`);
           console.log(`   Valid formats: ${validFormats.join(', ')}`);
           process.exit(1);
         }
@@ -2459,14 +2459,14 @@ const commands: Command[] = [
 
         if (outputFile) {
           await exporter.exportToFile(content, outputFile);
-          console.log(`✅ Exported ${limit} items to ${outputFile} (${format} format)`);
+          console.log(`${symbols.success} Exported ${limit} items to ${outputFile} (${format} format)`);
         } else {
           console.log(content);
-          console.log(`\n💡 Tip: Add output file path to save to file`);
+          console.log(`\nTip: Add output file path to save to file`);
           console.log(`   Example: zotero export bibtex references.bib`);
         }
       } catch (error) {
-        console.error('❌ Export failed:', error);
+        console.error(`${symbols.error} Export failed:`, error);
         process.exit(1);
       }
     }
@@ -2480,7 +2480,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
       const result = await attachmentManager.downloadFromWebDAV(args[0]);
-      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Downloaded to ${result.localPath}` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -2491,7 +2491,7 @@ const commands: Command[] = [
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
       const result = await attachmentManager.openAttachment(args[0]);
-      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Opened` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -2501,13 +2501,13 @@ const commands: Command[] = [
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
-      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      if (!result.success) { console.log(`${symbols.error} ${result.error}`); return; }
       console.log(`Found ${result.duplicates.length} duplicates`);
       if (args.includes('--delete')) {
         for (const g of result.duplicates) {
           await attachmentManager.removeDuplicates(g);
         }
-        console.log('🗑️  Removed');
+        console.log(' Removed');
       }
     }
   },
@@ -2542,7 +2542,7 @@ const commands: Command[] = [
 
       if (otherArgs.length === 0) {
         console.log(`
-❌ 请提供至少一个标识符
+${symbols.error} 请提供至少一个标识符
 
 用法: zotero add-by-id <identifier> [identifier2 ...] [-a/--attachment <path>...]
 
@@ -2590,19 +2590,19 @@ WebDAV 同步:
         if (fs.existsSync(attPath)) {
           validAttachments.push(attPath);
         } else {
-          console.log(`⚠️  Attachment not found: ${attPath}`);
+          console.log(`!  Attachment not found: ${attPath}`);
         }
       }
 
       try {
-        console.log('🔍 正在解析标识符...\n');
+        console.log('正在解析标识符...\n');
 
         // 导入 identifier 模块
         const { IdentifierParser, MetadataFetcher } = await import('./identifier/index.js');
 
         // 1. 解析标识符
         const identifiers = IdentifierParser.parse(input);
-        console.log(`📝 找到 ${identifiers.length} 个标识符`);
+        console.log(`找到 ${identifiers.length} 个标识符`);
 
         // 2. 显示识别结果
         identifiers.forEach((id, index) => {
@@ -2619,25 +2619,25 @@ WebDAV 同步:
         });
 
         // 4. 获取元数据
-        console.log('\n📦 正在获取元数据...');
+        console.log('\n正在获取元数据...');
         const results = await fetcher.fetchBatch(identifiers);
 
         // 5. 显示结果摘要
         const successCount = results.filter(r => !r.error).length;
         const failCount = results.filter(r => r.error).length;
 
-        console.log(`\n📊 结果摘要:`);
-        console.log(`   ✅ 成功: ${successCount}`);
-        console.log(`   ❌ 失败: ${failCount}`);
+        console.log(`\n结果摘要:`);
+        console.log(`   ${symbols.success} 成功: ${successCount}`);
+        console.log(`   ${symbols.error} 失败: ${failCount}`);
 
         // 6. 写入数据库
         if (successCount > 0) {
-          console.log('\n💾 写入本地数据库...');
+          console.log('\n写入本地数据库...');
           const db = getDatabase();
           const library = await db.select().from(libraries).get();
 
           if (!library) {
-            console.log('❌ 未找到文献库。请先运行 "zotero sync"');
+            console.log(`${symbols.error} 未找到文献库。请先运行 "zotero sync"`);
             return;
           }
 
@@ -2658,11 +2658,11 @@ WebDAV 同步:
             };
 
             await db.insert(items).values(item).run();
-            console.log(`   📄 已添加: ${item.title?.substring(0, 50) || '(无标题)'}...`);
+            console.log(`   已添加: ${item.title?.substring(0, 50) || '(无标题)'}...`);
 
             // 处理微信文章的 snapshot 附件（iOS 兼容性）
             if (result.extra?.isWeChatArticle && result.extra?.processedHtml) {
-              console.log(`   📎 创建微信文章 snapshot...`);
+              console.log(`   创建微信文章 snapshot...`);
               
               const crypto = await import('crypto');
               const contentHash = result.extra.contentHash || 
@@ -2716,17 +2716,17 @@ WebDAV 同步:
                 }),
               }).run();
               
-              console.log(`      ✅ Snapshot: ${uniqueFilename} (${(result.extra.processedHtml.length / 1024).toFixed(1)} KB)`);
+              console.log(`      ${symbols.success} Snapshot: ${uniqueFilename} (${(result.extra.processedHtml.length / 1024).toFixed(1)} KB)`);
               
               // 检查 autoSync 配置
               const wdc = await db.select().from(webdavConfig).get();
               if (wdc?.autoSync) {
-                console.log(`      🔄 自动同步到 WebDAV (autoSync enabled)...`);
-                console.log(`      💡 父条目将在下次 sync 时上传到 Zotero，然后附件自动关联`);
+                console.log(`      自动同步到 WebDAV (autoSync enabled)...`);
+                console.log(`      父条目将在下次 sync 时上传到 Zotero，然后附件自动关联`);
                 // Note: WebDAV sync will be handled by sync process or manual webdav:sync
                 // The attachment item will be created during regular sync (parent first, then attachment)
               } else {
-                console.log(`      💡 运行 "zotero sync" 上传条目，然后 "zotero webdav:sync" 上传附件`);
+                console.log(`      运行 "zotero sync" 上传条目，然后 "zotero webdav:sync" 上传附件`);
                 if (!wdc) {
                   console.log(`         或先配置: zotero webdav:config <url> <user> <pass>`);
                 }
@@ -2735,7 +2735,7 @@ WebDAV 同步:
 
             // Add attachments if provided
             if (validAttachments.length > 0) {
-              console.log(`   📎 添加 ${validAttachments.length} 个附件...`);
+              console.log(`   添加 ${validAttachments.length} 个附件...`);
               
               const addedAttKeys: string[] = [];
 
@@ -2773,14 +2773,14 @@ WebDAV 同步:
                   }),
                 }).run();
 
-                console.log(`      ✅ ${filename} (${(stats.size / 1024).toFixed(1)} KB)`);
+                console.log(`      ${symbols.success} ${filename} (${(stats.size / 1024).toFixed(1)} KB)`);
               }
               
               // Auto-sync attachments if enabled
               const wdc = await db.select().from(webdavConfig).get();
               if (wdc?.autoSync && addedAttKeys.length > 0) {
-                console.log(`      🔄 自动同步 ${addedAttKeys.length} 个附件到 WebDAV...`);
-                console.log(`      💡 父条目将在下次 sync 时上传到 Zotero`);
+                console.log(`      自动同步 ${addedAttKeys.length} 个附件到 WebDAV...`);
+                console.log(`      父条目将在下次 sync 时上传到 Zotero`);
                 let syncCount = 0;
                 let failCount = 0;
                 for (const attKey of addedAttKeys) {
@@ -2790,35 +2790,35 @@ WebDAV 同步:
                       syncCount++;
                     } else {
                       failCount++;
-                      console.log(`         ⚠️  ${attKey}: ${syncResult.error}`);
+                      console.log(`         !  ${attKey}: ${syncResult.error}`);
                     }
                   } catch (e: any) {
                     failCount++;
-                    console.log(`         ⚠️  ${attKey}: ${e.message}`);
+                    console.log(`         !  ${attKey}: ${e.message}`);
                   }
                 }
                 if (syncCount > 0) {
-                  console.log(`      ✅ ${syncCount} 个附件已上传`);
+                  console.log(`      ${symbols.success} ${syncCount} 个附件已上传`);
                 }
                 if (failCount > 0) {
-                  console.log(`      ⚠️  ${failCount} 个附件上传失败，运行 "zotero webdav:sync" 重试`);
+                  console.log(`      !  ${failCount} 个附件上传失败，运行 "zotero webdav:sync" 重试`);
                 }
               } else if (!wdc?.autoSync && addedAttKeys.length > 0) {
-                console.log(`      💡 运行 "zotero webdav:sync" 上传这些附件`);
+                console.log(`      运行 "zotero webdav:sync" 上传这些附件`);
               }
             }
           }
 
-          console.log(`\n🎉 成功添加 ${successCount} 个文献到本地数据库！`);
+          console.log(`\n成功添加 ${successCount} 个文献到本地数据库！`);
           if (validAttachments.length > 0) {
-            console.log(`   📎 共添加 ${validAttachments.length} 个附件`);
+            console.log(`   共添加 ${validAttachments.length} 个附件`);
           }
-          console.log('💡 运行 "zotero sync" 同步到 Zotero 服务器');
+          console.log('运行 "zotero sync" 同步到 Zotero 服务器');
         }
 
         // 7. 显示失败详情
         if (failCount > 0) {
-          console.log('\n⚠️ 失败的标识符:');
+          console.log('\n! 失败的标识符:');
           results.filter(r => r.error).forEach((result, index) => {
             console.log(`   ${index + 1}. ${result.identifier.value}`);
             console.log(`     原因: ${result.error}`);
@@ -2826,8 +2826,8 @@ WebDAV 同步:
         }
 
       } catch (error) {
-        console.log(`\n❌ 添加失败: ${error}`);
-        console.log('\n💡 请检查:');
+        console.log(`\n${symbols.error} 添加失败: ${error}`);
+        console.log('\n请检查:');
         console.log('   1. 标识符格式是否正确');
         console.log('   2. 网络连接是否正常');
         console.log('   3. API 密钥配置是否正确');
@@ -2843,7 +2843,7 @@ WebDAV 同步:
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
       const result = await attachmentManager.downloadFromWebDAV(args[0]);
-      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Downloaded to ${result.localPath}` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -2854,7 +2854,7 @@ WebDAV 同步:
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
       const result = await attachmentManager.openAttachment(args[0]);
-      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Opened` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -2864,13 +2864,13 @@ WebDAV 同步:
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
-      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      if (!result.success) { console.log(`${symbols.error} ${result.error}`); return; }
       console.log(`Found ${result.duplicates.length} duplicates`);
       if (args.includes('--delete')) {
         for (const g of result.duplicates) {
           await attachmentManager.removeDuplicates(g);
         }
-        console.log('🗑️  Removed');
+        console.log(' Removed');
       }
     }
   },
@@ -2896,7 +2896,7 @@ WebDAV 同步:
 
       if (!subcommand || subcommand === '--help' || subcommand === '-h') {
         console.log(`
-📝 Note Management
+Note Management
 
 Usage: zotero note <subcommand> [options]
 
@@ -2932,7 +2932,7 @@ Notes:
       const library = await db.select().from(libraries).get();
 
       if (!library) {
-        console.log('❌ No library found. Run "sync" first.');
+        console.log(`${symbols.error} No library found. Run "sync" first.`);
         return;
       }
 
@@ -2942,7 +2942,7 @@ Notes:
           const content = subArgs.slice(1).join(' ');
 
           if (!parentKey) {
-            console.log('❌ Usage: zotero note add <parent-key> [content]');
+            console.log(`${symbols.error} Usage: zotero note add <parent-key> [content]`);
             console.log('   Example: zotero note add ABCD1234 "This is a **note**"');
             return;
           }
@@ -2954,7 +2954,7 @@ Notes:
             .get();
 
           if (!parentItem) {
-            console.log(`❌ Parent item ${parentKey} not found.`);
+            console.log(`${symbols.error} Parent item ${parentKey} not found.`);
             return;
           }
 
@@ -2986,13 +2986,13 @@ Notes:
             rawJson: JSON.stringify({ data: noteData }),
           }).run();
 
-          console.log(`✅ Note added successfully!`);
+          console.log(`${symbols.success} Note added successfully!`);
           console.log(`   Key: ${noteKey}`);
           console.log(`   Parent: ${parentKey}`);
           if (content) {
             console.log(`   Preview: ${htmlToPlainText(htmlContent, 80)}`);
           }
-          console.log(`\n💡 Run "zotero sync" to upload to remote.`);
+          console.log(`\nRun "zotero sync" to upload to remote.`);
           break;
         }
 
@@ -3001,7 +3001,7 @@ Notes:
           let newContent = subArgs.slice(1).join(' ');
 
           if (!noteKey) {
-            console.log('❌ Usage: zotero note edit <note-key> [content]');
+            console.log(`${symbols.error} Usage: zotero note edit <note-key> [content]`);
             console.log('   Example: zotero note edit NOTE5678 "Updated **content**"');
             return;
           }
@@ -3013,12 +3013,12 @@ Notes:
             .get();
 
           if (!note) {
-            console.log(`❌ Note ${noteKey} not found.`);
+            console.log(`${symbols.error} Note ${noteKey} not found.`);
             return;
           }
 
           if (note.itemType !== 'note') {
-            console.log(`❌ Item ${noteKey} is not a note.`);
+            console.log(`${symbols.error} Item ${noteKey} is not a note.`);
             return;
           }
 
@@ -3049,7 +3049,7 @@ Notes:
             const { configManager } = await import('@zotero-headless/core');
             const editor = configManager.get('editor') || process.env.EDITOR || process.env.VISUAL || 'nano';
 
-            console.log(`📝 Opening external editor: ${editor}`);
+            console.log(`Opening external editor: ${editor}`);
             console.log(`   File: ${tmpFile.name}`);
             console.log(`   Edit and save the file, then close the editor to apply changes.`);
             console.log('');
@@ -3082,7 +3082,7 @@ Notes:
 
             // Check if content changed
             if (editedContent === currentMarkdown) {
-              console.log('\n📋 No changes detected. Note not updated.');
+              console.log('\nNo changes detected. Note not updated.');
               return;
             }
 
@@ -3106,10 +3106,10 @@ Notes:
             .where(and(eq(items.key, noteKey), eq(items.libraryId, library.id)))
             .run();
 
-          console.log(`✅ Note updated successfully!`);
+          console.log(`${symbols.success} Note updated successfully!`);
           console.log(`   Key: ${noteKey}`);
           console.log(`   Preview: ${htmlToPlainText(newHtmlContent, 80)}`);
-          console.log(`\n💡 Run "zotero sync" to upload changes.`);
+          console.log(`\nRun "zotero sync" to upload changes.`);
           break;
         }
 
@@ -3117,7 +3117,7 @@ Notes:
           const noteKey = subArgs[0];
 
           if (!noteKey) {
-            console.log('❌ Usage: zotero note show <note-key>');
+            console.log(`${symbols.error} Usage: zotero note show <note-key>`);
             console.log('   Example: zotero note show NOTE5678');
             return;
           }
@@ -3129,12 +3129,12 @@ Notes:
             .get();
 
           if (!note) {
-            console.log(`❌ Note ${noteKey} not found.`);
+            console.log(`${symbols.error} Note ${noteKey} not found.`);
             return;
           }
 
           if (note.itemType !== 'note') {
-            console.log(`❌ Item ${noteKey} is not a note.`);
+            console.log(`${symbols.error} Item ${noteKey} is not a note.`);
             return;
           }
 
@@ -3146,10 +3146,10 @@ Notes:
           // Convert to Markdown for display
           const markdownContent = htmlToMarkdown(htmlContent);
 
-          console.log(`\n📝 Note: ${noteKey}`);
+          console.log(`\nNote: ${noteKey}`);
           console.log(`   Parent: ${data.parentItem || '(none)'}`);
           console.log(`   Updated: ${formatDate(note.updatedAt)}`);
-          console.log(`   Synced: ${note.synced ? '✅' : '🔄'}`);
+          console.log(`   Synced: ${note.synced ? symbols.success : ''}`);
           console.log('─'.repeat(60));
           console.log(markdownContent || '(empty note)');
           console.log('─'.repeat(60));
@@ -3160,7 +3160,7 @@ Notes:
           const parentKey = subArgs[0];
 
           if (!parentKey) {
-            console.log('❌ Usage: zotero note list <parent-key>');
+            console.log(`${symbols.error} Usage: zotero note list <parent-key>`);
             console.log('   Example: zotero note list ABCD1234');
             return;
           }
@@ -3187,18 +3187,18 @@ Notes:
           });
 
           if (parentNotes.length === 0) {
-            console.log(`\n📝 No notes found for item ${parentKey}.`);
+            console.log(`\nNo notes found for item ${parentKey}.`);
             return;
           }
 
-          console.log(`\n📝 Notes for ${parentKey} (${parentNotes.length}):\n`);
+          console.log(`\nNotes for ${parentKey} (${parentNotes.length}):\n`);
 
           for (const note of parentNotes) {
             const rawData = JSON.parse(note.rawJson || '{}');
             const data = rawData.data || rawData;
             const htmlContent = data.note || '';
             const preview = htmlToPlainText(htmlContent, 60) || '(empty note)';
-            const syncStatus = note.synced ? '✅' : '🔄';
+            const syncStatus = note.synced ? symbols.success : '';
 
             console.log(`  ${syncStatus} [${note.key}] ${preview}`);
           }
@@ -3211,7 +3211,7 @@ Notes:
           const outputPath = subArgs[1] || '.';
 
           if (!target) {
-            console.log('❌ Usage: zotero note export <note-key> [output-path]');
+            console.log(`${symbols.error} Usage: zotero note export <note-key> [output-path]`);
             console.log('   Example: zotero note export NOTE1234 ./my-notes/');
             console.log('   Example: zotero note export --all ./exported-notes/');
             return;
@@ -3228,7 +3228,7 @@ Notes:
               .all();
 
             if (allNotes.length === 0) {
-              console.log('📝 No notes found to export.');
+              console.log('No notes found to export.');
               return;
             }
 
@@ -3241,7 +3241,7 @@ Notes:
               fs.mkdirSync(outputDir, { recursive: true });
             }
 
-            console.log(`📤 Exporting ${allNotes.length} notes to ${outputDir}...\n`);
+            console.log(`Exporting ${allNotes.length} notes to ${outputDir}...\n`);
 
             let exported = 0;
             for (const note of allNotes) {
@@ -3262,13 +3262,13 @@ Notes:
                 // Write file
                 fs.writeFileSync(filepath, markdown, 'utf-8');
                 exported++;
-                console.log(`  ✅ ${filename}`);
+                console.log(`  ${symbols.success} ${filename}`);
               } catch (e) {
-                console.warn(`  ⚠️  Failed to export note ${note.key}: ${e}`);
+                console.warn(`  !  Failed to export note ${note.key}: ${e}`);
               }
             }
 
-            console.log(`\n🎉 Exported ${exported}/${allNotes.length} notes to ${outputDir}/`);
+            console.log(`\nExported ${exported}/${allNotes.length} notes to ${outputDir}/`);
             return;
           }
 
@@ -3279,12 +3279,12 @@ Notes:
             .get();
 
           if (!note) {
-            console.log(`❌ Note ${target} not found.`);
+            console.log(`${symbols.error} Note ${target} not found.`);
             return;
           }
 
           if (note.itemType !== 'note') {
-            console.log(`❌ Item ${target} is not a note.`);
+            console.log(`${symbols.error} Item ${target} is not a note.`);
             return;
           }
 
@@ -3310,19 +3310,19 @@ Notes:
               }
               
               fs.writeFileSync(filepath, markdown, 'utf-8');
-              console.log(`✅ Exported note to ${filepath}`);
+              console.log(`${symbols.success} Exported note to ${filepath}`);
             } else {
               // Output to stdout
               console.log(markdown);
             }
           } catch (e) {
-            console.error(`❌ Failed to export note: ${e}`);
+            console.error(`${symbols.error} Failed to export note: ${e}`);
           }
           break;
         }
 
         default:
-          console.log(`❌ Unknown subcommand: ${subcommand}`);
+          console.log(`${symbols.error} Unknown subcommand: ${subcommand}`);
           console.log('   Run "zotero note --help" for usage.');
       }
     }
@@ -3336,7 +3336,7 @@ Notes:
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-download <key>'); return; }
       const result = await attachmentManager.downloadFromWebDAV(args[0]);
-      console.log(result.success ? `✅ Downloaded to ${result.localPath}` : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Downloaded to ${result.localPath}` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -3347,7 +3347,7 @@ Notes:
       await initModules();
       if (!args[0]) { console.log('Usage: attachment-open <key>'); return; }
       const result = await attachmentManager.openAttachment(args[0]);
-      console.log(result.success ? '✅ Opened' : `❌ ${result.error}`);
+      console.log(result.success ? `${symbols.success} Opened` : `${symbols.error} ${result.error}`);
     }
   },
   {
@@ -3357,13 +3357,13 @@ Notes:
     execute: async (args) => {
       await initModules();
       const result = await attachmentManager.findDuplicates();
-      if (!result.success) { console.log(`❌ ${result.error}`); return; }
+      if (!result.success) { console.log(`${symbols.error} ${result.error}`); return; }
       console.log(`Found ${result.duplicates.length} duplicates`);
       if (args.includes('--delete')) {
         for (const g of result.duplicates) {
           await attachmentManager.removeDuplicates(g);
         }
-        console.log('🗑️  Removed');
+        console.log(' Removed');
       }
     }
   },
@@ -3386,7 +3386,7 @@ Notes:
       
       if (args[0] === '--init') {
         configManager.init();
-        console.log('✅ Config file created at ~/.zoterrc');
+        console.log(`${symbols.success} Config file created at ~/.zoterrc`);
         return;
       }
       
@@ -3419,7 +3419,7 @@ Notes:
       
       if (args.includes('--clear')) {
         historyManager.clear();
-        console.log('🗑️  History cleared');
+        console.log(' History cleared');
         return;
       }
       
@@ -3434,7 +3434,7 @@ Notes:
       console.log(`\n📜 Recent history (${recent.length}):\n`);
       recent.forEach((entry, i) => {
         const date = new Date(entry.timestamp).toLocaleDateString();
-        const icon = entry.type === 'item' ? '📄' : entry.type === 'search' ? '🔍' : '⚡';
+        const icon = entry.type === 'item' ? '' : entry.type === 'search' ? '' : '';
         console.log(`  ${icon} [${entry.key || entry.query || entry.command}] (${date})`);
       });
       console.log();
@@ -3455,7 +3455,7 @@ Notes:
     ],
     execute: async () => {
       console.log(`
-🛠️  Zotero-Headless CLI
+ Zotero-Headless CLI
 
 Usage: zotero <command> [options]
 
@@ -3501,7 +3501,7 @@ Quick Examples:
 With Attachments:
   zotero add book "Title" "Author" -a file1.pdf -a file2.pdf
   zotero add-by-id "10.1000/xyz" -a supplement.pdf
-  zotero ls                             # Shows 📎N count for each item
+  zotero ls                             # Shows N count for each item
 
 With Notes (Markdown):
   zotero note add ABCD1234 "Key findings: ..."
@@ -3589,9 +3589,9 @@ For more info: https://github.com/altairwei/Zotero-Headless
       }
 
       if (!shellPath) {
-        console.error('❌ Cannot find shell.');
+        console.error(`${symbols.error} Cannot find shell.`);
         console.log('');
-        console.log('💡 Try reinstalling: npm install -g zotero-headless');
+        console.log('Try reinstalling: npm install -g zotero-headless');
         return;
       }
 
@@ -3609,7 +3609,7 @@ For more info: https://github.com/altairwei/Zotero-Headless
           process.exitCode = code ?? 0;
         });
       } catch (error) {
-        console.error('❌ Failed to start shell:', error);
+        console.error(`${symbols.error} Failed to start shell:`, error);
       }
     }
   }
@@ -3659,7 +3659,7 @@ export async function main() {
       showCommandHelp(cmd, helpTarget);
       return;
     } else {
-      console.log(`❌ Unknown command: ${helpTarget}`);
+      console.log(`${symbols.error} Unknown command: ${helpTarget}`);
       console.log(`   Run "zotero help" for all commands.`);
       process.exit(1);
     }
@@ -3692,7 +3692,7 @@ export async function main() {
   );
 
   if (!command) {
-    console.log(`❌ Unknown command: ${commandName}`);
+    console.log(`${symbols.error} Unknown command: ${commandName}`);
     console.log(`   Run "zotero help" for usage.`);
     process.exit(1);
   }
@@ -3700,7 +3700,7 @@ export async function main() {
   try {
     await command.execute(commandArgs, commandName);
   } catch (error) {
-    console.error('❌ Command failed:', error);
+    console.error(`${symbols.error} Command failed:`, error);
     process.exit(1);
   }
 }
@@ -3740,7 +3740,8 @@ function showCommandHelp(cmd: Command, invokedName: string) {
 }
 
 // Only run main if this file is executed directly
-// @ts-ignore
-if (require.main === module) {
+import { fileURLToPath } from 'url';
+import { realpathSync } from 'fs';
+if (process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])) {
   main();
 }

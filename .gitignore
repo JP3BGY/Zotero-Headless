@@ -5,8 +5,8 @@ node_modules/
 dist/
 build/
 dist-package/
+apps/cli/bundle/
 apps/shell/bundle/
-apps/cli-bundle/dist/
 
 # Package artifacts
 *.tgz

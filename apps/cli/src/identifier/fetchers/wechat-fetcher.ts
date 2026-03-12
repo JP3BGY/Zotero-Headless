@@ -30,7 +30,7 @@ export class WeChatFetcher extends BaseFetcher {
   async fetchMetadata(identifier: Identifier): Promise<MetadataResult> {
     const url = identifier.normalized;
     
-    console.log('📥 Fetching WeChat article...');
+    console.log('Fetching WeChat article...');
     
     // 1. 下载文章（使用微信特定的 headers，必须接受 gzip）
     const html = await this.downloadArticle(url);
@@ -41,11 +41,11 @@ export class WeChatFetcher extends BaseFetcher {
     }
     
     // 2. 解析元数据
-    console.log('🔍 Parsing metadata...');
+    console.log('Parsing metadata...');
     const meta = this.parseMetadata(html, url);
     
     // 3. 提取内容
-    console.log('📝 Extracting content...');
+    console.log('Extracting content...');
     const content = this.extractContent(html);
     if (!content) {
       throw new Error('Could not extract content from the article. The page structure may have changed.');

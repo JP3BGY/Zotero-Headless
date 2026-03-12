@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'js-yaml';
+import { symbols } from './symbols.js';
 
 export interface ZoteroConfig {
   // Default settings
@@ -21,6 +22,7 @@ export interface ZoteroConfig {
   display?: {
     defaultLimit?: number;
     showAttachments?: boolean;
+    collapseOutput?: boolean;
   };
   
   // Download settings
@@ -30,6 +32,18 @@ export interface ZoteroConfig {
   
   // Shortcuts for common queries
   shortcuts?: Record<string, string>;
+
+  // Shell keybindings
+  keybindings?: {
+    submit?: string;       // default: "enter"
+    historyUp?: string;    // default: "up"
+    historyDown?: string;  // default: "down"
+    scrollUp?: string;     // default: "pageup"
+    scrollDown?: string;   // default: "pagedown"
+    complete?: string;     // default: "tab"
+    clear?: string;        // default: "ctrl+l"
+    exit?: string;         // default: "ctrl+d"
+  };
 }
 
 const DEFAULT_CONFIG: ZoteroConfig = {
@@ -42,11 +56,22 @@ const DEFAULT_CONFIG: ZoteroConfig = {
   display: {
     defaultLimit: 20,
     showAttachments: true,
+    collapseOutput: true,
   },
   download: {
     defaultDir: path.join(os.homedir(), '.local', 'share', 'zotero-headless', 'downloads'),
   },
   shortcuts: {},
+  keybindings: {
+    submit: 'enter',
+    historyUp: 'up',
+    historyDown: 'down',
+    scrollUp: 'pageup',
+    scrollDown: 'pagedown',
+    complete: 'tab',
+    clear: 'ctrl+l',
+    exit: 'ctrl+d',
+  },
 };
 
 export class ConfigManager {
@@ -118,7 +143,7 @@ export class ConfigManager {
   init(): void {
     if (!fs.existsSync(this.configPath)) {
       this.save();
-      console.log(`✅ Created default config at ${this.configPath}`);
+      console.log(`${symbols.success} Created default config at ${this.configPath}`);
     }
   }
 

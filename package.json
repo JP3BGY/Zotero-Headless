@@ -3,22 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "description": "Zotero Web API 同步客户端 - 无需桌面客户端即可实现文献库同步",
-  "bin": {
-    "zotero": "./bin/zotero.mjs",
-    "zotero.cmd": "./bin/zotero.cmd",
-    "zotero-sh": "./bin/zotero-sh.mjs"
-  },
-  "files": [
-    "bin/**/*",
-    "apps/**/dist/**/*",
-    "packages/**/dist/**/*",
-    "scripts/**/*",
-    "package.json",
-    "pnpm-workspace.yaml",
-    "turbo.json"
-  ],
   "scripts": {
     "build": "turbo run build",
+    "bundle": "turbo run bundle --filter=@zotero-headless/cli --filter=@zotero-headless/shell",
+    "package": "node scripts/package-for-npm.js",
     "dev": "turbo run dev",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -33,7 +21,6 @@
     "@types/better-sqlite3": "^7.5.0",
     "@types/node": "^25.2.3",
     "@vitest/coverage-v8": "^2.0.0",
-    "esbuild": "^0.27.3",
     "prettier": "^3.2.0",
     "tar": "^7.5.9",
     "tsup": "^8.5.1",
@@ -42,18 +29,5 @@
     "typescript": "^5.9.3",
     "vitest": "^2.1.9"
   },
-  "packageManager": "pnpm@8.12.0",
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
-  "dependencies": {
-    "axios": "^1.13.5",
-    "better-sqlite3": "^11.9.1",
-    "commander": "^14.0.3",
-    "dotenv": "^17.3.1",
-    "drizzle-orm": "^0.30.10",
-    "sql.js": "^1.14.0",
-    "zod": "^4.3.6"
-  }
+  "packageManager": "pnpm@8.12.0"
 }

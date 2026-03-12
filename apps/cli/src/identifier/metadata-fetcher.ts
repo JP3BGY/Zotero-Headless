@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { Identifier, MetadataResult, FetcherConfig } from './types.js';
+import { symbols } from '@zotero-headless/core';
 import { DOIFetcher } from './fetchers/doi-fetcher.js';
 import { ISBNFetcher } from './fetchers/isbn-fetcher.js';
 import { PMIDFetcher } from './fetchers/pmid-fetcher.js';
@@ -66,15 +67,15 @@ export class MetadataFetcher {
     for (let i = 0; i < identifiers.length; i += batchSize) {
       const batch = identifiers.slice(i, i + batchSize);
       
-      console.log(`\n📦 处理第 ${Math.floor(i / batchSize) + 1} 批 (${batch.length} 个)...`);
+      console.log(`\n处理第 ${Math.floor(i / batchSize) + 1} 批 (${batch.length} 个)...`);
       
       const batchPromises = batch.map(async (identifier) => {
         try {
           const result = await this.fetch(identifier);
-          console.log(`   ✅ ${identifier.type.toUpperCase()}: ${identifier.value}`);
+          console.log(`   ${symbols.success} ${identifier.type.toUpperCase()}: ${identifier.value}`);
           return result;
         } catch (error) {
-          console.log(`   ❌ ${identifier.type.toUpperCase()}: ${identifier.value} - ${(error as Error).message}`);
+          console.log(`   ${symbols.error} ${identifier.type.toUpperCase()}: ${identifier.value} - ${(error as Error).message}`);
           return {
             identifier,
             data: null,

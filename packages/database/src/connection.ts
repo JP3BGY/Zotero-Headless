@@ -6,7 +6,7 @@ import path from 'path';
 import BetterSQLite3 from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema.js';
-import { appConfig } from '@zotero-headless/core';
+import { appConfig, symbols } from '@zotero-headless/core';
 
 // Re-export schema
 export * from './schema.js';
@@ -21,9 +21,9 @@ let sqliteInstance: BetterSQLite3.Database | null = null;
 /**
  * Get raw SQLite instance for executing raw SQL
  */
-export function getRawSQLite(): BetterSQLite3.Database {
+export function getRawSQLite(options?: { quiet?: boolean }): BetterSQLite3.Database {
   if (!sqliteInstance) {
-    initializeDatabase();
+    initializeDatabase(options);
   }
   if (!sqliteInstance) {
     throw new Error('Failed to initialize SQLite instance');
@@ -34,10 +34,11 @@ export function getRawSQLite(): BetterSQLite3.Database {
 /**
  * Initialize database connection
  */
-export function initializeDatabase(): Database {
+export function initializeDatabase(options?: { quiet?: boolean }): Database {
   if (db) {
     return db;
   }
+  const quiet = options?.quiet ?? false;
 
   const dbPath = appConfig.database.path;
   
@@ -45,7 +46,7 @@ export function initializeDatabase(): Database {
   const dbDir = path.dirname(dbPath);
   if (!fs.existsSync(dbDir)) {
     fs.mkdirSync(dbDir, { recursive: true });
-    console.log(`📁 Created database directory: ${dbDir}`);
+    console.log(`Created database directory: ${dbDir}`);
   }
   
   // Open database connection
@@ -188,20 +189,22 @@ export function initializeDatabase(): Database {
     const hasWebdavSynced = columns.some(col => col.name === 'webdav_synced');
     
     if (!hasWebdavSynced) {
-      console.log('🔄 Migrating database: Adding WebDAV columns to attachments...');
+      console.log('Migrating database: Adding WebDAV columns to attachments...');
       sqliteInstance.exec(`
         ALTER TABLE attachments ADD COLUMN webdav_synced INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE attachments ADD COLUMN webdav_path TEXT;
         ALTER TABLE attachments ADD COLUMN webdav_synced_at INTEGER;
       `);
-      console.log('✅ Migration complete');
+      console.log(`${symbols.success} Migration complete`);
     }
   } catch (e) {
-    console.warn('⚠️ Database migration warning:', e);
+    console.warn(`${symbols.warning} Database migration warning:`, e);
   }
   
-  console.log(`📂 Database initialized: ${dbPath}`);
-  
+  if (!quiet) {
+    console.log(`${symbols.success} Database initialized: ${dbPath}`);
+  }
+
   return db;
 }
 
@@ -223,7 +226,7 @@ export function closeDatabase(): void {
     sqliteInstance.close();
     sqliteInstance = null;
     db = null;
-    console.log('📂 Database connection closed');
+    console.log('Database connection closed');
   }
 }
 

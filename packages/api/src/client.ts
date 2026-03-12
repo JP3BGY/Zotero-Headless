@@ -278,7 +278,7 @@ export class ZoteroAPIClient {
       }
     }
     
-    console.log(`   📤 Sending ${items.length} item(s) to API`);
+    console.log(`   Sending ${items.length} item(s) to API`);
     items.forEach((item, i) => {
       console.log(`      [${i}] key=${item.key}, type=${item.itemType}, version=${item.version}`);
     });

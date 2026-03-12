@@ -6,6 +6,7 @@
 
 ## 目录
 
+- [从源码构建](#从源码构建)
 - [GitHub Actions 自动构建](#github-actions-自动构建)
   - [构建 npm 包](#构建-npm-包)
   - [构建 Docker 镜像](#构建-docker-镜像)
@@ -14,6 +15,68 @@
   - [Windows 安装](#windows-安装)
 - [配置](#配置)
 - [故障排除](#故障排除)
+
+---
+
+## 从源码构建
+
+### 前提条件
+
+- Node.js ≥ 18.0.0
+- pnpm 8.x（`npm install -g pnpm@8`）
+
+### 开发模式
+
+```bash
+# 1. 安装依赖
+pnpm install
+
+# 2. 编译所有包（TypeScript → JavaScript）
+pnpm build
+
+# 3. 运行 CLI
+pnpm --filter @zotero-headless/cli exec zotero help
+
+# 4. 启动交互式 Shell
+node bin/zotero-sh.mjs
+```
+
+### 打包发布
+
+```bash
+# 一步打包：编译 → tsup 打包 → 生成 .tgz
+pnpm package
+
+# 也可以分步执行：
+pnpm build           # TypeScript 编译
+pnpm bundle          # tsup 打包 CLI 和 Shell 为单文件
+node scripts/package-for-npm.js   # 收集产物生成 .tgz
+
+# 安装测试
+npm install -g ./zotero-headless-*.tgz
+zotero help
+zotero-sh
+```
+
+### 构建产物说明
+
+| 产物 | 路径 | 说明 |
+|------|------|------|
+| TypeScript 编译输出 | `*/dist/` | 每个包各自的 `dist/` 目录 |
+| CLI 单文件包 | `apps/cli/bundle/zotero.cjs` | CJS 格式，含 shebang |
+| Shell 单文件包 | `apps/shell/bundle/shell.mjs` | ESM 格式，含 shebang + createRequire |
+| npm 发布包 | `zotero-headless-*.tgz` | 可直接 `npm install -g` |
+
+### 常用开发命令
+
+```bash
+pnpm build          # 编译所有包
+pnpm typecheck      # 类型检查（不输出文件）
+pnpm test           # 运行测试（vitest）
+pnpm lint           # 代码检查
+pnpm bundle         # tsup 打包 CLI + Shell
+pnpm package        # 完整打包流程 → .tgz
+```
 
 ---
 
@@ -57,21 +120,14 @@ jobs:
         with:
           version: 8.12.0
 
-      - name: Build
+      - name: Build and Package
         run: |
           pnpm install
-          pnpm build
-
-      - name: Package
-        run: |
-          VERSION=${{ steps.get_version.outputs.VERSION }}
-          mkdir -p dist-package
-          cp -r apps/cli/dist dist-package/
-          tar -czf zotero-headless-${VERSION}.tgz dist-package/
+          pnpm package
 
       - uses: actions/upload-artifact@v4
         with:
-          name: zotero-headless-${{ steps.get_version.outputs.VERSION }}
+          name: zotero-headless-package
           path: zotero-headless-*.tgz
           retention-days: 30
 ```
@@ -299,9 +355,10 @@ zotero verify
 | 问题 | 解决 |
 |------|------|
 | "git is not recognized" | 安装 Git for Windows |
-| "pnpm is not recognized" | `npm install -g pnpm` |
-| "node-gyp rebuild fails" | `npm install -g windows-build-tools` |
-| "permission denied" | Linux/macOS: `chmod +x $(npm root -g)/zotero-headless/dist/index.js` |
+| "pnpm is not recognized" | `npm install -g pnpm@8` |
+| "node-gyp rebuild fails" | `npm install -g windows-build-tools`（仅 Windows） |
+| types 包 build 报 TS5055 | 运行 `rm -rf packages/types/dist` 后重新 build |
+| tsup 找不到 | 确认 `pnpm install` 已在根目录执行（tsup 在根 devDependencies） |
 
 ### GitHub Actions 问题
 
