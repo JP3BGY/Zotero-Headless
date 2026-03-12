@@ -1,5 +1,5 @@
 const lang = process.env.ZOTERO_LANG || 'zh';
-const isEnglish = lang === 'en';
+export const isEnglish = lang === 'en';
 
 export const t = {
   welcome: 'Zotero Shell v1.0.0',

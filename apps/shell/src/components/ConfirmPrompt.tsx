@@ -1,9 +1,7 @@
 import React from 'react';
 import { Box, Text, useInput } from 'ink';
 import { useShellState } from '../hooks/useShellState.js';
-
-const lang = process.env.ZOTERO_LANG || 'zh';
-const isEnglish = lang === 'en';
+import { isEnglish } from '../i18n.js';
 
 export function ConfirmPrompt() {
   const { state, dispatch } = useShellState();

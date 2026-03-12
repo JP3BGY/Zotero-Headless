@@ -20,6 +20,12 @@ export function useKeyHandler() {
   const completions = useCompletions();
   const kb = useKeybindings();
 
+  const doExit = useCallback(() => {
+    addLine('info', t.goodbye);
+    dispatch({ type: 'SET_MODE', mode: 'exiting' });
+    setTimeout(() => exit(), 100);
+  }, [addLine, dispatch, exit]);
+
   const runCliCommand = useCallback(async (parsedCmd: string, args: string[], originalInput: string) => {
     dispatch({ type: 'START_COMMAND', command: originalInput });
 
@@ -77,9 +83,7 @@ export function useKeyHandler() {
       return;
     }
     if (parsedCmd === 'exit' || parsedCmd === 'quit' || parsedCmd === 'q') {
-      addLine('info', t.goodbye);
-      dispatch({ type: 'SET_MODE', mode: 'exiting' });
-      setTimeout(() => exit(), 100);
+      doExit();
       return;
     }
     if (parsedCmd === 'help') {
@@ -112,7 +116,7 @@ export function useKeyHandler() {
 
     // Regular CLI command
     await runCliCommand(parsedCmd, args, cmd);
-  }, [state.mode, dispatch, history, addLine, exit, runCliCommand]);
+  }, [state.mode, dispatch, history, addLine, doExit, runCliCommand]);
 
   const handleTab = useCallback(() => {
     const { input } = state;
@@ -175,9 +179,7 @@ export function useKeyHandler() {
     const isDoublePress = now - lastCtrlCTime.current < CTRL_C_WINDOW;
 
     if (isDoublePress) {
-      addLine('info', t.goodbye);
-      dispatch({ type: 'SET_MODE', mode: 'exiting' });
-      setTimeout(() => exit(), 100);
+      doExit();
       return;
     }
 
@@ -201,7 +203,7 @@ export function useKeyHandler() {
     } else {
       addLine('info', t.ctrlCHint);
     }
-  }, [state.mode, state.input, dispatch, addLine, exit]);
+  }, [state.mode, state.input, dispatch, addLine, doExit]);
 
   useInput((input, key) => {
     // Ctrl+C: handle in all modes
@@ -225,9 +227,7 @@ export function useKeyHandler() {
     }
 
     if (kb.match('exit', input, key)) {
-      addLine('info', t.goodbye);
-      dispatch({ type: 'SET_MODE', mode: 'exiting' });
-      setTimeout(() => exit(), 100);
+      doExit();
       return;
     }
 

@@ -128,11 +128,12 @@ function shellReducer(state: ShellState, action: ShellAction): ShellState {
       let collapsedGroups = state.collapsedGroups;
       if (action.autoCollapse && state.currentInputLineId !== null) {
         // Only collapse if the group has output lines
+        const gid = state.currentInputLineId;
         const hasOutput = lines.some(
-          l => l.groupId === state.currentInputLineId && l.type !== 'input'
+          l => l.groupId === gid && l.type !== 'input'
         );
         if (hasOutput) {
-          collapsedGroups = { ...collapsedGroups, [state.currentInputLineId]: true };
+          collapsedGroups = { ...collapsedGroups, [gid]: true };
         }
       }
 
@@ -185,15 +186,20 @@ function shellReducer(state: ShellState, action: ShellAction): ShellState {
       return { ...state, collapsedGroups: {} };
 
     case 'COLLAPSE_ALL': {
+      // Precompute which groupIds have non-input children in a single pass
+      const groupsWithChildren = new Set<number>();
+      for (const l of state.lines) {
+        if (l.groupId != null && l.type !== 'input') {
+          groupsWithChildren.add(l.groupId);
+        }
+      }
+
       const allGroups: Record<number, true> = {};
       const seen = new Set<number>();
       for (const line of state.lines) {
         if (line.type === 'input' && line.groupId != null && !seen.has(line.groupId)) {
           seen.add(line.groupId);
-          const hasChildren = state.lines.some(
-            l => l.groupId === line.groupId && l.type !== 'input'
-          );
-          if (hasChildren) {
+          if (groupsWithChildren.has(line.groupId)) {
             allGroups[line.groupId] = true;
           }
         }

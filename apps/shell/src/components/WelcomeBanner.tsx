@@ -1,13 +1,12 @@
 import React from 'react';
 import { Box, Text, useStdout } from 'ink';
-import { appConfig } from '@zotero-headless/core';
-import { getRawSQLite } from '@zotero-headless/database';
+import { isEnglish } from '../i18n.js';
+import { formatRelativeTime } from '../utils/formatTime.js';
+import { loadDbInfo } from '../utils/dbInfo.js';
 
 const ZOTERO_COLOR = 'rgb(204,51,51)';
 const VERSION = '1.0.0';
 const NARROW_THRESHOLD = 60;
-
-const isEnglish = (process.env.ZOTERO_LANG || 'zh') === 'en';
 
 const LOGO_LINES = [
   '▐█████▌',
@@ -15,53 +14,6 @@ const LOGO_LINES = [
   ' ▟█▘   ',
   '▐█████▌',
 ];
-
-interface WelcomeInfo {
-  userId: string;
-  itemCount: number;
-  dbConnected: boolean;
-  lastSync: string | null;
-  cwd: string;
-}
-
-function loadWelcomeInfo(): WelcomeInfo {
-  const info: WelcomeInfo = {
-    userId: appConfig.zotero.userId || '?',
-    itemCount: 0,
-    dbConnected: false,
-    lastSync: null,
-    cwd: process.cwd(),
-  };
-
-  try {
-    const db = getRawSQLite({ quiet: true });
-    if (!db) return info;
-    info.dbConnected = true;
-
-    const row = db.prepare('SELECT COUNT(*) as cnt FROM items WHERE deleted = 0').get() as any;
-    info.itemCount = row?.cnt ?? 0;
-
-    const syncRow = db.prepare(
-      "SELECT completed_at FROM sync_logs WHERE status = 'completed' ORDER BY completed_at DESC LIMIT 1"
-    ).get() as any;
-    if (syncRow?.completed_at) {
-      const d = new Date(syncRow.completed_at * 1000);
-      const diff = Date.now() - d.getTime();
-      const min = Math.floor(diff / 60000);
-      if (min < 1) info.lastSync = 'just now';
-      else if (min < 60) info.lastSync = `${min}m ago`;
-      else {
-        const hrs = Math.floor(min / 60);
-        if (hrs < 24) info.lastSync = `${hrs}h ago`;
-        else info.lastSync = `${Math.floor(hrs / 24)}d ago`;
-      }
-    }
-  } catch {
-    // DB not ready
-  }
-
-  return info;
-}
 
 function shortenPath(p: string, maxLen: number): string {
   const home = process.env.HOME || process.env.USERPROFILE || '';
@@ -73,33 +25,6 @@ function shortenPath(p: string, maxLen: number): string {
     s = '…' + s.slice(s.length - maxLen + 1);
   }
   return s;
-}
-
-/** Visible width (CJK = 2) */
-function strWidth(s: string): number {
-  let w = 0;
-  for (const ch of s) {
-    const code = ch.codePointAt(0)!;
-    if (
-      (code >= 0x4e00 && code <= 0x9fff) || (code >= 0x3400 && code <= 0x4dbf) ||
-      (code >= 0xf900 && code <= 0xfaff) || (code >= 0xff01 && code <= 0xff60) ||
-      (code >= 0xffe0 && code <= 0xffe6) || (code >= 0x20000 && code <= 0x2fa1f)
-    ) {
-      w += 2;
-    } else {
-      w += 1;
-    }
-  }
-  return w;
-}
-
-function pad(s: string, tw: number, align: 'center' | 'left' = 'center'): string {
-  const sw = strWidth(s);
-  if (sw >= tw) return s;
-  const gap = tw - sw;
-  if (align === 'left') return s + ' '.repeat(gap);
-  const l = Math.floor(gap / 2);
-  return ' '.repeat(l) + s + ' '.repeat(gap - l);
 }
 
 /**
@@ -144,10 +69,10 @@ export function WelcomeBanner() {
     );
   }
 
-  const info = loadWelcomeInfo();
+  const info = loadDbInfo();
   const dbLabel = info.dbConnected ? 'connected' : 'disconnected';
   const dbColor = info.dbConnected ? 'green' : 'red';
-  const syncLabel = info.lastSync ?? 'never';
+  const syncLabel = info.lastSyncDate ? formatRelativeTime(info.lastSyncDate) : 'never';
 
   // Layout
   const innerWidth = width - 2;

@@ -21,6 +21,14 @@ export function useVisibleLines(state: ShellState): VisibleLine[] {
   const { lines, collapsedGroups } = state;
 
   return useMemo(() => {
+    // Precompute per-group counts of non-input lines in a single pass
+    const groupCounts = new Map<number, number>();
+    for (const line of lines) {
+      if (line.groupId != null && line.type !== 'input') {
+        groupCounts.set(line.groupId, (groupCounts.get(line.groupId) ?? 0) + 1);
+      }
+    }
+
     const result: VisibleLine[] = [];
     const emittedCollapsedGroups = new Set<number>();
 
@@ -35,9 +43,7 @@ export function useVisibleLines(state: ShellState): VisibleLine[] {
       if (line.groupId != null && collapsedGroups[line.groupId]) {
         if (!emittedCollapsedGroups.has(line.groupId)) {
           emittedCollapsedGroups.add(line.groupId);
-          const count = lines.filter(
-            l => l.groupId === line.groupId && l.type !== 'input'
-          ).length;
+          const count = groupCounts.get(line.groupId) ?? 0;
           if (count > 0) {
             result.push({
               kind: 'collapsed',
