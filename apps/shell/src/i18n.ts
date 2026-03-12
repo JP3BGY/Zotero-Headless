@@ -6,7 +6,6 @@ export const t = {
   subtitle: isEnglish ? 'Type "help" for commands, or "exit" to quit' : '输入 "help" 查看可用命令，或 "exit" 退出',
   shortcuts: isEnglish ? 'Tab=complete, ↑↓=history, Ctrl+C×2=exit' : 'Tab=补全, ↑↓=历史, Ctrl+C×2=退出',
   executing: isEnglish ? 'Executing...' : '执行中...',
-  moreMatches: (n: number) => isEnglish ? `... ${n} more matches` : `... 还有 ${n} 个匹配`,
   goodbye: isEnglish ? 'Goodbye!' : '再见!',
   ctrlCHint: isEnglish ? 'Press Ctrl+C again to exit.' : '再按一次 Ctrl+C 退出。',
   unknownCommand: (cmd: string) => isEnglish ? `Unknown command: ${cmd}` : `未知命令: ${cmd}`,
