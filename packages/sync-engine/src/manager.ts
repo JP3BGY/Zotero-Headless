@@ -1047,7 +1047,7 @@ export class SyncManager extends EventEmitter {
       if (childAttachments.length > 0) {
         console.log(`    Cascading delete: ${childAttachments.length} attachment(s) of ${parentKey}`);
         await this.db.update(items)
-          .set({ deleted: true, updatedAt: Math.floor(Date.now() / 1000), synced: false })
+          .set({ deleted: true, deletedAt: Math.floor(Date.now() / 1000), updatedAt: Math.floor(Date.now() / 1000), synced: false })
           .where(and(
             eq(items.libraryId, libraryId),
             eq(items.itemType, 'attachment'),
@@ -1059,7 +1059,7 @@ export class SyncManager extends EventEmitter {
 
     // Then mark the parent items as deleted
     await this.db.update(items)
-      .set({ deleted: true, updatedAt: Math.floor(Date.now() / 1000), synced: false })
+      .set({ deleted: true, deletedAt: Math.floor(Date.now() / 1000), updatedAt: Math.floor(Date.now() / 1000), synced: false })
       .where(and(
         eq(items.libraryId, libraryId),
         inArray(items.key, keys)

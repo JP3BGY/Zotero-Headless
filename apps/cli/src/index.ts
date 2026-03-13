@@ -2342,6 +2342,22 @@ const commands: Command[] = [
         }
 
         if (permanent) {
+          // Check trash retention period
+          if (item.deletedAt) {
+            const { configManager } = await import('@zotero-headless/core');
+            const retentionDays = configManager.get('delete')?.trashRetentionDays ?? 7;
+            const retentionSeconds = retentionDays * 24 * 60 * 60;
+            const now = Math.floor(Date.now() / 1000);
+            const elapsed = now - item.deletedAt;
+            if (elapsed < retentionSeconds) {
+              const availableDate = new Date((item.deletedAt + retentionSeconds) * 1000).toLocaleDateString();
+              console.log(`${symbols.error} Cannot permanently delete: item has been in trash for less than ${retentionDays} days.`);
+              console.log(`   Permanent deletion available after: ${availableDate}`);
+              console.log(`   Use "zotero restore ${key}" to recover from trash.`);
+              process.exit(1);
+            }
+          }
+
           // Permanent delete: remove from local DB immediately
           // Sync will detect it's gone and delete from remote
           console.log(`   Marking ${key} for permanent deletion...`);
@@ -2386,6 +2402,7 @@ const commands: Command[] = [
               deleted: true,
               synced: false,
               updatedAt: Math.floor(Date.now() / 1000),  // 使用秒级时间戳
+              deletedAt: Math.floor(Date.now() / 1000),  // Track when trashed
               rawJson: JSON.stringify({ ...rawData, data })
             })
             .where(and(eq(items.key, key), eq(items.libraryId, library.id)))

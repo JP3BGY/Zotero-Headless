@@ -33,6 +33,11 @@ export interface ZoteroConfig {
   // Shortcuts for common queries
   shortcuts?: Record<string, string>;
 
+  // Delete safety settings
+  delete?: {
+    trashRetentionDays?: number;  // Days before trashed items can be permanently deleted (default: 7)
+  };
+
   // Shell keybindings
   keybindings?: {
     submit?: string;       // default: "enter"
@@ -62,6 +67,9 @@ const DEFAULT_CONFIG: ZoteroConfig = {
     defaultDir: path.join(os.homedir(), '.local', 'share', 'zotero-headless', 'downloads'),
   },
   shortcuts: {},
+  delete: {
+    trashRetentionDays: 7,
+  },
   keybindings: {
     submit: 'enter',
     historyUp: 'up',
