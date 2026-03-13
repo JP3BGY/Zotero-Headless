@@ -8,7 +8,7 @@ import { existsSync } from 'fs';
 import { appConfig, symbols } from '@zotero-headless/core';
 import { eq, like, desc, asc, count, and, isNull, sql } from 'drizzle-orm';
 import { ProgressBar } from './progress-bar.js';
-import { resolveConflictsInteractive, isInteractive, ConflictItem } from './conflict-resolver.js';
+import { resolveConflictsInteractive, isInteractive, createPrompt, ConflictItem } from './conflict-resolver.js';
 import { t, setLanguage, getLanguage, formatItemType, formatField, type Language } from './i18n.js';
 
 // Lazy-loaded modules (to avoid initialization on help commands)
@@ -2298,6 +2298,7 @@ const commands: Command[] = [
     options: [
       { name: '--force', alias: '-f', description: 'Permanently delete (skip trash)' },
       { name: '--permanent', alias: '-p', description: 'Same as --force' },
+      { name: '--yes', alias: '-y', description: 'Skip confirmation prompt' },
     ],
     examples: [
       'zotero delete ABC123',
@@ -2311,6 +2312,7 @@ const commands: Command[] = [
       const key = args[0];
       const permanent = args.includes('--permanent') || args.includes('-p');
       const force = args.includes('--force') || args.includes('-f');
+      const skipConfirm = args.includes('--yes') || args.includes('-y');
 
       if (!key) {
         console.log(`${symbols.error} Usage: zotero delete <key> [--permanent]`);
@@ -2337,6 +2339,30 @@ const commands: Command[] = [
         if (!item) {
           console.log(`${symbols.error} Item ${key} not found.`);
           process.exit(1);
+        }
+
+        // Confirmation prompt
+        if (!skipConfirm) {
+          if (!isInteractive()) {
+            console.log(`${symbols.error} ${t('commands.delete.nonInteractive')}`);
+            process.exit(1);
+          }
+
+          const title = item.title || '(no title)';
+          const promptMsg = (permanent || force)
+            ? t('commands.delete.confirmPermanent', title, key)
+            : t('commands.delete.confirmTrash', title, key);
+
+          const rl = createPrompt();
+          const answer = await new Promise<string>((resolve) => {
+            rl.question(promptMsg, (ans) => resolve(ans));
+          });
+          rl.close();
+
+          if (!['y', 'yes'].includes(answer.trim().toLowerCase())) {
+            console.log(`${symbols.warning} ${t('commands.delete.cancelled')}`);
+            return;
+          }
         }
 
         if (permanent) {

@@ -76,6 +76,10 @@ const en: Translations = {
       deleting: 'Deleting item...',
       deleted: (key: string) => `Item deleted: ${key}`,
       error: 'Failed to delete item',
+      confirmTrash: (title: string, key: string) => `Move "${title}" (${key}) to trash? [y/N]: `,
+      confirmPermanent: (title: string, key: string) => `PERMANENTLY delete "${title}" (${key})? This CANNOT be undone! [y/N]: `,
+      cancelled: 'Delete cancelled.',
+      nonInteractive: 'Delete requires confirmation. Use --yes to skip in non-interactive mode.',
     },
     export: {
       exporting: 'Exporting...',
@@ -212,6 +216,10 @@ const zh: Translations = {
       deleting: '删除文献...',
       deleted: (key: string) => `文献已删除: ${key}`,
       error: '删除文献失败',
+      confirmTrash: (title: string, key: string) => `将 "${title}" (${key}) 移入回收站？[y/N]: `,
+      confirmPermanent: (title: string, key: string) => `永久删除 "${title}" (${key})？此操作不可撤销！[y/N]: `,
+      cancelled: '删除已取消。',
+      nonInteractive: '删除需要确认。在非交互模式下请使用 --yes 跳过确认。',
     },
     export: {
       exporting: '导出中...',
