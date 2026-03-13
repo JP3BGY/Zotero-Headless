@@ -2318,16 +2318,15 @@ const commands: Command[] = [
       console.log(' Deleting item locally...\n');
 
       const key = args[0];
-      let permanent = args.includes('--permanent') || args.includes('-p');
-      let force = args.includes('--force') || args.includes('-f');
+      let isPermanent = args.includes('--permanent') || args.includes('-p')
+        || args.includes('--force') || args.includes('-f');
       const skipConfirm = args.includes('--yes') || args.includes('-y');
       const dryRun = args.includes('--dry-run') || args.includes('-n');
 
       // Restrict permanent delete to shell mode only
-      if ((permanent || force) && !_shellMode) {
+      if (isPermanent && !_shellMode) {
         console.log(`${symbols.warning} ${t('commands.delete.shellOnly')}`);
-        permanent = false;
-        force = false;
+        isPermanent = false;
       }
 
       if (!key) {
@@ -2365,7 +2364,7 @@ const commands: Command[] = [
           }
 
           const title = item.title || '(no title)';
-          const promptMsg = (permanent || force)
+          const promptMsg = isPermanent
             ? t('commands.delete.confirmPermanent', title, key)
             : t('commands.delete.confirmTrash', title, key);
 
@@ -2382,7 +2381,6 @@ const commands: Command[] = [
         }
 
         if (dryRun) {
-          const isPermanent = permanent || force;
 
           // Count child attachments
           let childCount = 0;
@@ -2411,7 +2409,7 @@ const commands: Command[] = [
           return;
         }
 
-        if (permanent || force) {
+        if (isPermanent) {
           // Check trash retention period
           if (item.deletedAt) {
             const { configManager } = await import('@zotero-headless/core');

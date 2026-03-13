@@ -226,11 +226,13 @@ export async function deleteItem(
   });
 
   // 始终软删除（移到回收站）
+  const now = Math.floor(Date.now() / 1000);
   await db.update(items)
     .set({
       deleted: true,
-      deletedAt: Math.floor(Date.now() / 1000),
-      dateModified: Math.floor(Date.now() / 1000)
+      deletedAt: now,
+      updatedAt: now,
+      synced: false,
     })
     .where(eq(items.key, key))
     .run();
@@ -305,7 +307,8 @@ export async function restoreItem(key: string): Promise<void> {
     .set({
       deleted: false,
       deletedAt: null,
-      dateModified: Math.floor(Date.now() / 1000)
+      updatedAt: Math.floor(Date.now() / 1000),
+      synced: false,
     })
     .where(eq(items.key, key))
     .run();

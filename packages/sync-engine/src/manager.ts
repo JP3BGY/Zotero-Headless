@@ -3,7 +3,7 @@
 // See Zotero-Headless-Complete-Design.md Section 5
 
 import { EventEmitter } from 'events';
-import { getDatabase, getRawSQLite, libraries, items, collections, itemTags, syncLogs, attachments, webdavConfig, type Database } from '@zotero-headless/database';
+import { getDatabase, getRawSQLite, libraries, items, collections, itemTags, syncLogs, attachments, webdavConfig, logDeletion, type Database } from '@zotero-headless/database';
 import { ZoteroAPIClient } from '@zotero-headless/api';
 import { appConfig, symbols } from '@zotero-headless/core';
 import { ConflictResolver, conflictResolver } from './conflict.js';
@@ -1043,9 +1043,16 @@ export class SyncManager extends EventEmitter {
           eq(items.rawJson, `%"parentItem":"${parentKey}"%`)
         ))
         .all();
-      
+
       if (childAttachments.length > 0) {
         console.log(`    Cascading delete: ${childAttachments.length} attachment(s) of ${parentKey}`);
+        for (const child of childAttachments) {
+          await logDeletion({
+            itemKey: child.key, libraryId, title: child.title,
+            itemType: child.itemType, operationType: 'soft', caller: 'sync',
+            rawJsonSnapshot: child.rawJson,
+          });
+        }
         await this.db.update(items)
           .set({ deleted: true, deletedAt: Math.floor(Date.now() / 1000), updatedAt: Math.floor(Date.now() / 1000), synced: false })
           .where(and(
@@ -1055,6 +1062,19 @@ export class SyncManager extends EventEmitter {
           ))
           .run();
       }
+    }
+
+    // Log parent item deletions
+    const parentItems = await this.db.select()
+      .from(items)
+      .where(and(eq(items.libraryId, libraryId), inArray(items.key, keys)))
+      .all();
+    for (const item of parentItems) {
+      await logDeletion({
+        itemKey: item.key, libraryId, title: item.title,
+        itemType: item.itemType, operationType: 'soft', caller: 'sync',
+        rawJsonSnapshot: item.rawJson,
+      });
     }
 
     // Then mark the parent items as deleted
