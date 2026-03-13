@@ -16,7 +16,7 @@ import type {
   BatchOptions,
   BatchResult 
 } from './types.js';
-import { ItemNotFoundError, ValidationError } from './types.js';
+import { ItemNotFoundError, ValidationError, BATCH_DELETE_LIMIT } from './types.js';
 
 // 延迟加载数据库模块
 let dbModule: any;
@@ -193,33 +193,31 @@ export async function getItemOrThrow(key: string): Promise<Item> {
  * 删除文献
  */
 export async function deleteItem(
-  key: string, 
+  key: string,
   options: DeleteOptions = {}
 ): Promise<void> {
   const { getDatabase, items } = await getDb();
   const db = getDatabase();
-  
+
+  // Agent API 安全限制：不允许永久删除
+  if (options.permanent) {
+    console.warn('Warning: permanent delete is not allowed via agent API. Moving to trash instead.');
+  }
+
   // 检查项目是否存在
   const existing = await getItem(key);
   if (!existing) {
     throw new ItemNotFoundError(key);
   }
-  
-  if (options.permanent) {
-    // 永久删除
-    await db.delete(items)
-      .where(eq(items.key, key))
-      .run();
-  } else {
-    // 移到回收站
-    await db.update(items)
-      .set({ 
-        deleted: true,
-        dateModified: Math.floor(Date.now() / 1000)
-      })
-      .where(eq(items.key, key))
-      .run();
-  }
+
+  // 始终软删除（移到回收站）
+  await db.update(items)
+    .set({
+      deleted: true,
+      dateModified: Math.floor(Date.now() / 1000)
+    })
+    .where(eq(items.key, key))
+    .run();
 }
 
 /**
@@ -229,6 +227,14 @@ export async function batchDelete(
   keys: string[],
   options: DeleteOptions & BatchOptions = {}
 ): Promise<BatchResult> {
+  // Agent API 安全限制：批量删除数量上限
+  if (keys.length > BATCH_DELETE_LIMIT) {
+    throw new ValidationError(
+      `Batch delete limit exceeded: ${keys.length} items requested, maximum is ${BATCH_DELETE_LIMIT}. Delete in smaller batches.`,
+      'keys'
+    );
+  }
+
   const succeeded: string[] = [];
   const failed: Array<{ key: string; error: string }> = [];
   
