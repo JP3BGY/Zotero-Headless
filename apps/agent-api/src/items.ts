@@ -213,8 +213,9 @@ export async function deleteItem(
   } else {
     // 移到回收站
     await db.update(items)
-      .set({ 
+      .set({
         deleted: true,
+        deletedAt: Math.floor(Date.now() / 1000),
         dateModified: Math.floor(Date.now() / 1000)
       })
       .where(eq(items.key, key))
@@ -280,8 +281,9 @@ export async function restoreItem(key: string): Promise<void> {
   }
   
   await db.update(items)
-    .set({ 
+    .set({
       deleted: false,
+      deletedAt: null,
       dateModified: Math.floor(Date.now() / 1000)
     })
     .where(eq(items.key, key))

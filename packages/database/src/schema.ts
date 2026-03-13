@@ -37,6 +37,7 @@ export const items = sqliteTable('items', {
   version: integer('version').notNull().default(0),
   synced: integer('synced', { mode: 'boolean' }).notNull().default(false),
   deleted: integer('deleted', { mode: 'boolean' }).notNull().default(false),
+  deletedAt: integer('deleted_at'),  // Timestamp when item was moved to trash (null = not trashed)
   createdAt: integer('created_at', {  }).notNull(),
   updatedAt: integer('updated_at', {  }).notNull(),
   

@@ -200,7 +200,21 @@ export function initializeDatabase(options?: { quiet?: boolean }): Database {
   } catch (e) {
     console.warn(`${symbols.warning} Database migration warning:`, e);
   }
-  
+
+  // Migration: Add deleted_at column to items table
+  try {
+    const itemColumns = sqliteInstance.prepare(`PRAGMA table_info(items)`).all() as any[];
+    const hasDeletedAt = itemColumns.some(col => col.name === 'deleted_at');
+
+    if (!hasDeletedAt) {
+      if (!quiet) console.log('Migrating database: Adding deleted_at column to items...');
+      sqliteInstance.exec(`ALTER TABLE items ADD COLUMN deleted_at INTEGER;`);
+      if (!quiet) console.log(`${symbols.success} Migration complete`);
+    }
+  } catch (e) {
+    console.warn(`${symbols.warning} Database migration warning:`, e);
+  }
+
   if (!quiet) {
     console.log(`${symbols.success} Database initialized: ${dbPath}`);
   }
