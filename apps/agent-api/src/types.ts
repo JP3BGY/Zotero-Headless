@@ -148,9 +148,12 @@ export interface SyncStatus {
 
 // ============ 删除相关 ============
 
+/** Maximum number of items that can be deleted in a single batch operation */
+export const BATCH_DELETE_LIMIT = 10;
+
 export interface DeleteOptions {
-  permanent?: boolean;  // true = 永久删除，false = 移到回收站
-  confirm?: boolean;    // 是否需要确认（Agent 可设为 false）
+  /** @deprecated Permanent delete is no longer allowed via agent API. Always moves to trash. */
+  permanent?: boolean;
 }
 
 // ============ 批量操作 ============
