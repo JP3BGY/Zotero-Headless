@@ -196,7 +196,7 @@ export async function deleteItem(
   key: string,
   options: DeleteOptions = {}
 ): Promise<void> {
-  const { getDatabase, items } = await getDb();
+  const { getDatabase, items, logDeletion } = await getDb();
   const db = getDatabase();
 
   // Agent API 安全限制：不允许永久删除
@@ -204,11 +204,26 @@ export async function deleteItem(
     console.warn('Warning: permanent delete is not allowed via agent API. Moving to trash instead.');
   }
 
-  // 检查项目是否存在
-  const existing = await getItem(key);
-  if (!existing) {
+  // Query raw DB record to get libraryId and rawJson for audit log
+  const rawRecord = await db.select()
+    .from(items)
+    .where(eq(items.key, key))
+    .get();
+
+  if (!rawRecord) {
     throw new ItemNotFoundError(key);
   }
+
+  // Log deletion before performing it
+  await logDeletion({
+    itemKey: key,
+    libraryId: rawRecord.libraryId ?? 0,
+    title: rawRecord.title,
+    itemType: rawRecord.itemType,
+    operationType: 'soft',
+    caller: 'agent',
+    rawJsonSnapshot: rawRecord.rawJson,
+  });
 
   // 始终软删除（移到回收站）
   await db.update(items)

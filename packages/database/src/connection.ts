@@ -177,9 +177,23 @@ export function initializeDatabase(options?: { quiet?: boolean }): Database {
       updated_at INTEGER NOT NULL
     );
     
+    CREATE TABLE IF NOT EXISTS deletion_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_key TEXT NOT NULL,
+      library_id INTEGER NOT NULL,
+      title TEXT,
+      item_type TEXT,
+      operation_type TEXT NOT NULL,
+      caller TEXT NOT NULL,
+      raw_json_snapshot TEXT,
+      deleted_at INTEGER NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_items_library ON items(library_id);
     CREATE INDEX IF NOT EXISTS idx_items_synced ON items(synced);
     CREATE INDEX IF NOT EXISTS idx_items_deleted ON items(deleted);
+    CREATE INDEX IF NOT EXISTS idx_deletion_log_item ON deletion_log(item_key);
+    CREATE INDEX IF NOT EXISTS idx_deletion_log_time ON deletion_log(deleted_at);
   `);
   
   // Migration: Add missing columns to existing tables
