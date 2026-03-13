@@ -2294,15 +2294,17 @@ const commands: Command[] = [
   {
     name: 'delete',
     aliases: ['d', 'del', 'rm', 'trash'],
-    description: 'Delete (trash) an item. Aliases: rm, del, d. Options: -p/--permanent, -f/--force',
+    description: 'Delete (trash) an item. Aliases: rm, del, d. Options: -p/--permanent, -f/--force, -n/--dry-run',
     options: [
       { name: '--force', alias: '-f', description: 'Permanently delete (skip trash)' },
       { name: '--permanent', alias: '-p', description: 'Same as --force' },
+      { name: '--dry-run', alias: '-n', description: 'Show what would be deleted without executing' },
     ],
     examples: [
       'zotero delete ABC123',
       'zotero rm ABC123 -f',
       'zotero del ABC123 ABC124',
+      'zotero delete ABC123 --dry-run',
     ],
     execute: async (args) => {
       await initModules();
@@ -2311,6 +2313,7 @@ const commands: Command[] = [
       const key = args[0];
       const permanent = args.includes('--permanent') || args.includes('-p');
       const force = args.includes('--force') || args.includes('-f');
+      const dryRun = args.includes('--dry-run') || args.includes('-n');
 
       if (!key) {
         console.log(`${symbols.error} Usage: zotero delete <key> [--permanent]`);
@@ -2337,6 +2340,36 @@ const commands: Command[] = [
         if (!item) {
           console.log(`${symbols.error} Item ${key} not found.`);
           process.exit(1);
+        }
+
+        if (dryRun) {
+          const isPermanent = permanent || force;
+
+          // Count child attachments
+          let childCount = 0;
+          try {
+            const result = await db.select({ count: count() })
+              .from(items)
+              .where(and(
+                eq(items.libraryId, library.id),
+                like(items.rawJson, `%"parentItem":"${key}"%`)
+              ))
+              .get();
+            childCount = result?.count ?? 0;
+          } catch (e) {
+            // Ignore errors counting children
+          }
+
+          console.log(t('commands.delete.dryRunHeader'));
+          console.log(`   ${t('fields.title')}:  ${item.title || t('common.unknown')}`);
+          console.log(`   Key:       ${key}`);
+          console.log(`   ${t('fields.type')}:  ${item.itemType}`);
+          console.log(`   ${t('commands.delete.dryRunMode')}:  ${isPermanent ? t('commands.delete.dryRunPermanent') : t('commands.delete.dryRunTrash')}`);
+          if (childCount > 0) {
+            console.log(`   ${t('commands.delete.dryRunChildren', childCount)}`);
+          }
+          console.log(`\n${t('commands.delete.dryRunNoChanges')}`);
+          return;
         }
 
         if (permanent) {
