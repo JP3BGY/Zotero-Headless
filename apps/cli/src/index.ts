@@ -193,6 +193,10 @@ export interface Command {
   execute: (args: string[], invokedAs?: string) => Promise<void>;
 }
 
+// Shell mode flag — when true, permanent delete is allowed
+let _shellMode = false;
+export function setShellMode(v: boolean) { _shellMode = v; }
+
 const commands: Command[] = [
   {
     name: 'sync',
@@ -2298,8 +2302,8 @@ const commands: Command[] = [
     aliases: ['d', 'del', 'rm', 'trash'],
     description: 'Delete (trash) an item. Aliases: rm, del, d. Options: -p/--permanent, -f/--force',
     options: [
-      { name: '--force', alias: '-f', description: 'Permanently delete (skip trash)' },
-      { name: '--permanent', alias: '-p', description: 'Same as --force' },
+      { name: '--force', alias: '-f', description: 'Permanently delete - shell mode only' },
+      { name: '--permanent', alias: '-p', description: 'Same as --force - shell mode only' },
     ],
     examples: [
       'zotero delete ABC123',
@@ -2311,8 +2315,15 @@ const commands: Command[] = [
       console.log(' Deleting item locally...\n');
 
       const key = args[0];
-      const permanent = args.includes('--permanent') || args.includes('-p');
-      const force = args.includes('--force') || args.includes('-f');
+      let permanent = args.includes('--permanent') || args.includes('-p');
+      let force = args.includes('--force') || args.includes('-f');
+
+      // Restrict permanent delete to shell mode only
+      if ((permanent || force) && !_shellMode) {
+        console.log(`${symbols.warning} ${t('commands.delete.shellOnly')}`);
+        permanent = false;
+        force = false;
+      }
 
       if (!key) {
         console.log(`${symbols.error} Usage: zotero delete <key> [--permanent]`);
@@ -2341,7 +2352,7 @@ const commands: Command[] = [
           process.exit(1);
         }
 
-        if (permanent) {
+        if (permanent || force) {
           // Check trash retention period
           if (item.deletedAt) {
             const { configManager } = await import('@zotero-headless/core');

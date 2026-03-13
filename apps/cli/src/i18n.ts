@@ -76,6 +76,7 @@ const en: Translations = {
       deleting: 'Deleting item...',
       deleted: (key: string) => `Item deleted: ${key}`,
       error: 'Failed to delete item',
+      shellOnly: 'Permanent delete is only available in shell mode (zotero shell). Moving to trash instead.',
     },
     export: {
       exporting: 'Exporting...',
@@ -212,6 +213,7 @@ const zh: Translations = {
       deleting: '删除文献...',
       deleted: (key: string) => `文献已删除: ${key}`,
       error: '删除文献失败',
+      shellOnly: '永久删除仅在 shell 模式下可用（zotero shell）。已改为移入回收站。',
     },
     export: {
       exporting: '导出中...',
