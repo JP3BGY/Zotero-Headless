@@ -1,7 +1,10 @@
-import { commands, type Command } from '@zotero-headless/cli';
+import { commands, type Command, setShellMode } from '@zotero-headless/cli';
 import { getRawSQLite } from '@zotero-headless/database';
 
 import type { ItemKeySuggestion, LogLevel } from './types.js';
+
+// Enable shell mode so permanent delete is available
+setShellMode(true);
 
 // Re-export for backward compatibility
 export type ItemInfo = ItemKeySuggestion;
