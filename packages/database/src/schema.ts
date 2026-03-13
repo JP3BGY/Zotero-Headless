@@ -170,6 +170,19 @@ export const webdavConfig = sqliteTable('webdav_config', {
   updatedAt: integer('updated_at', {  }).notNull(),
 });
 
+// ============ Deletion Log 表（审计日志） ============
+export const deletionLog = sqliteTable('deletion_log', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  itemKey: textCol('item_key').notNull(),
+  libraryId: integer('library_id').notNull(),
+  title: textCol('title'),
+  itemType: textCol('item_type'),
+  operationType: textCol('operation_type').notNull(), // 'soft' | 'hard'
+  caller: textCol('caller').notNull(),                // 'cli' | 'shell' | 'agent' | 'sync'
+  rawJsonSnapshot: textCol('raw_json_snapshot'),       // Full item data for recovery
+  deletedAt: integer('deleted_at').notNull(),          // Timestamp of this delete operation
+});
+
 // ============ Relations ============
 export const librariesRelations = relations(libraries, ({ many }) => ({
   items: many(items),
@@ -202,3 +215,5 @@ export type SyncLog = typeof syncLogs.$inferSelect;
 export type NewSyncLog = typeof syncLogs.$inferInsert;
 export type WebDAVConfig = typeof webdavConfig.$inferSelect;
 export type NewWebDAVConfig = typeof webdavConfig.$inferInsert;
+export type DeletionLog = typeof deletionLog.$inferSelect;
+export type NewDeletionLog = typeof deletionLog.$inferInsert;

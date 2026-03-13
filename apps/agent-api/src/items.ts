@@ -193,18 +193,35 @@ export async function getItemOrThrow(key: string): Promise<Item> {
  * 删除文献
  */
 export async function deleteItem(
-  key: string, 
+  key: string,
   options: DeleteOptions = {}
 ): Promise<void> {
-  const { getDatabase, items } = await getDb();
+  const { getDatabase, items, logDeletion } = await getDb();
   const db = getDatabase();
-  
-  // 检查项目是否存在
-  const existing = await getItem(key);
-  if (!existing) {
+
+  // Query raw DB record to get libraryId and rawJson for audit log
+  const rawRecord = await db.select()
+    .from(items)
+    .where(eq(items.key, key))
+    .get();
+
+  if (!rawRecord) {
     throw new ItemNotFoundError(key);
   }
-  
+
+  const operationType = options.permanent ? 'hard' : 'soft';
+
+  // Log deletion before performing it
+  await logDeletion({
+    itemKey: key,
+    libraryId: rawRecord.libraryId ?? 0,
+    title: rawRecord.title,
+    itemType: rawRecord.itemType,
+    operationType,
+    caller: 'agent',
+    rawJsonSnapshot: rawRecord.rawJson,
+  });
+
   if (options.permanent) {
     // 永久删除
     await db.delete(items)
@@ -213,7 +230,7 @@ export async function deleteItem(
   } else {
     // 移到回收站
     await db.update(items)
-      .set({ 
+      .set({
         deleted: true,
         dateModified: Math.floor(Date.now() / 1000)
       })

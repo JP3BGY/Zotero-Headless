@@ -20,6 +20,7 @@ let attachments: any;
 let zoteroApi: any;
 let attachmentManager: any;
 let webdavConfig: any;
+let logDeletion: any;
 
 async function initModules() {
   if (!syncManager) {
@@ -33,6 +34,7 @@ async function initModules() {
     libraries = dbMod.libraries;
     webdavConfig = dbMod.webdavConfig;
     attachments = dbMod.attachments;
+    logDeletion = dbMod.logDeletion;
   }
   if (!zoteroApi) {
     const apiMod = await import('@zotero-headless/api');
@@ -2344,6 +2346,16 @@ const commands: Command[] = [
           // Sync will detect it's gone and delete from remote
           console.log(`   Marking ${key} for permanent deletion...`);
 
+          await logDeletion({
+            itemKey: key,
+            libraryId: library.id,
+            title: item.title,
+            itemType: item.itemType,
+            operationType: 'hard',
+            caller: 'cli',
+            rawJsonSnapshot: item.rawJson,
+          });
+
           await db.delete(items)
             .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
             .run();
@@ -2357,6 +2369,16 @@ const commands: Command[] = [
           const rawData = JSON.parse(item.rawJson || '{}');
           const data = rawData.data || rawData;
           data.deleted = true;
+
+          await logDeletion({
+            itemKey: key,
+            libraryId: library.id,
+            title: item.title,
+            itemType: item.itemType,
+            operationType: 'soft',
+            caller: 'cli',
+            rawJsonSnapshot: item.rawJson,
+          });
 
           // Update local item: mark as deleted and unsynced
           await db.update(items)
