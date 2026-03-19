@@ -17,6 +17,8 @@ let getDatabase: any;
 let items: any;
 let libraries: any;
 let attachments: any;
+let itemTags: any;
+let collections: any;
 let zoteroApi: any;
 let attachmentManager: any;
 let webdavConfig: any;
@@ -35,6 +37,8 @@ async function initModules() {
     webdavConfig = dbMod.webdavConfig;
     attachments = dbMod.attachments;
     logDeletion = dbMod.logDeletion;
+    itemTags = dbMod.itemTags;
+    collections = dbMod.collections;
   }
   if (!zoteroApi) {
     const apiMod = await import('@zotero-headless/api');
@@ -458,6 +462,458 @@ const commands: Command[] = [
       
       console.log('To sync a group library:');
       console.log('   zotero groups --sync <group-id>');
+    }
+  },
+
+  // ============ Tags Management ============
+
+  {
+    name: 'tags',
+    aliases: ['tag', 't'],
+    description: 'Manage item tags. Use subcommands: list, add, remove, delete',
+    options: [
+      { name: '--list', alias: '-l', description: 'List all tags in library' },
+      { name: '--add', alias: '-a', description: 'Add tags to an item', value: '<key> <tags...>' },
+      { name: '--remove', alias: '-r', description: 'Remove tags from an item', value: '<key> <tags...>' },
+      { name: '--item', alias: '-i', description: 'Show tags for a specific item', value: '<key>' },
+      { name: '--delete', alias: '-d', description: 'Delete a tag from library (removes from all items)', value: '<tag>' },
+    ],
+    examples: [
+      'zotero tags --list',
+      'zotero tags --add ABCD1234 "machine learning" "AI"',
+      'zotero tags --remove ABCD1234 "old tag"',
+      'zotero tags --item ABCD1234',
+      'zotero tags --delete "unused tag"',
+    ],
+    execute: async (args) => {
+      await initModules();
+
+      const db = getDatabase();
+      const libraryId = appConfig.zotero.userId;
+      const listIndex = args.indexOf('--list');
+      const addIndex = args.indexOf('--add');
+      const removeIndex = args.indexOf('--remove');
+      const itemIndex = args.indexOf('--item');
+      const deleteIndex = args.indexOf('--delete');
+
+      // List all tags
+      if (listIndex >= 0 || (args.length === 0 || args[0] === 'list')) {
+        console.log('Fetching tags...');
+        const tagsResult = await db.select()
+          .from(itemTags)
+          .orderBy(desc(itemTags.tag));
+
+        // Group by tag and count
+        const tagCounts = new Map<string, { count: number; type: number }>();
+        for (const row of tagsResult) {
+          const existing = tagCounts.get(row.tag);
+          if (existing) {
+            existing.count++;
+          } else {
+            tagCounts.set(row.tag, { count: 1, type: row.tagType });
+          }
+        }
+
+        if (tagCounts.size === 0) {
+          console.log('   No tags found in library.');
+          return;
+        }
+
+        console.log(`\nTags in library (${tagCounts.size}):\n`);
+        const sortedTags = Array.from(tagCounts.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+        for (const [tag, info] of sortedTags) {
+          const typeLabel = info.type === 1 ? ' (auto)' : ' (user)';
+          console.log(`  ${tag}${typeLabel}: ${info.count} items`);
+        }
+        return;
+      }
+
+      // Add tags to item
+      if (addIndex >= 0) {
+        const keyArg = args.find(arg => !arg.startsWith('--'));
+        const addArgs = args.slice(addIndex + 1);
+        const itemKey = addArgs[0];
+        const tagsToAdd = addArgs.slice(1);
+
+        if (!itemKey || tagsToAdd.length === 0) {
+          console.log('Usage: zotero tags --add <item-key> <tag1> [tag2] ...');
+          return;
+        }
+
+        // Find item in database
+        const item = await db.select()
+          .from(items)
+          .where(eq(items.key, itemKey))
+          .get();
+
+        if (!item) {
+          console.log(`${symbols.error} Item ${itemKey} not found`);
+          return;
+        }
+
+        // Parse existing tags
+        const existingTags: { tag: string; type: number }[] = JSON.parse(item.tags || '[]');
+        const existingTagNames = new Set(existingTags.map(t => t.tag.toLowerCase()));
+
+        // Add new tags
+        const newTags = tagsToAdd
+          .filter(tag => !existingTagNames.has(tag.toLowerCase()))
+          .map(tag => ({ tag, type: 0 }));
+
+        if (newTags.length === 0) {
+          console.log(`${symbols.info} All tags already exist on this item`);
+          return;
+        }
+
+        // Update item
+        const allTags = [...existingTags, ...newTags];
+        await db.update(items)
+          .set({ tags: JSON.stringify(allTags), version: item.version + 1 })
+          .where(eq(items.key, itemKey));
+
+        console.log(`${symbols.success} Added ${newTags.length} tag(s) to ${itemKey}`);
+        return;
+      }
+
+      // Remove tags from item
+      if (removeIndex >= 0) {
+        const removeArgs = args.slice(removeIndex + 1);
+        const itemKey = removeArgs[0];
+        const tagsToRemove = removeArgs.slice(1).map(t => t.toLowerCase());
+
+        if (!itemKey || tagsToRemove.length === 0) {
+          console.log('Usage: zotero tags --remove <item-key> <tag1> [tag2] ...');
+          return;
+        }
+
+        // Find item in database
+        const item = await db.select()
+          .from(items)
+          .where(eq(items.key, itemKey))
+          .get();
+
+        if (!item) {
+          console.log(`${symbols.error} Item ${itemKey} not found`);
+          return;
+        }
+
+        // Parse and filter tags
+        const existingTags: { tag: string; type: number }[] = JSON.parse(item.tags || '[]');
+        const filteredTags = existingTags.filter(t => !tagsToRemove.includes(t.tag.toLowerCase()));
+
+        if (filteredTags.length === existingTags.length) {
+          console.log(`${symbols.info} No matching tags found to remove`);
+          return;
+        }
+
+        // Update item
+        await db.update(items)
+          .set({ tags: JSON.stringify(filteredTags), version: item.version + 1 })
+          .where(eq(items.key, itemKey));
+
+        console.log(`${symbols.success} Removed ${existingTags.length - filteredTags.length} tag(s) from ${itemKey}`);
+        return;
+      }
+
+      // Show tags for specific item
+      if (itemIndex >= 0) {
+        const itemKey = args[itemIndex + 1];
+
+        if (!itemKey) {
+          console.log('Usage: zotero tags --item <item-key>');
+          return;
+        }
+
+        const item = await db.select()
+          .from(items)
+          .where(eq(items.key, itemKey))
+          .get();
+
+        if (!item) {
+          console.log(`${symbols.error} Item ${itemKey} not found`);
+          return;
+        }
+
+        const itemTagList: { tag: string; type: number }[] = JSON.parse(item.tags || '[]');
+
+        if (itemTagList.length === 0) {
+          console.log(`No tags on item ${itemKey}`);
+          return;
+        }
+
+        console.log(`Tags on ${itemKey} (${itemTagList.length}):\n`);
+        for (const tag of itemTagList) {
+          const typeLabel = tag.type === 1 ? ' (auto)' : ' (user)';
+          console.log(`  ${tag.tag}${typeLabel}`);
+        }
+        return;
+      }
+
+      // Delete tag from library (removes from all items)
+      if (deleteIndex >= 0) {
+        const tagToDelete = args[deleteIndex + 1];
+
+        if (!tagToDelete) {
+          console.log('Usage: zotero tags --delete <tag-name>');
+          return;
+        }
+
+        // Find all items with this tag
+        const itemsWithTag = await db.select()
+          .from(itemTags)
+          .where(eq(itemTags.tag, tagToDelete));
+
+        if (itemsWithTag.length === 0) {
+          console.log(`${symbols.info} Tag "${tagToDelete}" not found in library`);
+          return;
+        }
+
+        console.log(`Removing tag "${tagToDelete}" from ${itemsWithTag.length} item(s)...`);
+
+        // Remove tag from each item
+        for (const row of itemsWithTag) {
+          const item = await db.select()
+            .from(items)
+            .where(eq(items.key, row.itemKey))
+            .get();
+
+          if (item) {
+            const currentTags: { tag: string; type: number }[] = JSON.parse(item.tags || '[]');
+            const filteredTags = currentTags.filter(t => t.tag.toLowerCase() !== tagToDelete.toLowerCase());
+            await db.update(items)
+              .set({ tags: JSON.stringify(filteredTags), version: item.version + 1 })
+              .where(eq(items.key, row.itemKey));
+          }
+        }
+
+        // Delete from item_tags table
+        await db.delete(itemTags)
+          .where(eq(itemTags.tag, tagToDelete));
+
+        console.log(`${symbols.success} Deleted tag "${tagToDelete}" from library`);
+        return;
+      }
+
+      // Default: show help
+      console.log('Tags Management Commands:');
+      console.log('  zotero tags --list                List all tags in library');
+      console.log('  zotero tags --add <key> <tags>    Add tags to an item');
+      console.log('  zotero tags --remove <key> <tags> Remove tags from an item');
+      console.log('  zotero tags --item <key>           Show tags for an item');
+      console.log('  zotero tags --delete <tag>         Delete tag from library');
+    }
+  },
+
+  // ============ Collections Management ============
+
+  {
+    name: 'collections',
+    aliases: ['col', 'folder'],
+    description: 'Manage collections (folders). Use subcommands to list, create, or manage collections',
+    options: [
+      { name: '--list', alias: '-l', description: 'List all collections' },
+      { name: '--create', alias: '-c', description: 'Create a new collection', value: '<name>' },
+      { name: '--parent', alias: '-p', description: 'Parent collection key for nested collections', value: '<key>' },
+      { name: '--add-item', description: 'Add item to collection', value: '<collection-key> <item-key>' },
+      { name: '--remove-item', description: 'Remove item from collection', value: '<collection-key> <item-key>' },
+      { name: '--delete', alias: '-d', description: 'Delete a collection', value: '<key>' },
+    ],
+    examples: [
+      'zotero collections --list',
+      'zotero collections --create "My Papers"',
+      'zotero collections --create "Subfolder" --parent ABCD1234',
+      'zotero collections --add-item ABCD1234 WXYZ5678',
+      'zotero collections --remove-item ABCD1234 WXYZ5678',
+      'zotero collections --delete ABCD1234',
+    ],
+    execute: async (args) => {
+      await initModules();
+
+      const db = getDatabase();
+      const listIndex = args.indexOf('--list');
+      const createIndex = args.indexOf('--create');
+      const addItemIndex = args.indexOf('--add-item');
+      const removeItemIndex = args.indexOf('--remove-item');
+      const deleteIndex = args.indexOf('--delete');
+
+      // List collections
+      if (listIndex >= 0 || args.length === 0) {
+        // Note: Filtering by deleted requires SQLite boolean handling, so just get all and filter in JS
+        const allCols = await db.select()
+          .from(collections)
+          .orderBy(asc(collections.name));
+
+        // Filter out deleted collections in JavaScript
+        const cols = allCols.filter(c => !c.deleted);
+
+        if (cols.length === 0) {
+          console.log('   No collections found.');
+          return;
+        }
+
+        console.log(`\nCollections (${cols.length}):\n`);
+        for (const col of cols) {
+          const parentInfo = col.parentKey ? ` (parent: ${col.parentKey})` : ' (root)';
+          console.log(`  [${col.key}] ${col.name}${parentInfo}`);
+        }
+        return;
+      }
+
+      // Create collection
+      if (createIndex >= 0) {
+        const name = args[createIndex + 1];
+        const parentArg = args.find(arg => arg.startsWith('--parent='))?.split('=')[1] ||
+                         args.find(arg => arg.startsWith('-p'))?.substring(2);
+
+        if (!name) {
+          console.log('Usage: zotero collections --create <name> [--parent=<key>]');
+          return;
+        }
+
+        const newKey = generateKey();
+        const now = Math.floor(Date.now() / 1000);
+
+        await db.insert(collections)
+          .values({
+            key: newKey,
+            libraryId: appConfig.zotero.userId,
+            name,
+            parentKey: parentArg || null,
+            version: 0,
+            createdAt: now,
+            updatedAt: now,
+            deleted: false,
+            rawJson: JSON.stringify({ name, parentKey: parentArg || null })
+          });
+
+        console.log(`${symbols.success} Created collection "${name}" with key ${newKey}`);
+        return;
+      }
+
+      // Add item to collection
+      if (addItemIndex >= 0) {
+        const collectionKey = args[addItemIndex + 1];
+        const itemKey = args[addItemIndex + 2];
+
+        if (!collectionKey || !itemKey) {
+          console.log('Usage: zotero collections --add-item <collection-key> <item-key>');
+          return;
+        }
+
+        // Verify collection exists
+        const col = await db.select()
+          .from(collections)
+          .where(eq(collections.key, collectionKey))
+          .get();
+
+        if (!col) {
+          console.log(`${symbols.error} Collection ${collectionKey} not found`);
+          return;
+        }
+
+        // Verify item exists
+        const item = await db.select()
+          .from(items)
+          .where(eq(items.key, itemKey))
+          .get();
+
+        if (!item) {
+          console.log(`${symbols.error} Item ${itemKey} not found`);
+          return;
+        }
+
+        // Parse existing collection keys
+        const existingCollectionKeys: string[] = JSON.parse(item.collectionKeys || '[]');
+        if (existingCollectionKeys.includes(collectionKey)) {
+          console.log(`${symbols.info} Item already in collection`);
+          return;
+        }
+
+        // Add collection key
+        const newCollectionKeys = [...existingCollectionKeys, collectionKey];
+        await db.update(items)
+          .set({ collectionKeys: JSON.stringify(newCollectionKeys), version: item.version + 1 })
+          .where(eq(items.key, itemKey));
+
+        console.log(`${symbols.success} Added item ${itemKey} to collection ${collectionKey}`);
+        return;
+      }
+
+      // Remove item from collection
+      if (removeItemIndex >= 0) {
+        const collectionKey = args[removeItemIndex + 1];
+        const itemKey = args[removeItemIndex + 2];
+
+        if (!collectionKey || !itemKey) {
+          console.log('Usage: zotero collections --remove-item <collection-key> <item-key>');
+          return;
+        }
+
+        // Get item
+        const item = await db.select()
+          .from(items)
+          .where(eq(items.key, itemKey))
+          .get();
+
+        if (!item) {
+          console.log(`${symbols.error} Item ${itemKey} not found`);
+          return;
+        }
+
+        // Parse and filter collection keys
+        const existingCollectionKeys: string[] = JSON.parse(item.collectionKeys || '[]');
+        const newCollectionKeys = existingCollectionKeys.filter(k => k !== collectionKey);
+
+        if (newCollectionKeys.length === existingCollectionKeys.length) {
+          console.log(`${symbols.info} Item not in collection`);
+          return;
+        }
+
+        await db.update(items)
+          .set({ collectionKeys: JSON.stringify(newCollectionKeys), version: item.version + 1 })
+          .where(eq(items.key, itemKey));
+
+        console.log(`${symbols.success} Removed item ${itemKey} from collection ${collectionKey}`);
+        return;
+      }
+
+      // Delete collection
+      if (deleteIndex >= 0) {
+        const collectionKey = args[deleteIndex + 1];
+
+        if (!collectionKey) {
+          console.log('Usage: zotero collections --delete <key>');
+          return;
+        }
+
+        // Verify collection exists
+        const col = await db.select()
+          .from(collections)
+          .where(eq(collections.key, collectionKey))
+          .get();
+
+        if (!col) {
+          console.log(`${symbols.error} Collection ${collectionKey} not found`);
+          return;
+        }
+
+        // Soft delete
+        await db.update(collections)
+          .set({ deleted: true, version: col.version + 1 })
+          .where(eq(collections.key, collectionKey));
+
+        console.log(`${symbols.success} Deleted collection ${collectionKey}`);
+        return;
+      }
+
+      // Default: show help
+      console.log('Collections Management Commands:');
+      console.log('  zotero collections --list                         List all collections');
+      console.log('  zotero collections --create <name>               Create collection');
+      console.log('  zotero collections --create <name> --parent <key> Create nested collection');
+      console.log('  zotero collections --add-item <col> <item>        Add item to collection');
+      console.log('  zotero collections --remove-item <col> <item>    Remove item from collection');
+      console.log('  zotero collections --delete <key>                Delete collection');
     }
   },
 
@@ -2299,7 +2755,7 @@ const commands: Command[] = [
 
   {
     name: 'delete',
-    aliases: ['d', 'del', 'rm', 'trash'],
+    aliases: ['d', 'del', 'rm'],
     description: 'Delete (trash) an item. Aliases: rm, del, d. Options: -p/--permanent, -f/--force, -n/--dry-run',
     options: [
       { name: '--force', alias: '-f', description: 'Permanently delete - shell mode only' },
@@ -3775,6 +4231,10 @@ Notes & Attachments:
 Group Libraries:
   groups (g, team)             List group libraries
 
+Tags & Collections:
+  tags (t)                     Manage item tags
+  collections (col, folder)    Manage collections (folders)
+
 WebDAV:
   webdav:config (wdc)          Configure WebDAV
   webdav:sync (wds)            Sync attachments to WebDAV
@@ -3871,6 +4331,1004 @@ For more info: https://github.com/altairwei/Zotero-Headless
           shellPath = require.resolve('@zotero-headless/shell');
         } catch {
           // ignore
+        }
+      }
+
+      // Try 4: Relative to current working directory (development)
+      if (!shellPath) {
+        const devPath = join(process.cwd(), 'apps', 'shell', 'dist', 'index.js');
+        if (existsSync(devPath)) {
+          shellPath = devPath;
+        }
+      }
+
+      if (!shellPath) {
+        console.error(`${symbols.error} Cannot find shell.`);
+        console.log('');
+        console.log('Try reinstalling: npm install -g zotero-headless');
+        return;
+      }
+
+      try {
+        const child = spawn('node', [shellPath], {
+          stdio: 'inherit',
+          shell: false,
+          env: {
+            ...process.env,
+            ZOTERO_LANG: lang || getLanguage()
+          }
+        });
+
+        child.on('exit', (code) => {
+          process.exitCode = code ?? 0;
+        });
+      } catch (error) {
+        console.error(`${symbols.error} Failed to start shell:`, error);
+      }
+    }
+  },
+
+  // ============ Trash Management ============
+
+  {
+    name: 'trash',
+    aliases: ['trash:list', 'trash:view'],
+    description: 'View items in trash',
+    options: [
+      { name: '--list', alias: '-l', description: 'List items in trash' },
+    ],
+    examples: [
+      'zotero trash',
+      'zotero trash --list',
+    ],
+    execute: async (args) => {
+      await initModules();
+
+      const db = getDatabase();
+      const library = await db.select().from(libraries).get();
+
+      if (!library) {
+        console.log(`${symbols.error} No library found. Run "sync" first.`);
+        return;
+      }
+
+      // Get items in trash (deleted = true)
+      const trashedItems = await db.select()
+        .from(items)
+        .where(and(
+          eq(items.libraryId, library.id),
+          eq(items.deleted, true)
+        ))
+        .orderBy(desc(items.deletedAt));
+
+      if (trashedItems.length === 0) {
+        console.log('Trash is empty.');
+        return;
+      }
+
+      console.log(`\nItems in trash (${trashedItems.length}):\n`);
+      for (const item of trashedItems) {
+        const deletedAt = item.deletedAt ? formatDate(item.deletedAt) : 'unknown';
+        console.log(`  [${item.key}] ${item.title || '(no title)'}`);
+        console.log(`      Type: ${item.itemType} | Deleted: ${deletedAt}`);
+      }
+      console.log('\nTo restore: zotero restore <key>');
+      console.log('To empty: zotero trash:empty');
+    }
+  },
+
+  {
+    name: 'restore',
+    aliases: ['undelete', 'untrash'],
+    description: 'Restore item from trash',
+    options: [
+      { name: '--all', alias: '-a', description: 'Restore all items from trash' },
+    ],
+    examples: [
+      'zotero restore ABCD1234',
+      'zotero restore --all',
+    ],
+    execute: async (args) => {
+      await initModules();
+
+      const db = getDatabase();
+      const library = await db.select().from(libraries).get();
+
+      if (!library) {
+        console.log(`${symbols.error} No library found. Run "sync" first.`);
+        return;
+      }
+
+      const restoreAll = args.includes('--all') || args.includes('-a');
+
+      if (restoreAll) {
+        // Restore all items
+        const trashedItems = await db.select()
+          .from(items)
+          .where(and(
+            eq(items.libraryId, library.id),
+            eq(items.deleted, true)
+          ));
+
+        if (trashedItems.length === 0) {
+          console.log('No items to restore.');
+          return;
+        }
+
+        console.log(`Restoring ${trashedItems.length} item(s) from trash...`);
+        for (const item of trashedItems) {
+          await db.update(items)
+            .set({
+              deleted: false,
+              deletedAt: null,
+              version: item.version + 1,
+              synced: false
+            })
+            .where(eq(items.key, item.key));
+        }
+        console.log(`${symbols.success} Restored ${trashedItems.length} item(s) from trash`);
+        return;
+      }
+
+      // Restore single item
+      const key = args.find(arg => !arg.startsWith('-'));
+      if (!key) {
+        console.log('Usage: zotero restore <key>');
+        console.log('       zotero restore --all');
+        return;
+      }
+
+      const item = await db.select()
+        .from(items)
+        .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
+        .get();
+
+      if (!item) {
+        console.log(`${symbols.error} Item ${key} not found`);
+        return;
+      }
+
+      if (!item.deleted) {
+        console.log(`${symbols.info} Item ${key} is not in trash`);
+        return;
+      }
+
+      await db.update(items)
+        .set({
+          deleted: false,
+          deletedAt: null,
+          version: item.version + 1,
+          synced: false
+        })
+        .where(eq(items.key, key));
+
+      console.log(`${symbols.success} Restored item ${key} from trash`);
+    }
+  },
+
+  {
+    name: 'trash:empty',
+    aliases: ['trash:clear', 'empty-trash'],
+    description: 'Permanently empty the trash (shell mode only)',
+    options: [
+      { name: '--yes', alias: '-y', description: 'Skip confirmation prompt' },
+      { name: '--dry-run', alias: '-n', description: 'Show what would be deleted' },
+    ],
+    examples: [
+      'zotero trash:empty',
+      'zotero trash:empty --dry-run',
+    ],
+    execute: async (args) => {
+      await initModules();
+
+      if (!_shellMode) {
+        console.log(`${symbols.warning} ${t('commands.delete.shellOnly')}`);
+        console.log('   Use "zotero shell" to access shell mode.');
+        return;
+      }
+
+      const db = getDatabase();
+      const library = await db.select().from(libraries).get();
+
+      if (!library) {
+        console.log(`${symbols.error} No library found.`);
+        return;
+      }
+
+      const skipConfirm = args.includes('--yes') || args.includes('-y');
+      const dryRun = args.includes('--dry-run') || args.includes('-n');
+
+      const trashedItems = await db.select()
+        .from(items)
+        .where(and(
+          eq(items.libraryId, library.id),
+          eq(items.deleted, true)
+        ));
+
+      if (trashedItems.length === 0) {
+        console.log('Trash is already empty.');
+        return;
+      }
+
+      if (dryRun) {
+        console.log(`Would permanently delete ${trashedItems.length} item(s):`);
+        for (const item of trashedItems) {
+          console.log(`  [${item.key}] ${item.title || '(no title)'}`);
+        }
+        return;
+      }
+
+      if (!skipConfirm && isInteractive()) {
+        const rl = createPrompt();
+        const answer = await new Promise<string>((resolve) => {
+          rl.question(
+            `Permanently delete ${trashedItems.length} item(s)? This cannot be undone (y/N): `,
+            (ans) => resolve(ans)
+          );
+          rl.close();
+
+          if (!['y', 'yes'].includes(answer.trim().toLowerCase())) {
+            console.log('Cancelled.');
+            return;
+          }
+        });
+      }
+
+      // Permanently delete items
+      console.log(`Permanently deleting ${trashedItems.length} item(s)...`);
+      for (const item of trashedItems) {
+        // Log deletion before permanent delete
+        if (logDeletion) {
+          await logDeletion.logDeletion({
+            itemKey: item.key,
+            libraryId: library.id,
+            title: item.title,
+            itemType: item.itemType,
+            operationType: 'hard',
+            caller: 'cli',
+            rawJsonSnapshot: item.rawJson
+          });
+        }
+
+        await db.delete(items)
+          .where(eq(items.key, item.key));
+      }
+
+      console.log(`${symbols.success} Emptied trash: ${trashedItems.length} item(s) permanently deleted`);
+    }
+  },
+
+  // ============ Saved Searches ============
+
+  {
+    name: 'searches',
+    aliases: ['search:list', 'saved-searches'],
+    description: 'Manage saved searches',
+    options: [
+      { name: '--list', alias: '-l', description: 'List all saved searches' },
+      { name: '--run', alias: '-r', description: 'Run a saved search', value: '<key>' },
+      { name: '--delete', alias: '-d', description: 'Delete a saved search', value: '<key>' },
+    ],
+    examples: [
+      'zotero searches --list',
+      'zotero searches --run ABCD1234',
+      'zotero searches --delete ABCD1234',
+    ],
+    execute: async (args) => {
+      await initModules();
+
+      const db = getDatabase();
+      const library = await db.select().from(libraries).get();
+
+      const listIndex = args.indexOf('--list');
+      const runIndex = args.indexOf('--run');
+      const deleteIndex = args.indexOf('--delete');
+
+      // List saved searches - note: saved searches are stored in rawJson of items as search object type
+      if (listIndex >= 0 || args.length === 0) {
+        // Search for items of type "search"
+        const searchItems = await db.select()
+          .from(items)
+          .where(and(
+            library ? eq(items.libraryId, library.id) : undefined,
+            eq(items.itemType, 'search')
+          ));
+
+        if (searchItems.length === 0) {
+          console.log('No saved searches found.');
+          console.log('\nTo create a saved search, use Zotero Desktop client.');
+          return;
+        }
+
+        console.log(`\nSaved searches (${searchItems.length}):\n`);
+        for (const item of searchItems) {
+          const raw = JSON.parse(item.rawJson);
+          console.log(`  [${item.key}] ${item.title || 'Unnamed search'}`);
+          if (raw.conditions) {
+            console.log(`      Conditions: ${JSON.stringify(raw.conditions).substring(0, 60)}...`);
+          }
+        }
+        return;
+      }
+
+      // Run saved search
+      if (runIndex >= 0) {
+        const searchKey = args[runIndex + 1];
+        if (!searchKey) {
+          console.log('Usage: zotero searches --run <key>');
+          return;
+        }
+
+        const searchItem = await db.select()
+          .from(items)
+          .where(and(eq(items.key, searchKey), eq(items.itemType, 'search')))
+          .get();
+
+        if (!searchItem) {
+          console.log(`${symbols.error} Saved search ${searchKey} not found`);
+          return;
+        }
+
+        // Parse search conditions and execute
+        const raw = JSON.parse(searchItem.rawJson);
+        const conditions = raw.conditions || [];
+
+        // Simple condition matching - iterate items and filter
+        let results = await db.select()
+          .from(items)
+          .where(and(
+            library ? eq(items.libraryId, library.id) : undefined,
+            eq(items.deleted, false)
+          ));
+
+        // Apply simple conditions (field + operator + value)
+        for (const cond of conditions) {
+          if (cond.condition && cond.value) {
+            results = results.filter(item => {
+              const fieldValue = item[cond.condition as keyof typeof item];
+              if (!fieldValue) return false;
+              const itemVal = String(fieldValue).toLowerCase();
+              const searchVal = String(cond.value).toLowerCase();
+              switch (cond.operator) {
+                case 'contains':
+                  return itemVal.includes(searchVal);
+                case 'is':
+                  return itemVal === searchVal;
+                case 'isNot':
+                  return itemVal !== searchVal;
+                case 'beginsWith':
+                  return itemVal.startsWith(searchVal);
+                default:
+                  return itemVal.includes(searchVal);
+              }
+            });
+          }
+        }
+
+        console.log(`\nSearch "${searchItem.title}" returned ${results.length} item(s):\n`);
+        for (const item of results.slice(0, 20)) {
+          console.log(`  [${item.key}] ${item.title || '(no title)'}`);
+        }
+        if (results.length > 20) {
+          console.log(`  ... and ${results.length - 20} more`);
+        }
+        return;
+      }
+
+      // Delete saved search
+      if (deleteIndex >= 0) {
+        const searchKey = args[deleteIndex + 1];
+        if (!searchKey) {
+          console.log('Usage: zotero searches --delete <key>');
+          return;
+        }
+
+        const searchItem = await db.select()
+          .from(items)
+          .where(and(eq(items.key, searchKey), eq(items.itemType, 'search')))
+          .get();
+
+        if (!searchItem) {
+          console.log(`${symbols.error} Saved search ${searchKey} not found`);
+          return;
+        }
+
+        await db.update(items)
+          .set({ deleted: true, version: searchItem.version + 1 })
+          .where(eq(items.key, searchKey));
+
+        console.log(`${symbols.success} Deleted saved search ${searchKey}`);
+        return;
+      }
+
+      // Default help
+      console.log('Saved Searches Commands:');
+      console.log('  zotero searches --list           List all saved searches');
+      console.log('  zotero searches --run <key>      Run a saved search');
+      console.log('  zotero searches --delete <key>  Delete a saved search');
+    }
+  },
+
+  // ============ Duplicate Detection ============
+
+  {
+    name: 'duplicates',
+    aliases: ['dupes', 'find-duplicates'],
+    description: 'Find duplicate items in library',
+    options: [
+      { name: '--match-doi', description: 'Match by DOI' },
+      { name: '--match-isbn', description: 'Match by ISBN' },
+      { name: '--match-title', description: 'Match by title (exact)' },
+      { name: '--fuzzy-title', description: 'Match by title (fuzzy)' },
+      { name: '--merge', alias: '-m', description: 'Merge duplicates (keep oldest)', value: '<group-key>' },
+      { name: '--delete', alias: '-d', description: 'Delete duplicates after merge' },
+      { name: '--dry-run', alias: '-n', description: 'Show duplicates without merging' },
+    ],
+    examples: [
+      'zotero duplicates',
+      'zotero duplicates --match-doi',
+      'zotero duplicates --fuzzy-title',
+      'zotero duplicates --dry-run',
+    ],
+    execute: async (args) => {
+      await initModules();
+
+      const db = getDatabase();
+      const library = await db.select().from(libraries).get();
+
+      if (!library) {
+        console.log(`${symbols.error} No library found. Run "sync" first.`);
+        return;
+      }
+
+      // Get all non-deleted items
+      const allItems = await db.select()
+        .from(items)
+        .where(and(
+          eq(items.libraryId, library.id),
+          eq(items.deleted, false)
+        ));
+
+      const matchDoi = args.includes('--match-doi');
+      const matchIsbn = args.includes('--match-isbn');
+      const matchTitle = args.includes('--match-title');
+      const fuzzyTitle = args.includes('--fuzzy-title');
+      const mergeArg = args.find(arg => arg.startsWith('--merge='))?.split('=')[1];
+      const deleteDups = args.includes('--delete') || args.includes('-d');
+      const dryRun = args.includes('--dry-run') || args.includes('-n');
+
+      // Default: match by DOI and ISBN
+      const useDoi = matchDoi || (!matchIsbn && !matchTitle && !fuzzyTitle);
+      const useIsbn = matchIsbn || (!matchDoi && !matchTitle && !fuzzyTitle);
+      const useTitleExact = matchTitle;
+      const useTitleFuzzy = fuzzyTitle;
+
+      // Group items by duplicate key
+      const groups = new Map<string, typeof allItems>();
+
+      for (const item of allItems) {
+        let key: string | null = null;
+
+        if (useDoi && item.doi) {
+          key = `doi:${item.doi.toLowerCase()}`;
+        }
+        if (!key && useIsbn && item.isbn) {
+          key = `isbn:${item.isbn.replace(/[-\s]/g, '')}`;
+        }
+        if (!key && (useTitleExact || useTitleFuzzy)) {
+          const title = item.title?.toLowerCase().trim() || '';
+          if (useTitleExact) {
+            key = `title:${title}`;
+          } else if (useTitleFuzzy && title.length > 5) {
+            // Fuzzy: normalize and use first 3 words
+            const words = title.split(/\s+/).slice(0, 3).join(' ');
+            key = `title:${words}`;
+          }
+        }
+
+        if (key && key.length > 5) {  // Skip empty/too-short keys
+          if (!groups.has(key)) {
+            groups.set(key, []);
+          }
+          groups.get(key)!.push(item);
+        }
+      }
+
+      // Filter to groups with duplicates (more than 1 item)
+      const duplicates: typeof allItems[] = [];
+      for (const [key, groupItems] of groups) {
+        if (groupItems.length > 1) {
+          duplicates.push(...groupItems);
+        }
+      }
+
+      if (duplicates.length === 0) {
+        console.log('No duplicates found.');
+        return;
+      }
+
+      console.log(`\nFound ${duplicates.length} items in potential duplicate groups:\n`);
+
+      // Show duplicate groups
+      let groupNum = 0;
+      const itemToGroup = new Map<string, number>();
+      for (const [key, groupItems] of groups) {
+        if (groupItems.length > 1) {
+          groupNum++;
+          console.log(`\nGroup ${groupNum} (${groupItems.length} items):`);
+          // Sort by created date, oldest first
+          const sorted = groupItems.sort((a, b) => a.createdAt - b.createdAt);
+          for (const item of sorted) {
+            itemToGroup.set(item.key, groupNum);
+            const created = formatDate(item.createdAt);
+            console.log(`  [${item.key}] ${item.title || '(no title)'}`);
+            console.log(`      ${item.itemType} | Created: ${created}`);
+            if (item.doi) console.log(`      DOI: ${item.doi}`);
+            if (item.isbn) console.log(`      ISBN: ${item.isbn}`);
+          }
+        }
+      }
+
+      if (dryRun) {
+        console.log('\n(--dry-run) No changes made.');
+        return;
+      }
+
+      // Merge duplicates if requested
+      if (mergeArg) {
+        const groupKey = parseInt(mergeArg);
+        let targetGroup: typeof allItems = [];
+
+        for (const [key, groupItems] of groups) {
+          if (groupItems.length > 1) {
+            groupNum++;
+            if (groupNum === groupKey) {
+              targetGroup = groupItems;
+              break;
+            }
+          }
+        }
+
+        if (targetGroup.length === 0) {
+          console.log(`${symbols.error} Group ${groupKey} not found`);
+          return;
+        }
+
+        // Keep oldest, mark others as deleted
+        const sorted = targetGroup.sort((a, b) => a.createdAt - b.createdAt);
+        const keep = sorted[0];
+        const toDelete = sorted.slice(1);
+
+        console.log(`\nMerging group ${groupKey}: keeping [${keep.key}]`);
+        for (const item of toDelete) {
+          console.log(`  Deleting: [${item.key}] ${item.title || '(no title)'}`);
+          await db.update(items)
+            .set({
+              deleted: true,
+              deletedAt: Math.floor(Date.now() / 1000),
+              version: item.version + 1,
+              synced: false
+            })
+            .where(eq(items.key, item.key));
+        }
+        console.log(`${symbols.success} Merged ${toDelete.length} duplicates`);
+      }
+
+      console.log('\nTo merge duplicates:');
+      console.log('  zotero duplicates --merge=<group-number>');
+      console.log('  zotero duplicates --merge=<group-number> --delete');
+    }
+  },
+
+  // ============ Related Items ============
+
+  {
+    name: 'related',
+    aliases: ['rel'],
+    description: 'Manage related items',
+    options: [
+      { name: '--list', alias: '-l', description: 'List related items for an item', value: '<key>' },
+      { name: '--add', alias: '-a', description: 'Add related item', value: '<key> <related-key>' },
+      { name: '--remove', alias: '-r', description: 'Remove related item', value: '<key> <related-key>' },
+    ],
+    examples: [
+      'zotero related --list ABCD1234',
+      'zotero related --add ABCD1234 WXYZ5678',
+      'zotero related --remove ABCD1234 WXYZ5678',
+    ],
+    execute: async (args) => {
+      await initModules();
+
+      const db = getDatabase();
+      const library = await db.select().from(libraries).get();
+
+      if (!library) {
+        console.log(`${symbols.error} No library found. Run "sync" first.`);
+        return;
+      }
+
+      const listIndex = args.indexOf('--list');
+      const addIndex = args.indexOf('--add');
+      const removeIndex = args.indexOf('--remove');
+
+      // List related items
+      if (listIndex >= 0) {
+        const itemKey = args[listIndex + 1];
+        if (!itemKey) {
+          console.log('Usage: zotero related --list <key>');
+          return;
+        }
+
+        const item = await db.select()
+          .from(items)
+          .where(and(eq(items.key, itemKey), eq(items.libraryId, library.id)))
+          .get();
+
+        if (!item) {
+          console.log(`${symbols.error} Item ${itemKey} not found`);
+          return;
+        }
+
+        // Related items stored in rawJson.related
+        const raw = JSON.parse(item.rawJson);
+        const relatedKeys: string[] = raw.related || [];
+
+        if (relatedKeys.length === 0) {
+          console.log(`No related items for [${itemKey}]`);
+          return;
+        }
+
+        console.log(`\nRelated items for [${itemKey}]:\n`);
+        for (const relKey of relatedKeys) {
+          const relItem = await db.select()
+            .from(items)
+            .where(and(eq(items.key, relKey), eq(items.libraryId, library.id)))
+            .get();
+
+          if (relItem) {
+            console.log(`  [${relKey}] ${relItem.title || '(no title)'}`);
+            console.log(`      ${relItem.itemType}`);
+          } else {
+            console.log(`  [${relKey}] (not in library)`);
+          }
+        }
+        return;
+      }
+
+      // Add related item
+      if (addIndex >= 0) {
+        const itemKey = args[addIndex + 1];
+        const relatedKey = args[addIndex + 2];
+
+        if (!itemKey || !relatedKey) {
+          console.log('Usage: zotero related --add <key> <related-key>');
+          return;
+        }
+
+        const item = await db.select()
+          .from(items)
+          .where(and(eq(items.key, itemKey), eq(items.libraryId, library.id)))
+          .get();
+
+        if (!item) {
+          console.log(`${symbols.error} Item ${itemKey} not found`);
+          return;
+        }
+
+        const relatedItem = await db.select()
+          .from(items)
+          .where(and(eq(items.key, relatedKey), eq(items.libraryId, library.id)))
+          .get();
+
+        if (!relatedItem) {
+          console.log(`${symbols.error} Related item ${relatedKey} not found`);
+          return;
+        }
+
+        const raw = JSON.parse(item.rawJson);
+        const related: string[] = raw.related || [];
+
+        if (related.includes(relatedKey)) {
+          console.log(`${symbols.info} Item ${relatedKey} already related`);
+          return;
+        }
+
+        related.push(relatedKey);
+        raw.related = related;
+
+        await db.update(items)
+          .set({
+            rawJson: JSON.stringify(raw),
+            version: item.version + 1,
+            synced: false
+          })
+          .where(eq(items.key, itemKey));
+
+        console.log(`${symbols.success} Added [${relatedKey}] as related to [${itemKey}]`);
+        return;
+      }
+
+      // Remove related item
+      if (removeIndex >= 0) {
+        const itemKey = args[removeIndex + 1];
+        const relatedKey = args[removeIndex + 2];
+
+        if (!itemKey || !relatedKey) {
+          console.log('Usage: zotero related --remove <key> <related-key>');
+          return;
+        }
+
+        const item = await db.select()
+          .from(items)
+          .where(and(eq(items.key, itemKey), eq(items.libraryId, library.id)))
+          .get();
+
+        if (!item) {
+          console.log(`${symbols.error} Item ${itemKey} not found`);
+          return;
+        }
+
+        const raw = JSON.parse(item.rawJson);
+        const related: string[] = raw.related || [];
+        const filtered = related.filter(k => k !== relatedKey);
+
+        if (filtered.length === related.length) {
+          console.log(`${symbols.info} Item ${relatedKey} not in related list`);
+          return;
+        }
+
+        raw.related = filtered;
+
+        await db.update(items)
+          .set({
+            rawJson: JSON.stringify(raw),
+            version: item.version + 1,
+            synced: false
+          })
+          .where(eq(items.key, itemKey));
+
+        console.log(`${symbols.success} Removed [${relatedKey}] from related items`);
+        return;
+      }
+
+      // Default help
+      console.log('Related Items Commands:');
+      console.log('  zotero related --list <key>          List related items');
+      console.log('  zotero related --add <key> <rel-key>  Add related item');
+      console.log('  zotero related --remove <key> <rel>   Remove related item');
+    }
+  },
+
+  // ============ Trash Management ============
+
+  {
+    name: 'trash',
+    aliases: ['trashed', 'deleted-items'],
+    description: 'Manage trash (list, restore, empty)',
+    options: [
+      { name: '--list', alias: '-l', description: 'List trashed items' },
+      { name: '--restore', alias: '-r', description: 'Restore trashed item', value: '<key>' },
+      { name: '--empty', alias: '-e', description: 'Empty trash (permanent delete)' },
+      { name: '--count', alias: '-c', description: 'Show trash item count' },
+    ],
+    examples: [
+      'zotero trash --list',
+      'zotero trash --restore ABCD1234',
+      'zotero trash --empty',
+      'zotero trash --count',
+    ],
+    execute: async (args) => {
+      await initModules();
+
+      const db = getDatabase();
+      const library = await db.select().from(libraries).get();
+
+      if (!library) {
+        console.log(`${symbols.error} No library found. Run "sync" first.`);
+        return;
+      }
+
+      const listIndex = args.indexOf('--list');
+      const restoreIndex = args.indexOf('--restore');
+      const emptyIndex = args.indexOf('--empty');
+      const countIndex = args.indexOf('--count');
+
+      // Count trashed items
+      if (countIndex >= 0 || (args.length === 0)) {
+        const countResult = await db.select({ count: count() })
+          .from(items)
+          .where(and(
+            eq(items.libraryId, library.id),
+            eq(items.deleted, true)
+          ));
+        const trashCount = countResult[0]?.count || 0;
+        console.log(`Trash: ${trashCount} item(s)`);
+        if (args.includes('--count')) return;
+      }
+
+      // List trashed items
+      if (listIndex >= 0 || (args.length === 0 && !restoreIndex && !emptyIndex)) {
+        const trashedItems = await db.select()
+          .from(items)
+          .where(and(
+            eq(items.libraryId, library.id),
+            eq(items.deleted, true)
+          ))
+          .orderBy(desc(items.deletedAt));
+
+        if (trashedItems.length === 0) {
+          console.log('Trash is empty.');
+          return;
+        }
+
+        console.log(`\nTrashed items (${trashedItems.length}):\n`);
+        for (const item of trashedItems) {
+          const deletedAt = item.deletedAt ? formatDate(item.deletedAt) : 'Unknown';
+          console.log(`  [${item.key}] ${item.title || '(no title)'}`);
+          console.log(`      ${item.itemType} | Deleted: ${deletedAt}`);
+        }
+        console.log('\nTo restore: zotero trash --restore <key>');
+        console.log('To empty:   zotero trash --empty');
+        return;
+      }
+
+      // Restore item
+      if (restoreIndex >= 0) {
+        const itemKey = args[restoreIndex + 1];
+        if (!itemKey) {
+          console.log('Usage: zotero trash --restore <key>');
+          return;
+        }
+
+        const item = await db.select()
+          .from(items)
+          .where(and(
+            eq(items.key, itemKey),
+            eq(items.libraryId, library.id),
+            eq(items.deleted, true)
+          ))
+          .get();
+
+        if (!item) {
+          console.log(`${symbols.error} Trashed item ${itemKey} not found`);
+          return;
+        }
+
+        await db.update(items)
+          .set({
+            deleted: false,
+            deletedAt: null,
+            version: item.version + 1,
+            synced: false
+          })
+          .where(eq(items.key, itemKey));
+
+        console.log(`${symbols.success} Restored [${itemKey}] from trash`);
+        return;
+      }
+
+      // Empty trash
+      if (emptyIndex >= 0) {
+        // Check if we're in shell mode
+        if (!_shellMode) {
+          console.log(`${symbols.error} Emptying trash requires shell mode.`);
+          console.log('   This is a destructive operation. Use in shell only.');
+          console.log('\n   To enable, either:');
+          console.log('   - Use zotero shell');
+          console.log('   - Or run with --shell flag');
+          return;
+        }
+
+        const trashedItems = await db.select()
+          .from(items)
+          .where(and(
+            eq(items.libraryId, library.id),
+            eq(items.deleted, true)
+          ));
+
+        if (trashedItems.length === 0) {
+          console.log('Trash is already empty.');
+          return;
+        }
+
+        console.log(`Permanently deleting ${trashedItems.length} items...`);
+
+        for (const item of trashedItems) {
+          // Log deletion before hard delete
+          if (logDeletion) {
+            await logDeletion({
+              itemKey: item.key,
+              libraryId: item.libraryId,
+              title: item.title,
+              itemType: item.itemType,
+              operationType: 'hard',
+              caller: 'cli'
+            }, item.rawJson);
+          }
+
+          // Hard delete from database
+          await db.delete(items)
+            .where(eq(items.key, item.key));
+
+          // Also delete attachments
+          await db.delete(attachments)
+            .where(eq(attachments.parentItemKey, item.key));
+        }
+
+        console.log(`${symbols.success} Permanently deleted ${trashedItems.length} items`);
+        return;
+      }
+
+      // Default help
+      console.log('Trash Commands:');
+      console.log('  zotero trash --list              List trashed items');
+      console.log('  zotero trash --restore <key>     Restore item from trash');
+      console.log('  zotero trash --empty             Empty trash (permanent delete)');
+      console.log('  zotero trash --count             Show trash count');
+    }
+  },
+
+  // ============ Shell launcher (keep this last) ============
+
+  {
+    name: 'shell',
+    aliases: ['sh', 'repl', 'interactive', 'i'],
+    description: 'Start interactive shell. Use --lang=en or --lang=zh to set language.',
+    options: [
+      { name: '--lang', description: 'Set language (en|zh)', value: '<lang>' },
+    ],
+    examples: [
+      'zotero shell',
+    ],
+    execute: async (args: string[]) => {
+      const { spawn } = await import('child_process');
+      const { fileURLToPath } = await import('url');
+      const { dirname, join } = await import('path');
+      const { existsSync } = await import('fs');
+
+      // Parse --lang argument
+      let lang: string | undefined;
+      const langArg = args.find(arg => arg.startsWith('--lang='));
+      if (langArg) {
+        lang = langArg.split('=')[1];
+      }
+
+      // Find shell path - try multiple locations
+      let shellPath: string | null = null;
+
+      // Try 1: Shell bundle next to CLI entry point (npm package layout)
+      try {
+        const __dirname = dirname(fileURLToPath(import.meta.url));
+        // Try .mjs first (ESM bundle), then .js fallback
+        for (const name of ['shell.mjs', 'shell.js']) {
+          const bundlePath = join(__dirname, name);
+          if (existsSync(bundlePath)) {
+            shellPath = bundlePath;
+            break;
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      // Try 2: NODE_PATH environment variable
+      if (!shellPath) {
+        const nodePath = process.env.NODE_PATH;
+        if (nodePath) {
+          const nodeModulesPath = join(nodePath, '@zotero-headless', 'shell', 'dist', 'index.js');
+          if (existsSync(nodeModulesPath)) {
+            shellPath = nodeModulesPath;
+          }
+        }
+      }
+
+      // Try 3: In global node_modules (if installed with -g)
+      if (!shellPath) {
+        const globalPath = process.execPath;
+        const globalDir = dirname(globalPath);
+        const globalShellPath = join(globalDir, '..', 'lib', 'node_modules', '@zotero-headless', 'shell', 'dist', 'index.js');
+        if (existsSync(globalShellPath)) {
+          shellPath = globalShellPath;
         }
       }
 

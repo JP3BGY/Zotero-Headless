@@ -378,6 +378,181 @@ export class ZoteroAPIClient {
     return response.data;
   }
 
+  /** Create a collection */
+  async createCollection(
+    libraryId: string | number,
+    name: string,
+    parentKey?: string,
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<ZoteroCollectionResponse> {
+    const response = await this.request<ZoteroCollectionResponse[]>(
+      'POST',
+      `${this.getLibraryPath(libraryId, libraryType)}/collections`,
+      {
+        body: [{
+          name,
+          parentKey: parentKey || undefined
+        }]
+      }
+    );
+    return response.data[0];
+  }
+
+  /** Update a collection */
+  async updateCollection(
+    libraryId: string | number,
+    collectionKey: string,
+    name: string,
+    parentKey: string | null,
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<{ successful: Record<string, string> }> {
+    const response = await this.request<{ successful: Record<string, string> }>(
+      'PATCH',
+      `${this.getLibraryPath(libraryId, libraryType)}/collections/${collectionKey}`,
+      {
+        body: [{
+          name,
+          parentKey: parentKey === null ? null : (parentKey || undefined)
+        }]
+      }
+    );
+    return response.data;
+  }
+
+  /** Delete a collection */
+  async deleteCollection(
+    libraryId: string | number,
+    collectionKey: string,
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<void> {
+    await this.request(
+      'DELETE',
+      `${this.getLibraryPath(libraryId, libraryType)}/collections/${collectionKey}`
+    );
+  }
+
+  // ============ Tag Operations ============
+
+  /** Get all tags in a library */
+  async getTags(
+    libraryId: string | number,
+    libraryType: 'user' | 'group' = 'user',
+    options?: {
+      since?: number;
+      limit?: number;
+      start?: number;
+      order?: string;
+      sort?: 'asc' | 'desc';
+    }
+  ): Promise<{ tag: string; type: number; numItems: number }[]> {
+    const response = await this.request<{ tag: string; type: number; numItems: number }[]>(
+      'GET',
+      `${this.getLibraryPath(libraryId, libraryType)}/tags`,
+      { params: options as Record<string, string | number> }
+    );
+    return response.data;
+  }
+
+  /** Get tags for a specific item */
+  async getItemTags(
+    libraryId: string | number,
+    itemKey: string,
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<{ tag: string; type: number }[]> {
+    const response = await this.request<{ tag: string; type: number }[]>(
+      'GET',
+      `${this.getLibraryPath(libraryId, libraryType)}/items/${itemKey}/tags`
+    );
+    return response.data;
+  }
+
+  /** Update tags for an item */
+  async updateItemTags(
+    libraryId: string | number,
+    itemKey: string,
+    tags: { tag: string; type?: 0 | 1 }[],
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<WriteResponse> {
+    // First get current item to preserve other fields
+    const item = await this.getItem(libraryId, itemKey, libraryType);
+    if (!item) {
+      throw new Error(`Item ${itemKey} not found`);
+    }
+
+    // Update with new tags
+    const updatedData = {
+      ...item.data,
+      tags: tags
+    };
+
+    const response = await this.request<WriteResponse>(
+      'PATCH',
+      `${this.getLibraryPath(libraryId, libraryType)}/items/${itemKey}`,
+      { body: [updatedData] }
+    );
+    return response.data;
+  }
+
+  /** Add tags to an item */
+  async addItemTags(
+    libraryId: string | number,
+    itemKey: string,
+    tags: string[],
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<WriteResponse> {
+    // Get current tags
+    const currentTags = await this.getItemTags(libraryId, itemKey, libraryType);
+    const existingTagNames = new Set(currentTags.map(t => t.tag.toLowerCase()));
+
+    // Add new tags that don't already exist
+    const newTags = tags
+      .filter(tag => !existingTagNames.has(tag.toLowerCase()))
+      .map(tag => ({ tag, type: 0 as const }));
+
+    if (newTags.length === 0) {
+      return { successful: {}, unchanged: { [itemKey]: null }, failed: {} };
+    }
+
+    const allTags = [
+      ...currentTags.map(t => ({ tag: t.tag, type: t.type as 0 | 1 })),
+      ...newTags
+    ];
+
+    return this.updateItemTags(libraryId, itemKey, allTags, libraryType);
+  }
+
+  /** Remove tags from an item */
+  async removeItemTags(
+    libraryId: string | number,
+    itemKey: string,
+    tags: string[],
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<WriteResponse> {
+    // Get current tags
+    const currentTags = await this.getItemTags(libraryId, itemKey, libraryType);
+    const tagsToRemove = new Set(tags.map(t => t.toLowerCase()));
+
+    // Filter out tags to remove
+    const remainingTags = currentTags
+      .filter(t => !tagsToRemove.has(t.tag.toLowerCase()))
+      .map(t => ({ tag: t.tag, type: t.type as 0 | 1 }));
+
+    return this.updateItemTags(libraryId, itemKey, remainingTags, libraryType);
+  }
+
+  /** Delete a tag from the library (removes from all items) */
+  async deleteTag(
+    libraryId: string | number,
+    tag: string,
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<void> {
+    const encodedTag = encodeURIComponent(tag);
+    await this.request(
+      'DELETE',
+      `${this.getLibraryPath(libraryId, libraryType)}/tags/${encodedTag}`
+    );
+  }
+
   // ============ Utility ============
 
   /** Get item template for new items */
