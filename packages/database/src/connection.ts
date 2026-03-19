@@ -229,6 +229,20 @@ export function initializeDatabase(options?: { quiet?: boolean }): Database {
     console.warn(`${symbols.warning} Database migration warning:`, e);
   }
 
+  // Migration: Add deleted column to collections table
+  try {
+    const colColumns = sqliteInstance.prepare(`PRAGMA table_info(collections)`).all() as any[];
+    const hasDeleted = colColumns.some(col => col.name === 'deleted');
+
+    if (!hasDeleted) {
+      if (!quiet) console.log('Migrating database: Adding deleted column to collections...');
+      sqliteInstance.exec(`ALTER TABLE collections ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;`);
+      if (!quiet) console.log(`${symbols.success} Migration complete`);
+    }
+  } catch (e) {
+    console.warn(`${symbols.warning} Database migration warning:`, e);
+  }
+
   if (!quiet) {
     console.log(`${symbols.success} Database initialized: ${dbPath}`);
   }
