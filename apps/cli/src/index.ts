@@ -5268,7 +5268,741 @@ For more info: https://github.com/altairwei/Zotero-Headless
     }
   },
 
-  // ============ Shell launcher (keep this last) ============
+  // ============ Citation/Bibliography Export ============
+
+  {
+    name: 'cite',
+    aliases: ['citation', 'bibliography', 'bib'],
+    description: 'Generate citations and bibliography in various formats',
+    options: [
+      { name: '--style', alias: '-s', description: 'Citation style (apa, mla, chicago, ieee, harvard)', value: '<style>' },
+      { name: '--format', alias: '-f', description: 'Output format (text, html, bibtex, json)', value: '<format>' },
+      { name: '--output', alias: '-o', description: 'Output file', value: '<path>' },
+      { name: '--item', alias: '-i', description: 'Get citation for specific item', value: '<key>' },
+    ],
+    examples: [
+      'zotero cite ABCD1234',
+      'zotero cite ABCD1234 --style apa',
+      'zotero cite ABCD1234 --style mla --format bibtex',
+      'zotero cite --list-styles',
+    ],
+    execute: async (args) => {
+      await initModules();
+
+      const db = getDatabase();
+      const library = await db.select().from(libraries).get();
+
+      if (!library) {
+        console.log(`${symbols.error} No library found. Run "sync" first.`);
+        return;
+      }
+
+      const styleIndex = args.indexOf('--style');
+      const formatIndex = args.indexOf('--format');
+      const outputIndex = args.indexOf('--output');
+      const itemIndex = args.indexOf('--item');
+      const listStyles = args.includes('--list-styles');
+
+      // List available styles
+      if (listStyles) {
+        console.log('Available citation styles:');
+        console.log('  apa        - American Psychological Association');
+        console.log('  mla        - Modern Language Association');
+        console.log('  chicago    - Chicago Manual of Style');
+        console.log('  ieee       - Institute of Electrical and Electronics Engineers');
+        console.log('  harvard    - Harvard referencing style');
+        console.log('  Vancouver  - Vancouver system');
+        console.log('  bibtex     - BibTeX format');
+        return;
+      }
+
+      // Get style and format
+      let style = 'apa';
+      if (styleIndex >= 0 && args[styleIndex + 1]) {
+        style = args[styleIndex + 1].toLowerCase();
+      }
+
+      let outputFormat = 'text';
+      if (formatIndex >= 0 && args[formatIndex + 1]) {
+        outputFormat = args[formatIndex + 1].toLowerCase();
+      }
+
+      // Find item key from various positions
+      let itemKey: string | undefined;
+      if (itemIndex >= 0 && args[itemIndex + 1]) {
+        itemKey = args[itemIndex + 1];
+      } else {
+        // Try first non-option argument
+        for (const arg of args) {
+          if (!arg.startsWith('--') && !arg.startsWith('-') && arg.length > 3) {
+            itemKey = arg;
+            break;
+          }
+        }
+      }
+
+      if (!itemKey) {
+        console.log(`${symbols.error} Please provide an item key`);
+        console.log('Usage: zotero cite <key> [--style <style>] [--format <format>]');
+        console.log('   Or: zotero cite --item <key>');
+        console.log('\nList styles: zotero cite --list-styles');
+        return;
+      }
+
+      // Get item
+      const item = await db.select()
+        .from(items)
+        .where(and(
+          eq(items.key, itemKey),
+          eq(items.libraryId, library.id)
+        ))
+        .get();
+
+      if (!item) {
+        console.log(`${symbols.error} Item ${itemKey} not found`);
+        return;
+      }
+
+      // Parse item data
+      const raw = JSON.parse(item.rawJson);
+      const creators = (raw.creators || []) as Array<{ firstName?: string; lastName?: string; creatorType?: string }>;
+
+      // Generate citation based on style
+      let citation = '';
+
+      if (outputFormat === 'bibtex') {
+        // BibTeX format
+        const key = itemKey.toLowerCase();
+        const author = creators
+          .filter(c => c.creatorType === 'author')
+          .map(c => `${c.lastName || ''}, ${c.firstName || ''}`)
+          .join(' and ');
+        const year = raw.date ? new Date(raw.date).getFullYear() : '????';
+
+        citation = `@${raw.itemType || 'misc'}{${key},
+  author = {${author}},
+  title = {${item.title || ''}},
+  year = {${year}},
+  journal = {${raw.publicationTitle || raw.journal || ''}},
+  volume = {${raw.volume || ''}},
+  number = {${raw.issue || ''}},
+  pages = {${raw.pages || ''}},
+  doi = {${raw.DOI || ''}},
+  isbn = {${raw.ISBN || ''}},
+}`;
+      } else {
+        // Text citation formats
+        const authorText = creators
+          .filter(c => c.creatorType === 'author')
+          .map(c => {
+            if (style === 'apa' || style === 'harvard') {
+              return `${c.lastName || ''}, ${c.firstName ? c.firstName[0] + '.' : ''}`;
+            }
+            return `${c.firstName || ''} ${c.lastName || ''}`;
+          })
+          .slice(0, 3)
+          .join(', ');
+
+        const year = raw.date ? new Date(raw.date).getFullYear() : 'n.d.';
+        const title = item.title || 'Untitled';
+        const journal = raw.publicationTitle || raw.journal || '';
+
+        switch (style) {
+          case 'apa':
+            citation = `${authorText} (${year}). ${title}. ${journal}${raw.volume ? `, ${raw.volume}` : ''}${raw.issue ? `(${raw.issue})` : ''}${raw.pages ? `, ${raw.pages}` : ''}.`;
+            if (raw.DOI) citation += ` https://doi.org/${raw.DOI}`;
+            break;
+          case 'mla':
+            citation = `${authorText}. "${title}." ${journal}${raw.volume ? ` ${raw.volume}` : ''}${raw.issue ? `.${raw.issue}` : ''} (${year})${raw.pages ? `: ${raw.pages}` : ''}.`;
+            break;
+          case 'chicago':
+            citation = `${authorText}. "${title}." ${journal}${raw.volume ? ` ${raw.volume}` : ''}${raw.issue ? `, no. ${raw.issue}` : ''} (${year})${raw.pages ? `: ${raw.pages}` : ''}.`;
+            break;
+          case 'ieee':
+            citation = `${authorText}, "${title}," ${journal}${raw.volume ? `, vol. ${raw.volume}` : ''}${raw.issue ? `, no. ${raw.issue}` : ''}${raw.pages ? `, pp. ${raw.pages}` : ''}, ${year}.`;
+            break;
+          case 'vancouver':
+            citation = `${authorText}. ${title}. ${journal}. ${year}${raw.volume ? `;${raw.volume}` : ''}${raw.issue ? `(${raw.issue})` : ''}${raw.pages ? `:${raw.pages}` : ''}.`;
+            break;
+          case 'harvard':
+            citation = `${authorText} ${year}. '${title}', ${journal}${raw.volume ? `, ${raw.volume}` : ''}${raw.issue ? `(${raw.issue})` : ''}${raw.pages ? `, pp. ${raw.pages}` : ''}.`;
+            break;
+          default:
+            // Default APA-like
+            citation = `${authorText} (${year}). ${title}. ${journal}.`;
+        }
+      }
+
+      // Output
+      if (outputIndex >= 0 && args[outputIndex + 1]) {
+        const fs = await import('fs');
+        fs.writeFileSync(args[outputIndex + 1], citation);
+        console.log(`${symbols.success} Citation written to ${args[outputIndex + 1]}`);
+      } else {
+        console.log(citation);
+      }
+    }
+  },
+
+  // ============ Batch Operations ============
+
+  {
+    name: 'batch',
+    aliases: ['batch-operation', 'bulk'],
+    description: 'Batch operations on multiple items',
+    options: [
+      { name: '--tag', alias: '-t', description: 'Add tags to multiple items', value: '<keys...> <tags...>' },
+      { name: '--untag', description: 'Remove tags from multiple items', value: '<keys...> <tags...>' },
+      { name: '--add-to-collection', description: 'Add items to collection', value: '<collection-key> <item-keys...>' },
+      { name: '--remove-from-collection', description: 'Remove items from collection', value: '<collection-key> <item-keys...>' },
+      { name: '--delete', alias: '-d', description: 'Delete multiple items (move to trash)' },
+      { name: '--export', description: 'Export multiple items to file', value: '<format> <output-path> <keys...>' },
+    ],
+    examples: [
+      'zotero batch --tag ABCD1234 WXYZ5678 "new-tag"',
+      'zotero batch --add-to-collection ABCD1234 WXYZ5678',
+      'zotero batch --export bibtex output.bib <keys...>',
+    ],
+    execute: async (args) => {
+      await initModules();
+
+      const db = getDatabase();
+      const library = await db.select().from(libraries).get();
+
+      if (!library) {
+        console.log(`${symbols.error} No library found. Run "sync" first.`);
+        return;
+      }
+
+      const tagIndex = args.indexOf('--tag');
+      const untagIndex = args.indexOf('--untag');
+      const addColIndex = args.indexOf('--add-to-collection');
+      const removeColIndex = args.indexOf('--remove-from-collection');
+      const deleteIndex = args.indexOf('--delete');
+      const exportIndex = args.indexOf('--export');
+
+      // Batch tag
+      if (tagIndex >= 0) {
+        const tags: string[] = [];
+        const keys: string[] = [];
+
+        // Find -- to separate keys from tags
+        const dashDashIndex = args.indexOf('--');
+        if (dashDashIndex >= 0) {
+          for (let i = tagIndex + 1; i < dashDashIndex; i++) {
+            if (args[i] && !args[i].startsWith('--')) keys.push(args[i]);
+          }
+          for (let i = dashDashIndex + 1; i < args.length; i++) {
+            if (args[i]) tags.push(args[i]);
+          }
+        } else {
+          // Try to detect: first arg after --tag is key, rest are tags if > 2 args
+          for (let i = tagIndex + 1; i < args.length; i++) {
+            if (args[i].startsWith('--')) break;
+            if (i === tagIndex + 1 || i === tagIndex + 2) {
+              keys.push(args[i]); // First two are keys
+            } else {
+              tags.push(args[i]); // Rest are tags
+            }
+          }
+        }
+
+        if (keys.length === 0 || tags.length === 0) {
+          console.log('Usage: zotero batch --tag <key1> <key2> -- <tag1> <tag2>');
+          console.log('   Or: zotero batch --tag key1 key2 tag1 tag2');
+          return;
+        }
+
+        console.log(`Adding tags to ${keys.length} item(s)...`);
+
+        for (const key of keys) {
+          const item = await db.select()
+            .from(items)
+            .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
+            .get();
+
+          if (!item) {
+            console.log(`${symbols.error} Item ${key} not found`);
+            continue;
+          }
+
+          const raw = JSON.parse(item.rawJson);
+          const itemTags = raw.tags || [];
+          const existingTags = new Set(itemTags.map((t: any) => typeof t === 'string' ? t.toLowerCase() : (t.tag || '').toLowerCase()));
+
+          let addedCount = 0;
+          for (const tag of tags) {
+            if (!existingTags.has(tag.toLowerCase())) {
+              itemTags.push({ tag, type: 0 });
+              addedCount++;
+            }
+          }
+
+          if (addedCount > 0) {
+            raw.tags = itemTags;
+            await db.update(items)
+              .set({
+                rawJson: JSON.stringify(raw),
+                version: item.version + 1,
+                synced: false
+              })
+              .where(eq(items.key, key));
+          }
+        }
+
+        console.log(`${symbols.success} Added ${tags.length} tag(s) to ${keys.length} item(s)`);
+        return;
+      }
+
+      // Batch untag
+      if (untagIndex >= 0) {
+        const dashDashIndex = args.indexOf('--');
+        const tags: string[] = [];
+        const keys: string[] = [];
+
+        if (dashDashIndex >= 0) {
+          for (let i = untagIndex + 1; i < dashDashIndex; i++) {
+            if (args[i] && !args[i].startsWith('--')) keys.push(args[i]);
+          }
+          for (let i = dashDashIndex + 1; i < args.length; i++) {
+            if (args[i]) tags.push(args[i]);
+          }
+        }
+
+        if (keys.length === 0 || tags.length === 0) {
+          console.log('Usage: zotero batch --untag <key1> <key2> -- <tag1> <tag2>');
+          return;
+        }
+
+        const tagsToRemove = new Set(tags.map(t => t.toLowerCase()));
+
+        for (const key of keys) {
+          const item = await db.select()
+            .from(items)
+            .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
+            .get();
+
+          if (!item) continue;
+
+          const raw = JSON.parse(item.rawJson);
+          const itemTags = (raw.tags || []).filter((t: any) => {
+            const tagName = typeof t === 'string' ? t.toLowerCase() : (t.tag || '').toLowerCase();
+            return !tagsToRemove.has(tagName);
+          });
+
+          raw.tags = itemTags;
+          await db.update(items)
+            .set({
+              rawJson: JSON.stringify(raw),
+              version: item.version + 1,
+              synced: false
+            })
+            .where(eq(items.key, key));
+        }
+
+        console.log(`${symbols.success} Removed tags from ${keys.length} item(s)`);
+        return;
+      }
+
+      // Batch add to collection
+      if (addColIndex >= 0) {
+        const collectionKey = args[addColIndex + 1];
+        const itemKeys = args.slice(addColIndex + 2).filter(a => a && !a.startsWith('--'));
+
+        if (!collectionKey || itemKeys.length === 0) {
+          console.log('Usage: zotero batch --add-to-collection <collection-key> <item-key> [<item-key>...]');
+          return;
+        }
+
+        const collection = await db.select()
+          .from(collections)
+          .where(eq(collections.key, collectionKey))
+          .get();
+
+        if (!collection) {
+          console.log(`${symbols.error} Collection ${collectionKey} not found`);
+          return;
+        }
+
+        for (const key of itemKeys) {
+          const item = await db.select()
+            .from(items)
+            .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
+            .get();
+
+          if (!item) continue;
+
+          const raw = JSON.parse(item.rawJson);
+          const colKeys: string[] = raw.collections || [];
+          if (!colKeys.includes(collectionKey)) {
+            colKeys.push(collectionKey);
+            raw.collections = colKeys;
+            await db.update(items)
+              .set({
+                rawJson: JSON.stringify(raw),
+                version: item.version + 1,
+                synced: false
+              })
+              .where(eq(items.key, key));
+          }
+        }
+
+        console.log(`${symbols.success} Added ${itemKeys.length} item(s) to collection ${collectionKey}`);
+        return;
+      }
+
+      // Batch remove from collection
+      if (removeColIndex >= 0) {
+        const collectionKey = args[removeColIndex + 1];
+        const itemKeys = args.slice(removeColIndex + 2).filter(a => a && !a.startsWith('--'));
+
+        if (!collectionKey || itemKeys.length === 0) {
+          console.log('Usage: zotero batch --remove-from-collection <collection-key> <item-key> [<item-key>...]');
+          return;
+        }
+
+        for (const key of itemKeys) {
+          const item = await db.select()
+            .from(items)
+            .where(and(eq(items.key, key), eq(items.libraryId, library.id)))
+            .get();
+
+          if (!item) continue;
+
+          const raw = JSON.parse(item.rawJson);
+          const colKeys: string[] = (raw.collections || []).filter((k: string) => k !== collectionKey);
+          raw.collections = colKeys;
+          await db.update(items)
+            .set({
+              rawJson: JSON.stringify(raw),
+              version: item.version + 1,
+              synced: false
+            })
+            .where(eq(items.key, key));
+        }
+
+        console.log(`${symbols.success} Removed ${itemKeys.length} item(s) from collection ${collectionKey}`);
+        return;
+      }
+
+      // Batch delete
+      if (deleteIndex >= 0) {
+        // Get item keys - they come after -d
+        const deleteIdx = args.indexOf('-d');
+        const keys = args.slice(deleteIdx + 1).filter(a => a && !a.startsWith('-'));
+
+        if (keys.length === 0) {
+          console.log('Usage: zotero batch -d <key1> <key2> ...');
+          return;
+        }
+
+        console.log(`Moving ${keys.length} item(s) to trash...`);
+
+        for (const key of keys) {
+          const item = await db.select()
+            .from(items)
+            .where(and(eq(items.key, key), eq(items.libraryId, library.id), eq(items.deleted, false)))
+            .get();
+
+          if (!item) continue;
+
+          await db.update(items)
+            .set({
+              deleted: true,
+              deletedAt: Math.floor(Date.now() / 1000),
+              version: item.version + 1,
+              synced: false
+            })
+            .where(eq(items.key, key));
+        }
+
+        console.log(`${symbols.success} Moved ${keys.length} item(s) to trash`);
+        return;
+      }
+
+      // Batch export
+      if (exportIndex >= 0) {
+        const format = args[exportIndex + 1];
+        const outputPath = args[exportIndex + 2];
+        const keys = args.slice(exportIndex + 3).filter(a => a && !a.startsWith('-'));
+
+        if (!format || !outputPath || keys.length === 0) {
+          console.log('Usage: zotero batch --export <format> <output-path> <key1> <key2>...');
+          console.log('  Formats: bibtex, json, csv');
+          return;
+        }
+
+        const exportItems = await db.select()
+          .from(items)
+          .where(and(
+            eq(items.libraryId, library.id),
+            sql`${items.key} IN (${keys.map(k => `'${k}'`).join(',')})`
+          ));
+
+        let output = '';
+
+        if (format === 'json') {
+          output = JSON.stringify(exportItems.map(i => JSON.parse(i.rawJson)), null, 2);
+        } else if (format === 'bibtex') {
+          for (const item of exportItems) {
+            const raw = JSON.parse(item.rawJson);
+            const key = item.key.toLowerCase();
+            const author = (raw.creators || [])
+              .filter((c: any) => c.creatorType === 'author')
+              .map((c: any) => `${c.lastName || ''}, ${c.firstName || ''}`)
+              .join(' and ');
+            const year = raw.date ? new Date(raw.date).getFullYear() : '????';
+
+            output += `@${raw.itemType || 'misc'}{${key},
+  author = {${author}},
+  title = {${item.title || ''}},
+  year = {${year}},
+  journal = {${raw.publicationTitle || ''}},
+  doi = {${raw.DOI || ''}},
+}
+`;
+          }
+        } else if (format === 'csv') {
+          output = 'key,title,itemType,doi,isbn,year\n';
+          for (const item of exportItems) {
+            const raw = JSON.parse(item.rawJson);
+            const year = raw.date ? new Date(raw.date).getFullYear() : '';
+            output += `"${item.key}","${(item.title || '').replace(/"/g, '""')}","${item.itemType}","${raw.DOI || ''}","${raw.ISBN || ''}","${year}"
+`;
+          }
+        }
+
+        const fs = await import('fs');
+        fs.writeFileSync(outputPath, output);
+        console.log(`${symbols.success} Exported ${exportItems.length} item(s) to ${outputPath}`);
+        return;
+      }
+
+      // Default help
+      console.log('Batch Operations:');
+      console.log('  zotero batch --tag <keys...> -- <tags...>       Add tags to items');
+      console.log('  zotero batch --untag <keys...> -- <tags...>    Remove tags from items');
+      console.log('  zotero batch --add-to-collection <col> <keys>  Add items to collection');
+      console.log('  zotero batch --remove-from-collection <col>   Remove items from collection');
+      console.log('  zotero batch -d <key1> <key2>...               Delete (trash) multiple items');
+      console.log('  zotero batch --export <fmt> <file> <keys...>    Export items to file');
+    }
+  },
+
+  // ============ Creator Management ============
+
+  {
+    name: 'creators',
+    aliases: ['author', 'authors'],
+    description: 'Manage item creators/authors',
+    options: [
+      { name: '--list', alias: '-l', description: 'List creators for an item', value: '<key>' },
+      { name: '--add', alias: '-a', description: 'Add creator to item', value: '<key> <first-name> <last-name> [<type>]' },
+      { name: '--remove', alias: '-r', description: 'Remove creator from item', value: '<key> <creator-index>' },
+      { name: '--set-primary', description: 'Set primary author', value: '<key> <creator-index>' },
+    ],
+    examples: [
+      'zotero creators --list ABCD1234',
+      'zotero creators --add ABCD1234 John Smith author',
+      'zotero creators --remove ABCD1234 1',
+    ],
+    execute: async (args) => {
+      await initModules();
+
+      const db = getDatabase();
+      const library = await db.select().from(libraries).get();
+
+      if (!library) {
+        console.log(`${symbols.error} No library found. Run "sync" first.`);
+        return;
+      }
+
+      const listIndex = args.indexOf('--list');
+      const addIndex = args.indexOf('--add');
+      const removeIndex = args.indexOf('--remove');
+      const setPrimaryIndex = args.indexOf('--set-primary');
+
+      // List creators
+      if (listIndex >= 0) {
+        const itemKey = args[listIndex + 1];
+        if (!itemKey) {
+          console.log('Usage: zotero creators --list <key>');
+          return;
+        }
+
+        const item = await db.select()
+          .from(items)
+          .where(and(eq(items.key, itemKey), eq(items.libraryId, library.id)))
+          .get();
+
+        if (!item) {
+          console.log(`${symbols.error} Item ${itemKey} not found`);
+          return;
+        }
+
+        const raw = JSON.parse(item.rawJson);
+        const creators = (raw.creators || []) as Array<{ firstName?: string; lastName?: string; creatorType?: string }>;
+
+        if (creators.length === 0) {
+          console.log(`No creators for [${itemKey}]`);
+          return;
+        }
+
+        console.log(`\nCreators for [${itemKey}]:\n`);
+        creators.forEach((creator, idx) => {
+          const type = creator.creatorType || 'unknown';
+          console.log(`  [${idx + 1}] ${creator.firstName || ''} ${creator.lastName || ''} (${type})`);
+        });
+
+        console.log('\nTo add: zotero creators --add <key> <first-name> <last-name> [type]');
+        console.log('To remove: zotero creators --remove <key> <index>');
+        return;
+      }
+
+      // Add creator
+      if (addIndex >= 0) {
+        const itemKey = args[addIndex + 1];
+        const firstName = args[addIndex + 2];
+        const lastName = args[addIndex + 3];
+        const creatorType = args[addIndex + 4] || 'author';
+
+        if (!itemKey || !firstName || !lastName) {
+          console.log('Usage: zotero creators --add <key> <first-name> <last-name> [type]');
+          console.log('  Types: author, editor, translator, illustrator, etc.');
+          return;
+        }
+
+        const item = await db.select()
+          .from(items)
+          .where(and(eq(items.key, itemKey), eq(items.libraryId, library.id)))
+          .get();
+
+        if (!item) {
+          console.log(`${symbols.error} Item ${itemKey} not found`);
+          return;
+        }
+
+        const raw = JSON.parse(item.rawJson);
+        const creators = raw.creators || [];
+
+        creators.push({
+          firstName,
+          lastName,
+          creatorType
+        });
+
+        raw.creators = creators;
+
+        await db.update(items)
+          .set({
+            rawJson: JSON.stringify(raw),
+            version: item.version + 1,
+            synced: false
+          })
+          .where(eq(items.key, itemKey));
+
+        console.log(`${symbols.success} Added ${firstName} ${lastName} as ${creatorType} to [${itemKey}]`);
+        return;
+      }
+
+      // Remove creator
+      if (removeIndex >= 0) {
+        const itemKey = args[removeIndex + 1];
+        const creatorIdx = parseInt(args[removeIndex + 2]) - 1;
+
+        if (!itemKey || isNaN(creatorIdx)) {
+          console.log('Usage: zotero creators --remove <key> <index>');
+          return;
+        }
+
+        const item = await db.select()
+          .from(items)
+          .where(and(eq(items.key, itemKey), eq(items.libraryId, library.id)))
+          .get();
+
+        if (!item) {
+          console.log(`${symbols.error} Item ${itemKey} not found`);
+          return;
+        }
+
+        const raw = JSON.parse(item.rawJson);
+        const creators = raw.creators || [];
+
+        if (creatorIdx < 0 || creatorIdx >= creators.length) {
+          console.log(`${symbols.error} Invalid creator index. Valid: 1-${creators.length}`);
+          return;
+        }
+
+        const removed = creators.splice(creatorIdx, 1)[0];
+        raw.creators = creators;
+
+        await db.update(items)
+          .set({
+            rawJson: JSON.stringify(raw),
+            version: item.version + 1,
+            synced: false
+          })
+          .where(eq(items.key, itemKey));
+
+        console.log(`${symbols.success} Removed ${removed.firstName || ''} ${removed.lastName || ''} from [${itemKey}]`);
+        return;
+      }
+
+      // Set primary
+      if (setPrimaryIndex >= 0) {
+        const itemKey = args[setPrimaryIndex + 1];
+        const creatorIdx = parseInt(args[setPrimaryIndex + 2]) - 1;
+
+        if (!itemKey || isNaN(creatorIdx)) {
+          console.log('Usage: zotero creators --set-primary <key> <index>');
+          return;
+        }
+
+        const item = await db.select()
+          .from(items)
+          .where(and(eq(items.key, itemKey), eq(items.libraryId, library.id)))
+          .get();
+
+        if (!item) {
+          console.log(`${symbols.error} Item ${itemKey} not found`);
+          return;
+        }
+
+        const raw = JSON.parse(item.rawJson);
+        const creators = raw.creators || [];
+
+        if (creatorIdx < 0 || creatorIdx >= creators.length) {
+          console.log(`${symbols.error} Invalid creator index. Valid: 1-${creators.length}`);
+          return;
+        }
+
+        // Move creator to front
+        const selected = creators.splice(creatorIdx, 1)[0];
+        creators.unshift(selected);
+        raw.creators = creators;
+
+        await db.update(items)
+          .set({
+            rawJson: JSON.stringify(raw),
+            version: item.version + 1,
+            synced: false
+          })
+          .where(eq(items.key, itemKey));
+
+        console.log(`${symbols.success} Set ${selected.firstName || ''} ${selected.lastName || ''} as primary author`);
+        return;
+      }
+
+      // Default help
+      console.log('Creator Management:');
+      console.log('  zotero creators --list <key>                List creators');
+      console.log('  zotero creators --add <key> <first> <last> [type]  Add creator');
+      console.log('  zotero creators --remove <key> <index>      Remove creator');
+      console.log('  zotero creators --set-primary <key> <idx>  Set primary author');
+    }
+  },
+
+  // ============ Shell launcher
 
   {
     name: 'shell',

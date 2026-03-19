@@ -251,3 +251,313 @@ describe('CLI Collections Command', () => {
     );
   });
 });
+
+describe('CLI Trash Command', () => {
+  let mockConsoleLog: any;
+  let mockConsoleError: any;
+  let originalArgv: string[];
+
+  beforeEach(() => {
+    mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    originalArgv = process.argv;
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    mockConsoleLog.mockRestore();
+    mockConsoleError.mockRestore();
+  });
+
+  it('should accept --list option', async () => {
+    const { main } = await import('../index.js');
+    process.argv = ['node', 'cli', 'trash', '--list'];
+
+    try {
+      await main();
+    } catch (e) {}
+
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Unknown')
+    );
+  });
+
+  it('should accept --count option', async () => {
+    const { main } = await import('../index.js');
+    process.argv = ['node', 'cli', 'trash', '--count'];
+
+    try {
+      await main();
+    } catch (e) {}
+
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Unknown')
+    );
+  });
+
+  it('should accept --restore option format', async () => {
+    const { main } = await import('../index.js');
+    process.argv = ['node', 'cli', 'trash', '--restore', 'ABCD1234'];
+
+    try {
+      await main();
+    } catch (e) {}
+
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Unknown')
+    );
+  });
+
+  it('should accept trash alias', async () => {
+    const { main } = await import('../index.js');
+    process.argv = ['node', 'cli', 'trashed', '--list'];
+
+    try {
+      await main();
+    } catch (e) {}
+
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Unknown')
+    );
+  });
+});
+
+describe('CLI Cite Command', () => {
+  let mockConsoleLog: any;
+  let mockConsoleError: any;
+  let originalArgv: string[];
+
+  beforeEach(() => {
+    mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    originalArgv = process.argv;
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    mockConsoleLog.mockRestore();
+    mockConsoleError.mockRestore();
+  });
+
+  it('should accept --list-styles option', async () => {
+    const { main } = await import('../index.js');
+    process.argv = ['node', 'cli', 'cite', '--list-styles'];
+
+    try {
+      await main();
+    } catch (e) {}
+
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Unknown')
+    );
+  });
+
+  it('should accept --style option', async () => {
+    const { main } = await import('../index.js');
+    process.argv = ['node', 'cli', 'cite', 'ABCD1234', '--style', 'apa'];
+
+    try {
+      await main();
+    } catch (e) {}
+
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Unknown')
+    );
+  });
+
+  it('should accept --format option', async () => {
+    const { main } = await import('../index.js');
+    process.argv = ['node', 'cli', 'cite', 'ABCD1234', '--format', 'bibtex'];
+
+    try {
+      await main();
+    } catch (e) {}
+
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Unknown')
+    );
+  });
+
+  it('should accept bibtex alias', async () => {
+    const { main } = await import('../index.js');
+    process.argv = ['node', 'cli', 'bib', 'ABCD1234'];
+
+    try {
+      await main();
+    } catch (e) {}
+
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Unknown')
+    );
+  });
+});
+
+describe('CLI Batch Command', () => {
+  let mockConsoleLog: any;
+  let mockConsoleError: any;
+  let originalArgv: string[];
+
+  beforeEach(() => {
+    mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    originalArgv = process.argv;
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    mockConsoleLog.mockRestore();
+    mockConsoleError.mockRestore();
+  });
+
+  it('should accept --tag option format', async () => {
+    const { main } = await import('../index.js');
+    process.argv = ['node', 'cli', 'batch', '--tag', 'ABCD1234', 'WXYZ5678', '--', 'tag1', 'tag2'];
+
+    try {
+      await main();
+    } catch (e) {}
+
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Unknown')
+    );
+  });
+
+  it('should accept --add-to-collection option format', async () => {
+    const { main } = await import('../index.js');
+    process.argv = ['node', 'cli', 'batch', '--add-to-collection', 'ABCD1234', 'WXYZ5678'];
+
+    try {
+      await main();
+    } catch (e) {}
+
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Unknown')
+    );
+  });
+
+  it('should accept -d option format', async () => {
+    const { main } = await import('../index.js');
+    process.argv = ['node', 'cli', 'batch', '-d', 'ABCD1234', 'WXYZ5678'];
+
+    try {
+      await main();
+    } catch (e) {}
+
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Unknown')
+    );
+  });
+
+  it('should accept --export option format', async () => {
+    const { main } = await import('../index.js');
+    process.argv = ['node', 'cli', 'batch', '--export', 'json', 'output.json', 'ABCD1234'];
+
+    try {
+      await main();
+    } catch (e) {}
+
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Unknown')
+    );
+  });
+
+  it('should accept bulk alias', async () => {
+    const { main } = await import('../index.js');
+    process.argv = ['node', 'cli', 'bulk', '--list'];
+
+    try {
+      await main();
+    } catch (e) {}
+
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Unknown')
+    );
+  });
+});
+
+describe('CLI Creators Command', () => {
+  let mockConsoleLog: any;
+  let mockConsoleError: any;
+  let originalArgv: string[];
+
+  beforeEach(() => {
+    mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    originalArgv = process.argv;
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    mockConsoleLog.mockRestore();
+    mockConsoleError.mockRestore();
+  });
+
+  it('should accept --list option', async () => {
+    const { main } = await import('../index.js');
+    process.argv = ['node', 'cli', 'creators', '--list', 'ABCD1234'];
+
+    try {
+      await main();
+    } catch (e) {}
+
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Unknown')
+    );
+  });
+
+  it('should accept --add option format', async () => {
+    const { main } = await import('../index.js');
+    process.argv = ['node', 'cli', 'creators', '--add', 'ABCD1234', 'John', 'Smith', 'author'];
+
+    try {
+      await main();
+    } catch (e) {}
+
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Unknown')
+    );
+  });
+
+  it('should accept --remove option format', async () => {
+    const { main } = await import('../index.js');
+    process.argv = ['node', 'cli', 'creators', '--remove', 'ABCD1234', '1'];
+
+    try {
+      await main();
+    } catch (e) {}
+
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Unknown')
+    );
+  });
+
+  it('should accept --set-primary option format', async () => {
+    const { main } = await import('../index.js');
+    process.argv = ['node', 'cli', 'creators', '--set-primary', 'ABCD1234', '1'];
+
+    try {
+      await main();
+    } catch (e) {}
+
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Unknown')
+    );
+  });
+
+  it('should accept author alias', async () => {
+    const { main } = await import('../index.js');
+    process.argv = ['node', 'cli', 'author', '--list', 'ABCD1234'];
+
+    try {
+      await main();
+    } catch (e) {}
+
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Unknown')
+    );
+  });
+});
