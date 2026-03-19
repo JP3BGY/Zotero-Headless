@@ -88,6 +88,16 @@ const en: Translations = {
       dryRunChildren: (count: number) => `Children: ${count} attachment(s) would also be affected`,
       dryRunNoChanges: 'No changes made.',
     },
+    annotations: {
+      title: (title: string, count: number) => `Annotations for "${title}" (${count} annotations):`,
+      noAnnotations: 'No annotations found for this item.',
+      noAttachments: 'No PDF attachments found for this item.',
+      notFound: 'Item not found.',
+      page: 'p.',
+      note: 'Note',
+      comment: 'Comment',
+      dryRunNoChanges: 'No changes made.',
+    },
     export: {
       exporting: 'Exporting...',
       exported: (path: string) => `Exported to: ${path}`,
@@ -137,6 +147,7 @@ const en: Translations = {
     webpage: 'Webpage',
     attachment: 'Attachment',
     note: 'Note',
+    annotation: 'Annotation',
   },
   conflict: {
     title: 'Conflict Detected',
@@ -235,6 +246,15 @@ const zh: Translations = {
       dryRunChildren: (count: number) => `子项: ${count} 个附件也将受到影响`,
       dryRunNoChanges: '未做任何更改。',
     },
+    annotations: {
+      title: (title: string, count: number) => `"${title}" 的标注 (${count} 条):`,
+      noAnnotations: '未找到此文献的标注。',
+      noAttachments: '未找到此文献的 PDF 附件。',
+      notFound: '未找到文献。',
+      page: '页',
+      note: '笔记',
+      comment: '批注',
+    },
     export: {
       exporting: '导出中...',
       exported: (path: string) => `已导出到: ${path}`,
@@ -284,6 +304,7 @@ const zh: Translations = {
     webpage: '网页',
     attachment: '附件',
     note: '笔记',
+    annotation: '标注',
   },
   conflict: {
     title: '! 检测到冲突',

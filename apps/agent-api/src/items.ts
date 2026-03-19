@@ -6,15 +6,16 @@
  */
 
 import { eq, like, desc, asc, and, isNull, sql, inArray } from 'drizzle-orm';
-import type { 
-  Item, 
-  ListOptions, 
-  ListResult, 
-  SearchOptions, 
+import type {
+  Item,
+  Annotation,
+  ListOptions,
+  ListResult,
+  SearchOptions,
   SearchResult,
   DeleteOptions,
   BatchOptions,
-  BatchResult 
+  BatchResult
 } from './types.js';
 import { ItemNotFoundError, ValidationError, BATCH_DELETE_LIMIT } from './types.js';
 
@@ -312,6 +313,98 @@ export async function restoreItem(key: string): Promise<void> {
     })
     .where(eq(items.key, key))
     .run();
+}
+
+/**
+ * 获取文献的标注/批注
+ * 支持传入文献 key 或 PDF 附件 key
+ */
+export async function getAnnotations(
+  itemKey: string,
+  options?: { color?: string; type?: string }
+): Promise<Annotation[]> {
+  const { getDatabase, items } = await getDb();
+  const db = getDatabase();
+
+  // Find the item
+  const item = await db.select()
+    .from(items)
+    .where(eq(items.key, itemKey))
+    .get();
+
+  if (!item) {
+    throw new ItemNotFoundError(itemKey);
+  }
+
+  // Determine attachment keys to search
+  let attachmentKeys: string[] = [];
+  const rawData = JSON.parse(item.rawJson || '{}');
+  const data = rawData.data || rawData;
+
+  if (item.itemType === 'attachment') {
+    attachmentKeys = [itemKey];
+  } else {
+    // Find PDF attachment children
+    const children = await db.select()
+      .from(items)
+      .where(and(
+        eq(items.itemType, 'attachment'),
+        eq(items.deleted, false),
+        like(items.rawJson, `%"parentItem":"${itemKey}"%`)
+      ))
+      .all();
+    attachmentKeys = children.map((c: any) => c.key);
+  }
+
+  if (attachmentKeys.length === 0) {
+    return [];
+  }
+
+  // Find all annotation items for these attachments
+  const allAnnotations: any[] = [];
+  for (const attKey of attachmentKeys) {
+    const annots = await db.select()
+      .from(items)
+      .where(and(
+        eq(items.itemType, 'annotation'),
+        eq(items.deleted, false),
+        like(items.rawJson, `%"parentItem":"${attKey}"%`)
+      ))
+      .all();
+    allAnnotations.push(...annots);
+  }
+
+  // Parse and filter annotations
+  let result: Annotation[] = allAnnotations.map((row: any) => {
+    const raw = JSON.parse(row.rawJson || '{}');
+    const d = raw.data || raw;
+    return {
+      key: row.key,
+      parentAttachmentKey: d.parentItem || '',
+      annotationType: d.annotationType || 'highlight',
+      annotationText: d.annotationText || undefined,
+      annotationComment: d.annotationComment || undefined,
+      annotationColor: d.annotationColor || undefined,
+      annotationPageLabel: d.annotationPageLabel || undefined,
+      annotationSortIndex: d.annotationSortIndex || undefined,
+      tags: d.tags || undefined,
+    };
+  });
+
+  // Apply filters
+  if (options?.color) {
+    const colorFilter = options.color.toLowerCase();
+    result = result.filter(a => a.annotationColor?.toLowerCase().includes(colorFilter));
+  }
+  if (options?.type) {
+    const typeFilter = options.type.toLowerCase();
+    result = result.filter(a => a.annotationType.toLowerCase() === typeFilter);
+  }
+
+  // Sort by annotationSortIndex (natural page order)
+  result.sort((a, b) => (a.annotationSortIndex || '').localeCompare(b.annotationSortIndex || ''));
+
+  return result;
 }
 
 // ============ 辅助函数 ============

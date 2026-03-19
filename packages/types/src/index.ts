@@ -10,7 +10,7 @@ export type ItemType =
   | 'audioRecording' | 'videoRecording' | 'image' | 'presentation'
   | 'interview' | 'letter' | 'manuscript' | 'dictionaryEntry'
   | 'encyclopediaArticle' | 'statute' | 'case' | 'hearing'
-  | 'device' | 'software' | 'email' | 'attachment' | 'note';
+  | 'device' | 'software' | 'email' | 'attachment' | 'note' | 'annotation';
 
 // ============ Creator Types ============
 

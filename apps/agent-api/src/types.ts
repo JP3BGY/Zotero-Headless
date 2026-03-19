@@ -156,6 +156,20 @@ export interface DeleteOptions {
   permanent?: boolean;
 }
 
+// ============ Annotation 相关 ============
+
+export interface Annotation {
+  key: string;
+  parentAttachmentKey: string;
+  annotationType: string;  // 'highlight' | 'note' | 'image' | 'ink' | 'underline'
+  annotationText?: string;
+  annotationComment?: string;
+  annotationColor?: string;
+  annotationPageLabel?: string;
+  annotationSortIndex?: string;
+  tags?: Tag[];
+}
+
 // ============ 批量操作 ============
 
 export interface BatchOptions {

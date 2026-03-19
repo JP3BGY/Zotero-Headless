@@ -16,7 +16,8 @@ export {
   getItemOrThrow,
   deleteItem,
   batchDelete,
-  restoreItem
+  restoreItem,
+  getAnnotations
 } from './items.js';
 
 // 同步
