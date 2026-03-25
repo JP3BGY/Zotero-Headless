@@ -12,17 +12,15 @@
 apps/
   cli/              # 现有 CLI（人类界面）
     src/
-      index.ts      # 命令行入口（调用 api 包）
-      
-  api/              # 新增：程序化 API（Agent 界面）
+      index.ts      # 命令行入口
+
+  agent-api/        # 程序化 API（Agent 界面）  ← 已实现
     src/
       index.ts      # 统一导出
       types.ts      # 共享类型定义
       items.ts      # 文献管理 API
       sync.ts       # 同步 API
-      search.ts     # 搜索 API
       config.ts     # 配置 API
-      interactive.ts # 交互式操作（供 CLI 使用）
 ```
 
 ## API 设计原则
@@ -104,55 +102,60 @@ export interface SyncProgress {
 
 ## API 列表
 
-### 文献管理
+### 文献管理（已实现）
 ```typescript
-export function listItems(options: ListOptions): Promise<Item[]>
-export function searchItems(query: string, options?: SearchOptions): Promise<SearchResult>
-export function getItem(key: string): Promise<Item | null>
-export function createItem(data: Partial<Item>): Promise<Item>
-export function updateItem(key: string, data: Partial<Item>): Promise<Item>
-export function deleteItem(key: string, options?: DeleteOptions): Promise<void>
-export function trashItem(key: string): Promise<void>
+export function listItems(options: ListOptions): Promise<Item[]>          // ✅ 已实现
+export function searchItems(query: string, options?: SearchOptions): Promise<SearchResult>  // ✅ 已实现
+export function getItem(key: string): Promise<Item | null>                // ✅ 已实现
+export function getItemOrThrow(key: string): Promise<Item>                // ✅ 已实现
+export function deleteItem(key: string, options?: DeleteOptions): Promise<void>  // ✅ 已实现
+export function batchDelete(keys: string[], options?: BatchOptions): Promise<BatchResult>  // ✅ 已实现
+export function restoreItem(key: string): Promise<void>                   // ✅ 已实现
+export function getAnnotations(key: string): Promise<Annotation[]>        // ✅ 已实现
 ```
 
-### 同步
+### 同步（已实现）
 ```typescript
-export function sync(options?: SyncOptions): Promise<SyncResult>
-export function getConflicts(): Promise<Conflict[]>
-export function resolveConflict(conflict: Conflict, strategy: ConflictStrategy): Promise<void>
-export function getSyncStatus(): Promise<SyncStatus>
+export function sync(options?: SyncOptions): Promise<SyncResult>          // ✅ 已实现
+export function getSyncStatus(): Promise<SyncStatus>                      // ✅ 已实现
+export function getConflicts(): Promise<Conflict[]>                       // ✅ 已实现
+export function resolveConflict(conflict: Conflict, strategy: ConflictStrategy): Promise<void>  // ✅ 已实现
+export function resolveAllConflicts(strategy: ConflictStrategy): Promise<void>  // ✅ 已实现
 ```
 
-### 配置
+### 配置（已实现）
 ```typescript
-export function getConfig(): Promise<Config>
-export function setConfig(key: string, value: any): Promise<void>
-export function validateApiKey(key: string): Promise<boolean>
+export function getConfig(): Promise<Config>                              // ✅ 已实现
+export function setConfig(key: string, value: any): Promise<void>         // ✅ 已实现
+export function validateApiKey(key: string): Promise<boolean>             // ✅ 已实现
+export function initConfig(): Promise<void>                               // ✅ 已实现
 ```
 
-### Agent 专用扩展
+### 未实现（计划中）
 ```typescript
-// 批量操作
-export function batchDelete(keys: string[], options?: BatchOptions): Promise<BatchResult>
+// 文献创建与更新
+export function createItem(data: Partial<Item>): Promise<Item>            // 🔲 计划中
+export function updateItem(key: string, data: Partial<Item>): Promise<Item>  // 🔲 计划中
+export function trashItem(key: string): Promise<void>                     // 🔲 计划中
 
 // 智能搜索（带语义理解）
-export function semanticSearch(query: string): Promise<SearchResult>
+export function semanticSearch(query: string): Promise<SearchResult>      // 🔲 计划中
 
 // 导出格式化
-export function exportItems(keys: string[], format: 'json' | 'bibtex' | 'csv'): Promise<string>
+export function exportItems(keys: string[], format: 'json' | 'bibtex' | 'csv'): Promise<string>  // 🔲 计划中
 
 // 观察模式（适合 Agent 持续监听）
-export function watchChanges(callback: (change: ChangeEvent) => void): () => void
+export function watchChanges(callback: (change: ChangeEvent) => void): () => void  // 🔲 计划中
 ```
 
 ## 实现计划
 
-1. **提取核心逻辑** - 将 CLI 命令处理函数移到 api 包
-2. **定义类型** - 创建完整的 TypeScript 类型定义
-3. **实现 API 层** - 编写 api/src/*.ts
-4. **重构 CLI** - 让 CLI 调用 API 层
-5. **添加测试** - 确保 API 和 CLI 行为一致
-6. **Agent 示例** - 提供 Agent 使用示例
+1. ✅ **提取核心逻辑** - 已将核心逻辑提取到 `apps/agent-api/`
+2. ✅ **定义类型** - 已创建 `types.ts` 共享类型定义
+3. ✅ **实现 API 层** - 已实现 items/sync/config 三个模块
+4. 🔲 **重构 CLI** - 让 CLI 调用 API 层（当前 CLI 仍为独立实现）
+5. 🔲 **添加测试** - 确保 API 和 CLI 行为一致
+6. 🔲 **Agent 示例** - 提供 Agent 使用示例
 
 ## 向后兼容
 

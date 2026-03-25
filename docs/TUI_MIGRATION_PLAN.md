@@ -7,7 +7,7 @@
 
 | Phase | 状态 | 备注 |
 |-------|------|------|
-| Phase 0: 组件化拆分与状态管理重构 | **已完成** | 18 个文件，~1400 行 |
+| Phase 0: 组件化拆分与状态管理重构 | **已完成** | 23 个文件 |
 | Phase 1: Spinner + StatusLine + 可折叠输出 | **大部分完成** | 仅 OutputGroup（可折叠输出）未实现 |
 | Phase 2: 富文本渲染 + 多行输入 + 历史持久化 | **部分完成** | 历史持久化已完成；富文本渲染、多行输入待实现 |
 | Phase 3: Keybinding 可配置 + 渲染优化 | **已完成** | Keybinding 通过 ~/.zoterrc 配置；渲染优化（React.memo + 窗口化）已就绪 |
@@ -45,16 +45,21 @@ apps/shell/src/
 │   ├── OutputLine.tsx           # 单行输出渲染（使用 chalk 彩色符号）
 │   ├── InputPrompt.tsx          # 输入行 (> prompt + TextInput + Spinner)
 │   ├── CompletionList.tsx       # 补全下拉列表
-│   ├── Spinner.tsx              # 自定义 braille 动画指示器 + 计时
 │   ├── StatusLine.tsx           # 顶部标题行
 │   ├── StatusBar.tsx            # 底部状态栏（db/sync/library 信息）
+│   ├── WelcomeBanner.tsx        # 启动欢迎界面（版本、快捷键提示）
+│   ├── ConfigPanel.tsx          # 交互式配置管理面板
 │   └── ConfirmPrompt.tsx        # y/n 确认提示（用于破坏性操作）
 ├── hooks/
 │   ├── useShellState.ts         # Shell 状态 Context + reducer（13 种 action）
 │   ├── useHistory.ts            # 命令历史 Hook
 │   ├── useCompletions.ts        # 补全逻辑 Hook
-│   ├── useScroll.ts             # 终端布局计算 Hook
+│   ├── useVisibleLines.ts       # 终端布局计算 Hook
+│   ├── useKeybindings.ts        # 快捷键配置 Hook
 │   └── useKeyHandler.ts         # 键盘输入处理 Hook
+├── utils/
+│   ├── dbInfo.ts                # 数据库信息查询工具
+│   └── formatTime.ts            # 时间格式化工具
 ├── types.ts                     # 共享类型定义
 ├── i18n.ts                      # 国际化字符串（中/英双语）
 ├── commands.ts                  # 命令系统（25+ 命令别名）

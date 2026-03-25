@@ -52,6 +52,14 @@
 | **自动补全** | ✅ | bash/zsh 命令补全支持 |
 | **交互式 Shell** | ✅ | REPL 模式，支持命令补全和历史记录 |
 | **i18n** | ✅ | 中英文界面切换 |
+| **回收站管理** | ✅ | 移至回收站、恢复、清空回收站 |
+| **批注查看** | ✅ | 查看 PDF 批注、高亮、笔记 |
+| **引用生成** | ✅ | 多种引用格式（APA、MLA、Chicago 等） |
+| **批量操作** | ✅ | 批量打标签、移动、删除、导出 |
+| **重复检测** | ✅ | 按 DOI/ISBN/标题检测并合并重复 |
+| **关联条目** | ✅ | 查看和管理条目之间的关联关系 |
+| **保存的搜索** | ✅ | 管理和运行 Zotero 保存的搜索 |
+| **作者管理** | ✅ | 查看、添加、删除条目作者 |
 
 ---
 
@@ -196,18 +204,29 @@ zotero edit ABCD1234 title "新标题"       # 类似 Unix 风格
 zotero set ABCD1234 title "新标题"        # 类似设置变量
 ```
 
-### 7. 删除文献 (delete / rm / del / d / trash)
+### 7. 删除文献 (delete / rm / del / d)
 
 ```bash
 zotero delete ABCD1234              # 移至回收站（完整命令）
 zotero rm ABCD1234                  # Unix 风格删除
-zotero rm ABCD1234 -f               # 强制永久删除（类似 rm -f）
-zotero rm ABCD1234 -p               # --permanent 短形式
+zotero rm ABCD1234 -f               # 强制永久删除（类似 rm -f，仅 Shell 模式）
+zotero rm ABCD1234 -p               # --permanent 短形式（仅 Shell 模式）
+zotero rm ABCD1234 -n               # --dry-run 预览删除
 zotero del ABCD1234                 # del 别名
-zotero trash ABCD1234               # trash 别名
 ```
 
-### 8. 附件同步 (WebDAV)
+### 8. 回收站管理 (trash / restore / trash:empty)
+
+```bash
+zotero trash                        # 列出回收站中的条目
+zotero trash --list                 # 同上
+zotero restore ABCD1234             # 恢复单个条目
+zotero restore --all                # 恢复所有条目
+zotero trash:empty                  # 清空回收站（永久删除）
+zotero trash:empty --dry-run        # 预览将删除的内容
+```
+
+### 9. 附件同步 (WebDAV)
 
 ```bash
 zotero webdav:config https://dav.example.com/dav user pass
@@ -507,12 +526,112 @@ zotero list -<Tab><Tab>
 
 | 命令 | 别名 | 说明 | 同步需求 |
 |------|------|------|----------|
-| `zotero add-by-id <id>` | `add` | 通过 DOI/arXiv/ISBN/PMID 添加 | 自动同步 |
-| `zotero add <类型> <标题>` | `a`, `new`, `touch` | 手动添加新文献 | 自动同步 |
-| `zotero update <key> <字段> <值>` | `u`, `edit`, `set` | 更新文献（仅本地） | 需运行 `sync` |
-| `zotero delete <key>` | `rm`, `del`, `d`, `trash` | 删除/移至回收站 | 需运行 `sync` |
-| `zotero delete <key> --permanent` | `rm -p` | 永久删除 | 需运行 `sync` |
-| `zotero delete <key> --force` | `rm -f` | 强制删除（同 --permanent） | 需运行 `sync` |
+| `zotero add-by-id <id>` | `addby` | 通过 DOI/arXiv/ISBN/PMID 添加 | 自动同步 |
+| `zotero add <类型> <标题>` | `a`, `new`, `touch`, `create` | 手动添加新文献 | 自动同步 |
+| `zotero update <key> <字段> <值>` | `u`, `edit`, `set`, `mod` | 更新文献（仅本地） | 需运行 `sync` |
+| `zotero delete <key>` | `rm`, `del`, `d` | 删除/移至回收站 | 需运行 `sync` |
+| `zotero delete <key> --permanent` | `rm -p` | 永久删除（仅 Shell 模式） | 需运行 `sync` |
+| `zotero delete <key> --force` | `rm -f` | 强制删除（同 --permanent，仅 Shell 模式） | 需运行 `sync` |
+| `zotero delete <key> --dry-run` | `rm -n` | 预览删除，不执行 | — |
+
+### 回收站命令
+
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `zotero trash` | `trash:list`, `trash:view` | 列出回收站中的条目 |
+| `zotero trash --list` | | 同上 |
+| `zotero restore <key>` | `undelete`, `untrash` | 恢复已删除条目 |
+| `zotero restore --all` | | 恢复所有已删除条目 |
+| `zotero trash:empty` | `trash:clear`, `empty-trash` | 清空回收站（永久删除） |
+| `zotero trash:empty --dry-run` | | 预览将要永久删除的内容 |
+
+### 集合/文件夹命令
+
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `zotero collections --list` | `col`, `folder` | 列出所有集合 |
+| `zotero collections --create <name>` | | 创建新集合 |
+| `zotero collections --parent <key>` | | 指定父集合（嵌套） |
+| `zotero collections --add-item <col-key> <item-key>` | | 将条目添加到集合 |
+| `zotero collections --remove-item <col-key> <item-key>` | | 从集合移除条目 |
+| `zotero collections --delete <key>` | | 删除集合 |
+
+### 标签命令
+
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `zotero tags --list` | `tag`, `t` | 列出所有标签 |
+| `zotero tags --add <key> <tags...>` | | 为条目添加标签 |
+| `zotero tags --remove <key> <tags...>` | | 移除条目标签 |
+| `zotero tags --item <key>` | | 查看条目的标签 |
+| `zotero tags --delete <tag>` | | 从库中删除标签 |
+
+### 批注命令
+
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `zotero annotations <key>` | `annot`, `highlights`, `hl` | 查看条目的 PDF 批注 |
+| `zotero annotations <key> --color <color>` | | 按颜色过滤 |
+| `zotero annotations <key> --type <type>` | | 按类型过滤（highlight/note/image/underline） |
+| `zotero annotations <key> --format <fmt>` | | 输出格式（text/json/markdown） |
+
+### 引用命令
+
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `zotero cite` | `citation`, `bibliography`, `bib` | 生成引用 |
+| `zotero cite --item <key>` | | 指定条目 |
+| `zotero cite --style <style>` | | 引用风格（apa/mla/chicago/ieee/harvard） |
+| `zotero cite --format <format>` | | 输出格式（text/html/bibtex/json） |
+| `zotero cite --output <path>` | | 输出到文件 |
+
+### 批量操作命令
+
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `zotero batch --tag <keys...> <tags...>` | `bulk` | 批量添加标签 |
+| `zotero batch --untag <keys...> <tags...>` | | 批量移除标签 |
+| `zotero batch --add-to-collection <col-key> <item-keys...>` | | 批量添加到集合 |
+| `zotero batch --remove-from-collection <col-key> <item-keys...>` | | 批量从集合移除 |
+| `zotero batch --delete <keys...>` | | 批量删除（移至回收站） |
+| `zotero batch --export <format> <output> <keys...>` | | 批量导出 |
+
+### 作者管理命令
+
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `zotero creators --list <key>` | `author`, `authors` | 列出条目的作者 |
+| `zotero creators --add <key> <first> <last> [type]` | | 添加作者 |
+| `zotero creators --remove <key> <index>` | | 删除作者（按索引） |
+| `zotero creators --set-primary <key> <index>` | | 设置主要作者 |
+
+### 重复检测命令
+
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `zotero duplicates` | `dupes`, `find-duplicates` | 检测重复条目 |
+| `zotero duplicates --match-doi` | | 按 DOI 匹配 |
+| `zotero duplicates --match-isbn` | | 按 ISBN 匹配 |
+| `zotero duplicates --match-title` | | 按标题精确匹配 |
+| `zotero duplicates --fuzzy-title` | | 按标题模糊匹配 |
+| `zotero duplicates --merge <group-key>` | | 合并重复（保留最旧） |
+| `zotero duplicates --dry-run` | | 预览重复，不合并 |
+
+### 关联条目命令
+
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `zotero related --list <key>` | `rel` | 列出关联条目 |
+| `zotero related --add <key> <related-key>` | | 添加关联 |
+| `zotero related --remove <key> <related-key>` | | 移除关联 |
+
+### 保存的搜索命令
+
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `zotero searches --list` | `saved-searches` | 列出保存的搜索 |
+| `zotero searches --run <key>` | | 运行保存的搜索 |
+| `zotero searches --delete <key>` | | 删除保存的搜索 |
 
 ### add-by-id 命令
 
@@ -568,21 +687,27 @@ zotero webdav:sync
 
 ### 导出命令
 
-| 命令 | 说明 |
-|------|------|
-| `zotero export` | 导出为 BibTeX |
-| `zotero export bibtex [文件]` | 导出为 BibTeX |
-| `zotero export ris [文件]` | 导出为 RIS |
-| `zotero export csv [文件]` | 导出为 CSV |
-| `zotero export json [文件]` | 导出为 JSON |
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `zotero export` | `e`, `out`, `save` | 导出为 BibTeX（默认） |
+| `zotero export --format bibtex` | `-f bibtex` | 导出为 BibTeX |
+| `zotero export --format ris` | `-f ris` | 导出为 RIS |
+| `zotero export --format csv` | `-f csv` | 导出为 CSV |
+| `zotero export --format json` | `-f json` | 导出为 JSON |
+| `zotero export --output <path>` | `-o <path>` | 指定输出文件 |
 
 ### 工具命令
 
-| 命令 | 说明 |
-|------|------|
-| `zotero verify` | 验证 API Key 有效性 |
-| `zotero --help` | 显示帮助信息 |
-| `zotero --version` | 显示版本 |
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `zotero verify` | `v`, `check`, `test`, `ping` | 验证 API Key 有效性 |
+| `zotero config` | `cfg`, `conf` | 管理配置 |
+| `zotero config --get <key>` | | 获取配置值 |
+| `zotero config --set <key=value>` | | 设置配置值 |
+| `zotero config --list` | | 列出所有配置 |
+| `zotero history` | `hist`, `recent` | 查看命令历史 |
+| `zotero history --clear` | | 清除历史 |
+| `zotero help` | `h`, `?` | 显示帮助信息 |
 
 ### 命令选项示例
 
@@ -655,11 +780,16 @@ zotero shell --lang=zh    # 中文界面（默认）
 
 | 特性 | 说明 |
 |------|------|
-| **命令补全** | Tab 键自动补全命令和 Item Key |
-| **Item Key 补全** | 输入 `rm `、`get ` 等命令后自动补全文献 Key |
-| **历史记录** | ↑/↓ 键浏览历史命令 |
-| **实时输出** | 同步进度实时显示 |
+| **欢迎界面** | 启动时显示 WelcomeBanner，包含版本、快捷键提示 |
+| **命令补全** | Tab 键自动补全命令和 Item Key（模糊匹配） |
+| **Item Key 补全** | 输入 `rm `、`get ` 等命令后自动补全文献 Key（60s 缓存） |
+| **历史记录** | ↑/↓ 键浏览历史命令，跨会话持久化 |
+| **状态栏** | 底部 StatusBar 显示 User ID、数据库状态、库数量、条目数量、最近同步时间 |
+| **实时输出** | 同步进度实时显示，带 Spinner 动画和计时 |
+| **配置面板** | 交互式配置管理（ConfigPanel） |
 | **错误处理** | 网络错误友好提示，不中断会话 |
+| **快捷键可配置** | 通过 `~/.zoterrc` 自定义快捷键绑定 |
+| **永久删除** | 仅在 Shell 模式下允许 `--force`/`--permanent` 永久删除 |
 
 ### Shell 快捷键
 
@@ -667,7 +797,7 @@ zotero shell --lang=zh    # 中文界面（默认）
 |--------|------|
 | `Tab` | 自动补全命令或 Item Key |
 | `↑` / `↓` | 浏览历史命令 |
-| `Ctrl+C` | 退出 shell |
+| `Ctrl+C` (双击) | 退出 shell（单击取消当前操作） |
 | `PageUp` / `PageDown` | 滚动查看历史输出 |
 
 ### Shell 命令示例
@@ -726,8 +856,15 @@ zotero cat <key>     # get/show
 zotero grep <word>   # search
 zotero a <type>      # add
 zotero u <key>       # update
+zotero e             # export
 zotero st             # stats
 zotero v              # verify
+zotero n             # note
+zotero hl <key>      # annotations (highlights)
+zotero bib           # cite (bibliography)
+zotero dupes         # duplicates
+zotero rel           # related
+zotero col           # collections
 ```
 
 ---
@@ -1137,29 +1274,33 @@ zotero search "keyword" | zotero export --format bibtex
 
 ```bash
 # 运行所有测试
-npm test
+pnpm test
 
 # 监听模式
-npm run test:watch
+pnpm run test:watch
 
 # 运行特定测试
-npm test -- packages/sync-engine
+pnpm test --filter @zotero-headless/sync-engine
 ```
 
 ### 项目结构
 
 ```
 Zotero-Headless/
-├── apps/cli/              # CLI 入口
+├── apps/
+│   ├── cli/              # CLI 命令行入口
+│   ├── shell/            # 交互式 Shell TUI (Ink + React)
+│   └── agent-api/        # 程序化 API（供 AI Agent 使用）
 ├── packages/
-│   ├── api/              # Zotero API 客户端
-│   ├── core/             # 核心配置
-│   ├── database/         # SQLite 数据库层
-│   ├── sync-engine/      # 同步引擎
+│   ├── api/              # Zotero Web API 客户端
+│   ├── core/             # 核心配置与工具
+│   ├── database/         # SQLite 数据库层 (Drizzle ORM)
+│   ├── sync-engine/      # 双向同步引擎
 │   ├── attachment-manager/  # 附件管理
 │   ├── webdav-client/    # WebDAV 客户端
-│   └── types/            # TypeScript 类型
-└── tests/                # 测试套件
+│   └── types/            # TypeScript 类型定义
+├── scripts/              # 构建与打包脚本
+└── docs/                 # 文档
 ```
 
 ---
@@ -1224,4 +1365,4 @@ MIT License - See [LICENSE](LICENSE)
 
 ---
 
-*最后更新：2026-02-18*
+*最后更新：2026-03-25*
