@@ -13,5 +13,6 @@
     "exactOptionalPropertyTypes": true,
     "moduleDetection": "force",
     "esModuleInterop": false
-  }
+  },
+  "exclude": ["node_modules", "dist"]
 }
