@@ -627,11 +627,30 @@ export class AttachmentManager {
       ))
       .all();
 
+    // Filter out orphaned attachments whose parent items no longer exist locally
+    const validUnsynced: typeof unsynced = [];
+    for (const att of unsynced) {
+      if (att.parentItemKey) {
+        const parent = await this.db.select({ key: items.key })
+          .from(items)
+          .where(eq(items.key, att.parentItemKey))
+          .get();
+        if (!parent) {
+          console.warn(`   ${symbols.warning || '!'} Removing orphaned attachment ${att.key} (parent ${att.parentItemKey} no longer exists)`);
+          await this.db.delete(attachments)
+            .where(eq(attachments.key, att.key))
+            .run();
+          continue;
+        }
+      }
+      validUnsynced.push(att);
+    }
+
     const errors: string[] = [];
     let synced = 0;
 
-    for (let i = 0; i < unsynced.length; i++) {
-      const attachment = unsynced[i];
+    for (let i = 0; i < validUnsynced.length; i++) {
+      const attachment = validUnsynced[i];
       
       try {
         const result = await this.syncToWebDAV(attachment.key, options.onProgress);

@@ -829,48 +829,65 @@ export class SyncManager extends EventEmitter {
                   .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
                   .run();
                 
-                // 2. 更新 attachments 表的 parentItemKey
-                const attachmentCount = await tx.update(attachments)
-                  .set({ parentItemKey: newKey })
+                // 2. 更新 attachments 表的 parentItemKey 和 rawJson 中的 parentItem
+                const affectedAttachments = await tx.select()
+                  .from(attachments)
                   .where(and(
                     eq(attachments.parentItemKey, item.key),
                     eq(attachments.libraryId, libraryId)
                   ))
-                  .run();
-                
-                if (attachmentCount?.rowsAffected > 0) {
-                  console.log(`   Updated ${attachmentCount.rowsAffected} attachment(s) parent reference`);
+                  .all();
+
+                for (const att of affectedAttachments) {
+                  const updates: any = { parentItemKey: newKey };
+                  try {
+                    const rawData = JSON.parse(att.rawJson || '{}');
+                    if (rawData.data?.parentItem === item.key) {
+                      rawData.data.parentItem = newKey;
+                      updates.rawJson = JSON.stringify(rawData);
+                    }
+                  } catch (e) {
+                    // ignore parse error
+                  }
+                  await tx.update(attachments)
+                    .set(updates)
+                    .where(and(
+                      eq(attachments.key, att.key),
+                      eq(attachments.libraryId, libraryId)
+                    ))
+                    .run();
+                }
+
+                if (affectedAttachments.length > 0) {
+                  console.log(`   Updated ${affectedAttachments.length} attachment(s) parent reference`);
                 }
                 
-                // 3. 更新作为 parent 的 notes 的 rawJson 中的 parentItem
-                // Notes 存储在 items 表中，parentItem 在 rawJson.data.parentItem 中
-                const childNotes = await tx.select()
+                // 3. 更新子条目（notes 和 attachments）的 rawJson 中的 parentItem
+                const childItems = await tx.select()
                   .from(items)
                   .where(and(
-                    eq(items.itemType, 'note'),
                     eq(items.libraryId, libraryId),
                     like(items.rawJson, `%"parentItem":"${item.key}"%`)
                   ))
                   .all();
-                
-                for (const note of childNotes) {
+
+                for (const child of childItems) {
                   try {
-                    const rawData = JSON.parse(note.rawJson || '{}');
+                    const rawData = JSON.parse(child.rawJson || '{}');
                     if (rawData.data?.parentItem === item.key) {
                       rawData.data.parentItem = newKey;
-                      rawData.key = newKey; // 同时更新 key 字段
                       await tx.update(items)
                         .set({ rawJson: JSON.stringify(rawData) })
-                        .where(and(eq(items.key, note.key), eq(items.libraryId, libraryId)))
+                        .where(and(eq(items.key, child.key), eq(items.libraryId, libraryId)))
                         .run();
                     }
                   } catch (e) {
-                    console.warn(`      Failed to update note ${note.key} parent reference: ${e}`);
+                    console.warn(`      Failed to update child ${child.key} parent reference: ${e}`);
                   }
                 }
-                
-                if (childNotes.length > 0) {
-                  console.log(`   Updated ${childNotes.length} note(s) parent reference`);
+
+                if (childItems.length > 0) {
+                  console.log(`   Updated ${childItems.length} child item(s) parent reference`);
                 }
               });
               
@@ -1065,7 +1082,7 @@ export class SyncManager extends EventEmitter {
       libraryId,
       apiItem.version,
       1, // synced = true
-      0, // deleted = false
+      data.deleted ? 1 : 0, // deleted: respect trash status from API
       createdAt,
       updatedAt,
       data.itemType ?? 'document',
@@ -1087,6 +1104,21 @@ export class SyncManager extends EventEmitter {
       JSON.stringify(data.extra ?? {}),
       JSON.stringify(apiItem)
     );
+
+    // Sync tags to item_tags table
+    const tags: Array<{ tag: string; type?: number }> = data.tags ?? [];
+    if (tags.length > 0) {
+      const now = Math.floor(Date.now() / 1000);
+      // Clear existing tags for this item, then re-insert
+      sqlite.prepare('DELETE FROM item_tags WHERE item_key = ? AND library_id = ?')
+        .run(apiItem.key, libraryId);
+      const tagStmt = sqlite.prepare(
+        'INSERT OR IGNORE INTO item_tags (item_key, library_id, tag, tag_type, created_at) VALUES (?, ?, ?, ?, ?)'
+      );
+      for (const t of tags) {
+        tagStmt.run(apiItem.key, libraryId, t.tag, t.type ?? 0, now);
+      }
+    }
   }
 
   /**

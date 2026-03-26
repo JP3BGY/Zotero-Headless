@@ -213,7 +213,7 @@ export class ZoteroAPIClient {
     const response = await this.request<Record<string, number>>(
       'GET',
       `${this.getLibraryPath(libraryId, libraryType)}/items`,
-      { params: { since, format: 'versions' } }
+      { params: { since, format: 'versions', includeTrashed: true } }
     );
     return response.data;
   }
