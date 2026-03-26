@@ -5620,17 +5620,18 @@ For more info: https://github.com/altairwei/Zotero-Headless
   {
     name: 'cite',
     aliases: ['citation', 'bibliography', 'bib'],
-    description: 'Generate citations and bibliography in various formats',
+    description: 'Generate citations and bibliography using CSL (Citation Style Language)',
     options: [
-      { name: '--style', alias: '-s', description: 'Citation style (apa, mla, chicago, ieee, harvard)', value: '<style>' },
-      { name: '--format', alias: '-f', description: 'Output format (text, html, bibtex, json)', value: '<format>' },
+      { name: '--style', alias: '-s', description: 'Citation style (apa, vancouver, harvard)', value: '<style>' },
+      { name: '--format', alias: '-f', description: 'Output format (text, html, bibtex)', value: '<format>' },
       { name: '--output', alias: '-o', description: 'Output file', value: '<path>' },
       { name: '--item', alias: '-i', description: 'Get citation for specific item', value: '<key>' },
+      { name: '--lang', description: 'Locale for citation (e.g. en-US, zh-CN)', value: '<locale>' },
     ],
     examples: [
       'zotero cite ABCD1234',
       'zotero cite ABCD1234 --style apa',
-      'zotero cite ABCD1234 --style mla --format bibtex',
+      'zotero cite ABCD1234 --format bibtex',
       'zotero cite --list-styles',
     ],
     execute: async (args) => {
@@ -5648,17 +5649,18 @@ For more info: https://github.com/altairwei/Zotero-Headless
       const formatIndex = args.indexOf('--format');
       const outputIndex = args.indexOf('--output');
       const itemIndex = args.indexOf('--item');
+      const langIndex = args.indexOf('--lang');
       const listStyles = args.includes('--list-styles');
 
       // List available styles
       if (listStyles) {
-        console.log('Available citation styles:');
-        console.log('  apa        - American Psychological Association');
-        console.log('  mla        - Modern Language Association');
-        console.log('  chicago    - Chicago Manual of Style');
-        console.log('  ieee       - Institute of Electrical and Electronics Engineers');
+        console.log('Available citation styles (CSL):');
+        console.log('  apa        - American Psychological Association (7th ed.)');
+        console.log('  vancouver  - Vancouver system');
         console.log('  harvard    - Harvard referencing style');
-        console.log('  Vancouver  - Vancouver system');
+        console.log('\nOutput formats:');
+        console.log('  text       - Plain text (default)');
+        console.log('  html       - HTML formatted');
         console.log('  bibtex     - BibTeX format');
         return;
       }
@@ -5673,6 +5675,17 @@ For more info: https://github.com/altairwei/Zotero-Headless
       if (formatIndex >= 0 && args[formatIndex + 1]) {
         outputFormat = args[formatIndex + 1].toLowerCase();
       }
+
+      let locale = 'en-US';
+      if (langIndex >= 0 && args[langIndex + 1]) {
+        locale = args[langIndex + 1];
+      }
+
+      // Map style aliases
+      const styleMap: Record<string, string> = {
+        'harvard': 'harvard1',
+      };
+      const templateId = styleMap[style] || style;
 
       // Find item key from various positions
       let itemKey: string | undefined;
@@ -5710,80 +5723,118 @@ For more info: https://github.com/altairwei/Zotero-Headless
         return;
       }
 
-      // Parse item data - rawJson may be { data: { ... } } (from API) or { data: { ... } } (locally created)
+      // Parse item data
       const rawJson = JSON.parse(item.rawJson);
       const raw = rawJson.data || rawJson;
       let creators = raw.creators || [];
       if (typeof creators === 'string') {
         try { creators = JSON.parse(creators); } catch { creators = []; }
       }
-      creators = creators as Array<{ firstName?: string; lastName?: string; creatorType?: string }>;
 
-      // Generate citation based on style
+      // Convert Zotero item to CSL-JSON
+      const zoteroToCslType: Record<string, string> = {
+        'journalArticle': 'article-journal',
+        'book': 'book',
+        'bookSection': 'chapter',
+        'conferencePaper': 'paper-conference',
+        'thesis': 'thesis',
+        'report': 'report',
+        'webpage': 'webpage',
+        'preprint': 'article',
+        'patent': 'patent',
+        'presentation': 'speech',
+        'document': 'document',
+        'magazineArticle': 'article-magazine',
+        'newspaperArticle': 'article-newspaper',
+        'encyclopediaArticle': 'entry-encyclopedia',
+        'dictionaryEntry': 'entry-dictionary',
+        'film': 'motion_picture',
+        'tvBroadcast': 'broadcast',
+        'radioBroadcast': 'broadcast',
+        'map': 'map',
+        'statute': 'legislation',
+        'case': 'legal_case',
+        'hearing': 'hearing',
+        'bill': 'bill',
+        'letter': 'personal_communication',
+        'email': 'personal_communication',
+        'interview': 'interview',
+        'blogPost': 'post-weblog',
+        'forumPost': 'post',
+        'computerProgram': 'software',
+        'audioRecording': 'song',
+        'videoRecording': 'motion_picture',
+        'artwork': 'graphic',
+        'manuscript': 'manuscript',
+      };
+
+      // Parse date string to CSL date-parts
+      function parseDateToCsl(dateStr: string): any {
+        if (!dateStr) return undefined;
+        // Try ISO or common formats: "2017-8", "2017-08-24", "2017", "August 2017"
+        const isoMatch = dateStr.match(/^(\d{4})(?:-(\d{1,2})(?:-(\d{1,2}))?)?/);
+        if (isoMatch) {
+          const parts: number[] = [parseInt(isoMatch[1])];
+          if (isoMatch[2]) parts.push(parseInt(isoMatch[2]));
+          if (isoMatch[3]) parts.push(parseInt(isoMatch[3]));
+          return { 'date-parts': [parts] };
+        }
+        return { literal: dateStr };
+      }
+
+      // Map Zotero creator types to CSL roles
+      function mapCreators(zoteroCreators: any[]): any[] {
+        return zoteroCreators.map(c => ({
+          family: c.lastName || undefined,
+          given: c.firstName || undefined,
+          literal: (!c.lastName && !c.firstName && c.name) ? c.name : undefined,
+        }));
+      }
+
+      const cslItem: any = {
+        id: itemKey,
+        type: zoteroToCslType[raw.itemType] || 'article',
+        title: raw.title || item.title,
+        author: mapCreators(creators.filter((c: any) => c.creatorType === 'author')),
+        editor: mapCreators(creators.filter((c: any) => c.creatorType === 'editor')),
+        issued: parseDateToCsl(raw.date),
+        'container-title': raw.publicationTitle || raw.websiteTitle || raw.bookTitle || undefined,
+        volume: raw.volume || undefined,
+        issue: raw.issue || undefined,
+        page: raw.pages || undefined,
+        DOI: raw.DOI || undefined,
+        URL: raw.url || undefined,
+        ISBN: raw.ISBN || undefined,
+        ISSN: raw.ISSN || undefined,
+        publisher: raw.publisher || undefined,
+        'publisher-place': raw.place || undefined,
+        abstract: raw.abstractNote || undefined,
+        language: raw.language || undefined,
+      };
+
+      // Remove undefined values
+      for (const key of Object.keys(cslItem)) {
+        if (cslItem[key] === undefined) delete cslItem[key];
+        if (Array.isArray(cslItem[key]) && cslItem[key].length === 0) delete cslItem[key];
+      }
+
+      // Use citation-js for proper CSL formatting
+      const { Cite } = await import('@citation-js/core');
+      await import('@citation-js/plugin-csl');
+      await import('@citation-js/plugin-bibtex');
+
+      const cite = new Cite([cslItem]);
       let citation = '';
 
       if (outputFormat === 'bibtex') {
-        // BibTeX format
-        const key = itemKey.toLowerCase();
-        const author = creators
-          .filter(c => c.creatorType === 'author')
-          .map(c => `${c.lastName || ''}, ${c.firstName || ''}`)
-          .join(' and ');
-        const year = raw.date ? new Date(raw.date).getFullYear() : '????';
-
-        citation = `@${raw.itemType || 'misc'}{${key},
-  author = {${author}},
-  title = {${item.title || ''}},
-  year = {${year}},
-  journal = {${raw.publicationTitle || raw.journal || ''}},
-  volume = {${raw.volume || ''}},
-  number = {${raw.issue || ''}},
-  pages = {${raw.pages || ''}},
-  doi = {${raw.DOI || ''}},
-  isbn = {${raw.ISBN || ''}},
-}`;
+        citation = cite.format('bibtex');
+      } else if (outputFormat === 'html') {
+        citation = cite.format('bibliography', { format: 'html', template: templateId, lang: locale });
       } else {
-        // Text citation formats
-        const authorText = creators
-          .filter(c => c.creatorType === 'author')
-          .map(c => {
-            if (style === 'apa' || style === 'harvard') {
-              return `${c.lastName || ''}, ${c.firstName ? c.firstName[0] + '.' : ''}`;
-            }
-            return `${c.firstName || ''} ${c.lastName || ''}`;
-          })
-          .slice(0, 3)
-          .join(', ');
-
-        const year = raw.date ? new Date(raw.date).getFullYear() : 'n.d.';
-        const title = item.title || 'Untitled';
-        const journal = raw.publicationTitle || raw.journal || '';
-
-        switch (style) {
-          case 'apa':
-            citation = `${authorText} (${year}). ${title}. ${journal}${raw.volume ? `, ${raw.volume}` : ''}${raw.issue ? `(${raw.issue})` : ''}${raw.pages ? `, ${raw.pages}` : ''}.`;
-            if (raw.DOI) citation += ` https://doi.org/${raw.DOI}`;
-            break;
-          case 'mla':
-            citation = `${authorText}. "${title}." ${journal}${raw.volume ? ` ${raw.volume}` : ''}${raw.issue ? `.${raw.issue}` : ''} (${year})${raw.pages ? `: ${raw.pages}` : ''}.`;
-            break;
-          case 'chicago':
-            citation = `${authorText}. "${title}." ${journal}${raw.volume ? ` ${raw.volume}` : ''}${raw.issue ? `, no. ${raw.issue}` : ''} (${year})${raw.pages ? `: ${raw.pages}` : ''}.`;
-            break;
-          case 'ieee':
-            citation = `${authorText}, "${title}," ${journal}${raw.volume ? `, vol. ${raw.volume}` : ''}${raw.issue ? `, no. ${raw.issue}` : ''}${raw.pages ? `, pp. ${raw.pages}` : ''}, ${year}.`;
-            break;
-          case 'vancouver':
-            citation = `${authorText}. ${title}. ${journal}. ${year}${raw.volume ? `;${raw.volume}` : ''}${raw.issue ? `(${raw.issue})` : ''}${raw.pages ? `:${raw.pages}` : ''}.`;
-            break;
-          case 'harvard':
-            citation = `${authorText} ${year}. '${title}', ${journal}${raw.volume ? `, ${raw.volume}` : ''}${raw.issue ? `(${raw.issue})` : ''}${raw.pages ? `, pp. ${raw.pages}` : ''}.`;
-            break;
-          default:
-            // Default APA-like
-            citation = `${authorText} (${year}). ${title}. ${journal}.`;
-        }
+        citation = cite.format('bibliography', { format: 'text', template: templateId, lang: locale });
       }
+
+      citation = citation.trim();
 
       // Output
       if (outputIndex >= 0 && args[outputIndex + 1]) {

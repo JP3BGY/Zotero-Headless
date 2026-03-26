@@ -19,6 +19,9 @@
     "lint": "echo 'No lint configured'"
   },
   "dependencies": {
+    "@citation-js/core": "^0.7.21",
+    "@citation-js/plugin-bibtex": "^0.7.21",
+    "@citation-js/plugin-csl": "^0.7.22",
     "@types/jsdom": "^27.0.0",
     "@types/marked": "^6.0.0",
     "@types/tmp": "^0.2.6",
