@@ -6,7 +6,7 @@
 
 import { existsSync } from 'fs';
 import { appConfig, symbols } from '@zotero-headless/core';
-import { eq, like, desc, asc, count, and, isNull, sql } from 'drizzle-orm';
+import { eq, like, notLike, desc, asc, count, and, isNull, sql } from 'drizzle-orm';
 import { ProgressBar } from './progress-bar.js';
 import { resolveConflictsInteractive, isInteractive, createPrompt, ConflictItem } from './conflict-resolver.js';
 import { t, setLanguage, getLanguage, formatItemType, formatField, type Language } from './i18n.js';
@@ -144,6 +144,55 @@ function generateKey(): string {
       Math.floor(Math.random() * allowedKeyChars.length)
     )
   ).join('');
+}
+
+/**
+ * Resolve a collection path (e.g. "/Genetics/Promotor") or key to a collection key.
+ * Returns { key, name, path } or null if not found.
+ */
+async function resolveCollectionPath(db: any, libraryId: number, pathOrKey: string): Promise<{ key: string; name: string; path: string } | null> {
+  const { collections } = await import('@zotero-headless/database');
+  const allCols = await db.select().from(collections)
+    .where(and(eq(collections.libraryId, libraryId), eq(collections.deleted, false)))
+    .all();
+
+  // Build a lookup map by key
+  const byKey = new Map<string, any>();
+  for (const col of allCols) byKey.set(col.key, col);
+
+  // Helper: build full path for a collection
+  const buildPath = (col: any): string => {
+    const parts: string[] = [col.name];
+    let current = col;
+    while (current.parentKey && byKey.has(current.parentKey)) {
+      current = byKey.get(current.parentKey);
+      parts.unshift(current.name);
+    }
+    return '/' + parts.join('/');
+  };
+
+  // If it doesn't start with '/', treat as a collection key
+  if (!pathOrKey.startsWith('/')) {
+    const col = byKey.get(pathOrKey);
+    if (!col) return null;
+    return { key: col.key, name: col.name, path: buildPath(col) };
+  }
+
+  // Resolve by path: split and walk the tree
+  const segments = pathOrKey.split('/').filter(Boolean);
+  if (segments.length === 0) return null;
+
+  let current: any = null;
+  for (const segment of segments) {
+    const parentKey = current ? current.key : null;
+    const match = allCols.find(c =>
+      c.name === segment && (c.parentKey ?? null) === parentKey
+    );
+    if (!match) return null;
+    current = match;
+  }
+
+  return { key: current.key, name: current.name, path: buildPath(current) };
 }
 
 /**
@@ -917,6 +966,129 @@ const commands: Command[] = [
     }
   },
 
+  // ============ Collection Tree ============
+
+  {
+    name: 'tree',
+    aliases: ['tr'],
+    description: 'Show collection hierarchy as a tree',
+    options: [
+      { name: '--root', alias: '-r', description: 'Start from a specific collection (path or key)', value: '<path|key>' },
+      { name: '--depth', alias: '-d', description: 'Max depth to display', value: '<N>' },
+      { name: '--items', alias: '-i', description: 'Show item count per collection' },
+    ],
+    examples: [
+      'zotero tree',
+      'zotero tree -r /Genetics',
+      'zotero tree -r ABCD1234 -d 2',
+      'zotero tree -i',
+    ],
+    execute: async (args) => {
+      await initModules();
+      const db = getDatabase();
+
+      const library = await db.select().from(libraries).get();
+      if (!library) {
+        console.log(`${symbols.error} No library found. Run "sync" first.`);
+        return;
+      }
+
+      // Parse options
+      let rootPath: string | undefined;
+      let maxDepth = Infinity;
+      let showItems = false;
+
+      for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        if (arg === '--root' || arg === '-r') {
+          rootPath = args[++i];
+        } else if (arg === '--depth' || arg === '-d') {
+          maxDepth = parseInt(args[++i]) || Infinity;
+        } else if (arg === '--items' || arg === '-i') {
+          showItems = true;
+        }
+      }
+
+      // Fetch all active collections
+      const allCols = await db.select()
+        .from(collections)
+        .where(and(eq(collections.libraryId, library.id), eq(collections.deleted, false)))
+        .orderBy(asc(collections.name))
+        .all();
+
+      if (allCols.length === 0) {
+        console.log('   No collections found.');
+        return;
+      }
+
+      // Build item counts per collection if requested
+      const itemCounts = new Map<string, number>();
+      if (showItems) {
+        const allItems = await db.select({ collectionKeys: items.collectionKeys })
+          .from(items)
+          .where(and(
+            eq(items.libraryId, library.id),
+            eq(items.deleted, false),
+            notLike(items.rawJson, '%"parentItem":%')
+          ))
+          .all();
+        for (const item of allItems) {
+          const keys: string[] = (() => { try { return JSON.parse(item.collectionKeys || '[]'); } catch { return []; } })();
+          for (const k of keys) {
+            itemCounts.set(k, (itemCounts.get(k) || 0) + 1);
+          }
+        }
+      }
+
+      // Build tree structure
+      const childrenOf = new Map<string | null, typeof allCols>();
+      for (const col of allCols) {
+        const parentKey = col.parentKey || null;
+        if (!childrenOf.has(parentKey)) childrenOf.set(parentKey, []);
+        childrenOf.get(parentKey)!.push(col);
+      }
+
+      // Resolve root if specified
+      let rootKey: string | null = null;
+      if (rootPath) {
+        const resolved = await resolveCollectionPath(db, library.id, rootPath);
+        if (!resolved) {
+          console.log(`${symbols.error} Collection not found: ${rootPath}`);
+          return;
+        }
+        rootKey = resolved.key;
+        console.log(`\nCollection tree: ${resolved.path}\n`);
+      } else {
+        console.log(`\nCollection tree:\n`);
+      }
+
+      // Recursive tree printer
+      const printTree = (parentKey: string | null, prefix: string, depth: number) => {
+        if (depth >= maxDepth) return;
+        const children = childrenOf.get(parentKey) || [];
+        children.forEach((col, idx) => {
+          const isLast = idx === children.length - 1;
+          const connector = isLast ? '└── ' : '├── ';
+          const countStr = showItems ? ` (${itemCounts.get(col.key) || 0})` : '';
+          console.log(`${prefix}${connector}${col.name} [${col.key}]${countStr}`);
+          const childPrefix = prefix + (isLast ? '    ' : '│   ');
+          printTree(col.key, childPrefix, depth + 1);
+        });
+      };
+
+      printTree(rootKey, '', 0);
+
+      // Summary
+      const totalShown = rootKey
+        ? (function countAll(key: string | null): number {
+            const ch = childrenOf.get(key) || [];
+            return ch.length + ch.reduce((sum, c) => sum + countAll(c.key), 0);
+          })(rootKey)
+        : allCols.length;
+      console.log(`\n${totalShown} collection${totalShown !== 1 ? 's' : ''} total`);
+    }
+  },
+
   {
     name: 'attachment-download',
     aliases: ['attdl', 'down'],
@@ -1020,8 +1192,9 @@ const commands: Command[] = [
     description: 'List items in the library',
     options: [
       { name: '--type', alias: '-t', description: 'Filter by item type', value: '<type>' },
+      { name: '--dir', alias: '-d', description: 'Filter by collection path or key', value: '<path|key>' },
       { name: '--unsynced', alias: '-u', description: 'Show only unsynced items' },
-      { name: '--deleted', alias: '-d', description: 'Show deleted items' },
+      { name: '--deleted', alias: '-D', description: 'Show deleted items' },
       { name: '--since', alias: '-s', description: 'Show items updated since date', value: '<YYYY-MM-DD>' },
       { name: '--until', alias: '-e', description: 'Show items updated until date', value: '<YYYY-MM-DD>' },
       { name: '--sort', description: 'Sort by field (title|date|updated|type)', value: '<field>' },
@@ -1029,11 +1202,14 @@ const commands: Command[] = [
       { name: '--limit', alias: '-l', description: 'Limit number of results', value: '<N>' },
       { name: '--offset', alias: '-o', description: 'Offset for pagination', value: '<N>' },
       { name: '--compact', alias: '-c', description: 'Compact output format' },
+      { name: '--all', alias: '-a', description: 'Show all items including child items (notes, attachments)' },
     ],
     examples: [
       'zotero list',
+      'zotero ls ABC12345      # list children of item',
       'zotero ls -t book',
-      'zotero ls -u -l 10',
+      'zotero ls -d /Genetics/Promotor',
+      'zotero ls -d ABCD1234',
       'zotero la',
       'zotero ll --sort title',
     ],
@@ -1049,6 +1225,7 @@ const commands: Command[] = [
       
       const options: {
         type?: string;
+        dir?: string;
         unsynced?: boolean;
         deleted?: boolean;
         since?: string;
@@ -1058,6 +1235,7 @@ const commands: Command[] = [
         limit: number;
         offset: number;
         compact?: boolean;
+        all?: boolean;
       } = { limit: configLimit, offset: 0 };
 
       const positionalArgs: string[] = [];
@@ -1066,9 +1244,11 @@ const commands: Command[] = [
         const arg = args[i];
         if (arg === '--type' || arg === '-t') {
           options.type = args[++i];
+        } else if (arg === '--dir' || arg === '-d') {
+          options.dir = args[++i];
         } else if (arg === '--unsynced' || arg === '-u') {
           options.unsynced = true;
-        } else if (arg === '--deleted' || arg === '-d') {
+        } else if (arg === '--deleted' || arg === '-D') {
           options.deleted = true;
         } else if (arg === '--since' || arg === '-s') {
           options.since = args[++i];
@@ -1084,14 +1264,22 @@ const commands: Command[] = [
           options.offset = parseInt(args[++i]) || 0;
         } else if (arg === '--compact' || arg === '-c') {
           options.compact = true;
+        } else if (arg === '--all' || arg === '-a') {
+          options.all = true;
         } else if (!arg.startsWith('-')) {
           positionalArgs.push(arg);
         }
       }
 
-      // Backward compatibility: positional args as limit/offset
-      if (positionalArgs.length > 0) options.limit = parseInt(positionalArgs[0]) || 20;
-      if (positionalArgs.length > 1) options.offset = parseInt(positionalArgs[1]) || 0;
+      // Positional arg: if it looks like a key (non-numeric), list children of that item
+      let parentItemKey: string | undefined;
+      if (positionalArgs.length > 0 && isNaN(Number(positionalArgs[0]))) {
+        parentItemKey = positionalArgs[0];
+      } else {
+        // Backward compatibility: positional args as limit/offset
+        if (positionalArgs.length > 0) options.limit = parseInt(positionalArgs[0]) || 20;
+        if (positionalArgs.length > 1) options.offset = parseInt(positionalArgs[1]) || 0;
+      }
 
       // Determine output mode: compact if --compact, -c, or invoked as 'la'
       const useCompact = options.compact || isCompact;
@@ -1102,9 +1290,40 @@ const commands: Command[] = [
         return;
       }
 
+      // Validate parent item key if listing children
+      let parentItemTitle: string | undefined;
+      if (parentItemKey) {
+        const parentItem = await db.select({ key: items.key, title: items.title })
+          .from(items)
+          .where(and(eq(items.key, parentItemKey), eq(items.libraryId, library.id)))
+          .get();
+        if (!parentItem) {
+          console.log(`${symbols.error} Item ${parentItemKey} not found.`);
+          return;
+        }
+        parentItemTitle = parentItem.title || '(no title)';
+      }
+
+      // Resolve collection filter
+      let collectionInfo: { key: string; name: string; path: string } | null = null;
+      if (options.dir) {
+        collectionInfo = await resolveCollectionPath(db, library.id, options.dir);
+        if (!collectionInfo) {
+          console.log(`${symbols.error} Collection not found: ${options.dir}`);
+          return;
+        }
+      }
+
       // Build where conditions
       let whereConditions: any = eq(items.libraryId, library.id);
 
+      if (parentItemKey) {
+        // List children of the specified item
+        whereConditions = and(whereConditions, like(items.rawJson, `%"parentItem":"${parentItemKey}"%`));
+      }
+      if (collectionInfo) {
+        whereConditions = and(whereConditions, like(items.collectionKeys, `%"${collectionInfo.key}"%`));
+      }
       if (options.type) {
         whereConditions = and(whereConditions, eq(items.itemType, options.type));
       }
@@ -1116,6 +1335,11 @@ const commands: Command[] = [
       } else {
         // By default, hide deleted items
         whereConditions = and(whereConditions, eq(items.deleted, false));
+      }
+      if (!parentItemKey && !options.all) {
+        // By default, show only top-level items (exclude child notes and attachments)
+        // Skip this filter when listing children of a specific item
+        whereConditions = and(whereConditions, notLike(items.rawJson, '%"parentItem":%'));
       }
       if (options.since) {
         const sinceDate = new Date(options.since).getTime();
@@ -1138,13 +1362,23 @@ const commands: Command[] = [
 
       const orderDirection = options.order === 'asc' ? asc : desc;
 
-      // Build the query using sql`` for subquery
+      // Build subqueries for child counts (children are in items table with parentItem in rawJson)
+      // Use raw SQL column names for outer table references to avoid Drizzle parameterization issues
       const attachmentCountSubquery = sql<number>`(
-        SELECT COUNT(*) FROM ${attachments}
-        WHERE ${attachments.parentItemKey} = ${items.key}
-        AND ${attachments.libraryId} = ${items.libraryId}
-        AND (${attachments.deleted} IS NULL OR ${attachments.deleted} = 0)
+        SELECT COUNT(*) FROM items AS child
+        WHERE child.item_type = 'attachment'
+        AND child.library_id = items.library_id
+        AND child.raw_json LIKE '%"parentItem":"' || items.key || '"%'
+        AND (child.deleted IS NULL OR child.deleted = 0)
       )`.as('attachmentCount');
+
+      const noteCountSubquery = sql<number>`(
+        SELECT COUNT(*) FROM items AS child
+        WHERE child.item_type = 'note'
+        AND child.library_id = items.library_id
+        AND child.raw_json LIKE '%"parentItem":"' || items.key || '"%'
+        AND (child.deleted IS NULL OR child.deleted = 0)
+      )`.as('noteCount');
 
       const results = await db.select({
         key: items.key,
@@ -1153,7 +1387,11 @@ const commands: Command[] = [
         updatedAt: items.updatedAt,
         synced: items.synced,
         deleted: items.deleted,
+        creators: items.creators,
+        tags: items.tags,
+        collectionKeys: items.collectionKeys,
         attachmentCount: attachmentCountSubquery,
+        noteCount: noteCountSubquery,
       })
         .from(items)
         .where(whereConditions)
@@ -1164,15 +1402,21 @@ const commands: Command[] = [
 
       // Build filter description
       const filters: string[] = [];
+      if (collectionInfo) filters.push(`dir:${collectionInfo.path}`);
       if (options.type) filters.push(`type:${options.type}`);
       if (options.unsynced) filters.push('unsynced');
       if (options.deleted) filters.push('deleted');
+      if (options.all) filters.push('all');
       if (options.since) filters.push(`since:${options.since}`);
       if (options.until) filters.push(`until:${options.until}`);
       if (options.sort) filters.push(`sort:${options.sort}(${options.order || 'desc'})`);
 
       const filterDesc = filters.length > 0 ? ` (filtered: ${filters.join(', ')})` : '';
-      console.log(`\nItems (${results.length} shown)${filterDesc}:\n`);
+      if (parentItemKey) {
+        console.log(`\nChildren of [${parentItemKey}] ${parentItemTitle} (${results.length} shown)${filterDesc}:\n`);
+      } else {
+        console.log(`\nItems (${results.length} shown)${filterDesc}:\n`);
+      }
 
       if (results.length === 0) {
         console.log('   No items match the criteria.');
@@ -1232,10 +1476,46 @@ const commands: Command[] = [
         results.forEach(item => {
           const syncStatus = item.synced ? symbols.success : '';
           const delStatus = item.deleted ? ' (deleted)' : '';
+          console.log(`  ${syncStatus} [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}${delStatus}`);
+
+          // Line 2: type, date, key
+          const meta: string[] = [];
+          meta.push(`Type: ${item.itemType}`);
+          meta.push(`Updated: ${formatDate(item.updatedAt)}`);
+          meta.push(`Key: ${item.key}`);
+          console.log(`      ${meta.join(' | ')}`);
+
+          // Line 3: children, tags, creators
+          const details: string[] = [];
+
           const attCount = Number(item.attachmentCount) || 0;
-          const attIcon = attCount > 0 ? ` ${attCount}` : '';
-          console.log(`  ${syncStatus} [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}${delStatus}${attIcon}`);
-          console.log(`      Type: ${item.itemType} | Updated: ${formatDate(item.updatedAt)} | Key: ${item.key}`);
+          const noteCount = Number(item.noteCount) || 0;
+          if (attCount > 0) details.push(`${attCount} attachment${attCount > 1 ? 's' : ''}`);
+          if (noteCount > 0) details.push(`${noteCount} note${noteCount > 1 ? 's' : ''}`);
+
+          const tagList: any[] = (() => { try { return JSON.parse(item.tags || '[]'); } catch { return []; } })();
+          if (tagList.length > 0) {
+            const tagNames = tagList.slice(0, 3).map((t: any) => t.tag || t).join(', ');
+            const more = tagList.length > 3 ? ` +${tagList.length - 3}` : '';
+            details.push(`Tags: ${tagNames}${more}`);
+          }
+
+          const creatorList: any[] = (() => { try { return JSON.parse(item.creators || '[]'); } catch { return []; } })();
+          if (creatorList.length > 0) {
+            const names = creatorList.slice(0, 2).map((c: any) => c.lastName || c.name || 'Unknown');
+            const more = creatorList.length > 2 ? ` +${creatorList.length - 2}` : '';
+            details.push(`Authors: ${names.join(', ')}${more}`);
+          }
+
+          const colList: any[] = (() => { try { return JSON.parse(item.collectionKeys || '[]'); } catch { return []; } })();
+          if (colList.length > 0) {
+            details.push(`${colList.length} collection${colList.length > 1 ? 's' : ''}`);
+          }
+
+          if (details.length > 0) {
+            console.log(`      ${details.join(' | ')}`);
+          }
+
           console.log();
         });
       } else {
@@ -1243,10 +1523,36 @@ const commands: Command[] = [
         results.forEach(item => {
           const syncStatus = item.synced ? symbols.success : '';
           const delStatus = item.deleted ? ' (deleted)' : '';
+          console.log(`  ${syncStatus} [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}${delStatus}`);
+
+          // Build metadata segments for the second line
+          const meta: string[] = [];
+          meta.push(item.itemType);
+          meta.push(formatDate(item.updatedAt));
+
           const attCount = Number(item.attachmentCount) || 0;
-          const attIcon = attCount > 0 ? ` ${attCount}` : '';
-          console.log(`  ${syncStatus} [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}${delStatus}${attIcon}`);
-          console.log(`      Type: ${item.itemType} | Updated: ${formatDate(item.updatedAt)}`);
+          const noteCount = Number(item.noteCount) || 0;
+          if (attCount > 0 || noteCount > 0) {
+            const children: string[] = [];
+            if (attCount > 0) children.push(`${attCount} attachment${attCount > 1 ? 's' : ''}`);
+            if (noteCount > 0) children.push(`${noteCount} note${noteCount > 1 ? 's' : ''}`);
+            meta.push(children.join(', '));
+          }
+
+          const tagList: any[] = (() => { try { return JSON.parse(item.tags || '[]'); } catch { return []; } })();
+          if (tagList.length > 0) {
+            meta.push(`${tagList.length} tag${tagList.length > 1 ? 's' : ''}`);
+          }
+
+          const creatorList: any[] = (() => { try { return JSON.parse(item.creators || '[]'); } catch { return []; } })();
+          if (creatorList.length > 0) {
+            const first = creatorList[0];
+            const name = first.lastName || first.name || 'Unknown';
+            const authorStr = creatorList.length > 1 ? `${name} et al.` : name;
+            meta.push(authorStr);
+          }
+
+          console.log(`      ${meta.join(' | ')}`);
           console.log();
         });
       }

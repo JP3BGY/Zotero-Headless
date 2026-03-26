@@ -94,6 +94,12 @@ export class SyncManager extends EventEmitter {
         const hasUnsyncedChanges = unsyncedItems.length > 0;
 
         if (remoteVersion <= localVersion && !options.fullSync && !hasUnsyncedChanges) {
+          // Items are up to date, but still sync collections (lightweight version check)
+          try {
+            await this.syncCollections(libraryId, zoteroId, 'user', localVersion);
+          } catch (e) {
+            // Non-fatal: log but don't fail
+          }
           console.log(`${symbols.success} Library is up to date!`);
           return { success: true, updated: 0, deleted: 0, errors: [] };
         }
@@ -186,6 +192,11 @@ export class SyncManager extends EventEmitter {
       const hasUnsyncedChanges = unsyncedItems.length > 0;
 
       if (remoteVersion <= localVersion && !options.fullSync && !hasUnsyncedChanges) {
+        try {
+          await this.syncCollections(libraryId, groupId, 'group', localVersion);
+        } catch (e) {
+          // Non-fatal
+        }
         console.log(`${symbols.success} Group library is up to date!`);
         return { success: true, updated: 0, deleted: 0, errors: [] };
       }
@@ -453,7 +464,89 @@ export class SyncManager extends EventEmitter {
       await this.softDeleteItems(deletedData.items, libraryId);
     }
 
+    // 4. Sync collections
+    try {
+      await this.syncCollections(libraryId, zoteroId, libraryType, sinceVersion);
+    } catch (e) {
+      console.error(`   ! Collection sync failed: ${e}`);
+      errors.push(`Collection sync failed: ${e}`);
+    }
+
     return { updated, deleted, errors, conflicts };
+  }
+
+  /**
+   * Sync collections from remote
+   */
+  private async syncCollections(
+    libraryId: number,
+    zoteroId: string,
+    libraryType: 'user' | 'group',
+    sinceVersion: number
+  ): Promise<void> {
+    const db = this.db;
+    const { eq, and, count } = await import('drizzle-orm');
+
+    // If no local collections exist yet, do a full collection sync from version 0
+    const localCount = await db.select({ cnt: count() })
+      .from(collections)
+      .where(eq(collections.libraryId, libraryId))
+      .get();
+    const effectiveSince = (localCount?.cnt ?? 0) === 0 ? 0 : sinceVersion;
+
+    // Get changed collection versions
+    const versionMap = await this.apiClient.getCollectionVersions(zoteroId, effectiveSince, libraryType);
+    const changedKeys = Object.keys(versionMap);
+
+    if (changedKeys.length === 0) return;
+
+    console.log(`   Syncing ${changedKeys.length} collection(s)...`);
+
+    // Fetch collection data
+    const apiCollections = await this.apiClient.getCollections(zoteroId, changedKeys, libraryType);
+
+    const now = Math.floor(Date.now() / 1000);
+
+    for (const apiCol of apiCollections) {
+      const data = (apiCol.data || {}) as Record<string, any>;
+      const key = apiCol.key;
+      const name = (data.name as string) || key;
+      const parentKey = (data.parentCollection as string) || null;
+      const version = apiCol.version;
+
+      // Check if collection exists locally
+      const existing = await db.select()
+        .from(collections)
+        .where(and(eq(collections.key, key), eq(collections.libraryId, libraryId)))
+        .get();
+
+      if (existing) {
+        await db.update(collections)
+          .set({
+            name,
+            parentKey: parentKey || null,
+            version,
+            updatedAt: now,
+            deleted: false,
+            rawJson: JSON.stringify(apiCol),
+          })
+          .where(and(eq(collections.key, key), eq(collections.libraryId, libraryId)));
+      } else {
+        await db.insert(collections).values({
+          key,
+          libraryId,
+          name,
+          parentKey: parentKey || null,
+          version,
+          createdAt: now,
+          updatedAt: now,
+          deleted: false,
+          rawJson: JSON.stringify(apiCol),
+        });
+      }
+    }
+
+    console.log(`   ${symbols.success} Synced ${apiCollections.length} collection(s)`);
   }
 
   /**
