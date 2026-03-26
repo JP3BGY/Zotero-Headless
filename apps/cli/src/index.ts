@@ -10,6 +10,7 @@ import { eq, like, notLike, desc, asc, count, and, isNull, sql } from 'drizzle-o
 import { ProgressBar } from './progress-bar.js';
 import { resolveConflictsInteractive, isInteractive, createPrompt, ConflictItem } from './conflict-resolver.js';
 import { t, setLanguage, getLanguage, formatItemType, formatField, type Language } from './i18n.js';
+import { htmlToPlainText } from './note-utils.js';
 
 // Lazy-loaded modules (to avoid initialization on help commands)
 let syncManager: any;
@@ -1851,7 +1852,7 @@ const commands: Command[] = [
           if (options.field === 'note' && item.itemType === 'note') {
             // Show a snippet of the note content
             try {
-              const { htmlToPlainText } = require('./note-utils.js');
+              // htmlToPlainText imported at top level
               const rawData = JSON.parse(item.rawJson || '{}');
               const data = rawData.data || rawData;
               const content = data.note || '';
@@ -3556,11 +3557,42 @@ WebDAV 同步:
               const accessDate = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
               const sourceUrl = result.item.url || '';
               
+              const attRawJson = {
+                data: {
+                  key: attKey,
+                  itemType: 'attachment',
+                  title: 'Snapshot',
+                  filename: uniqueFilename,
+                  contentType: 'text/html',
+                  charset: 'utf-8',
+                  parentItem: itemKey,
+                  linkMode: 'imported_url',
+                  url: sourceUrl,
+                  accessDate: accessDate
+                }
+              };
+
+              // 在 items 表中创建 attachment 子条目（list 命令依赖此表统计附件数）
+              await db.insert(items).values({
+                key: attKey,
+                libraryId: library.id,
+                version: 0,
+                synced: false,
+                deleted: false,
+                createdAt: now,
+                updatedAt: now,
+                itemType: 'attachment',
+                title: 'Snapshot',
+                url: sourceUrl,
+                rawJson: JSON.stringify(attRawJson),
+              }).run();
+
+              // 在 attachments 表中创建文件记录（用于文件管理和 WebDAV 同步）
               await db.insert(attachments).values({
                 key: attKey,
                 parentItemKey: itemKey,
                 libraryId: library.id,
-                filename: uniqueFilename,  // iOS 兼容：使用内容哈希，不等于 attachment key
+                filename: uniqueFilename,
                 contentType: 'text/html',
                 fileType: '.html',
                 path: htmlPath,
@@ -3570,19 +3602,7 @@ WebDAV 同步:
                 deleted: false,
                 size: result.extra.processedHtml.length,
                 webdavSynced: false,
-                rawJson: JSON.stringify({
-                  data: {
-                    itemType: 'attachment',
-                    title: 'Snapshot',
-                    filename: uniqueFilename,
-                    contentType: 'text/html',
-                    charset: 'utf-8',
-                    parentItem: itemKey,
-                    linkMode: 'imported_url',
-                    url: sourceUrl,
-                    accessDate: accessDate
-                  }
-                }),
+                rawJson: JSON.stringify(attRawJson),
               }).run();
               
               console.log(`      ${symbols.success} Snapshot: ${uniqueFilename} (${(result.extra.processedHtml.length / 1024).toFixed(1)} KB)`);
@@ -6419,9 +6439,12 @@ export async function main() {
   // Check for --version flag
   if (args[0] === '--version' || args[0] === '-v') {
     try {
-      // Use require for pkg compatibility
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const packageJson = require('../../package.json');
+      const { readFileSync } = await import('fs');
+      const { fileURLToPath } = await import('url');
+      const { dirname, join } = await import('path');
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = dirname(__filename);
+      const packageJson = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf-8'));
       console.log(packageJson.version || 'unknown');
     } catch {
       console.log('unknown');

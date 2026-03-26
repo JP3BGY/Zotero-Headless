@@ -11,6 +11,7 @@ import type { Identifier, MetadataResult, FetcherConfig, Creator } from '../type
 import https from 'https';
 import http from 'http';
 import { gunzipSync } from 'zlib';
+import crypto from 'crypto';
 
 export class WeChatFetcher extends BaseFetcher {
   constructor(config: FetcherConfig) {
@@ -591,8 +592,6 @@ export class WeChatFetcher extends BaseFetcher {
    * MD5 哈希
    */
   private md5Hash(data: string): string {
-    // 简单实现，实际使用 crypto 模块
-    const crypto = require('crypto');
     return crypto.createHash('md5').update(data).digest('hex');
   }
 }
