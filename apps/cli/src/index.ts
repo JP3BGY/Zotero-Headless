@@ -1381,6 +1381,22 @@ const commands: Command[] = [
         AND (child.deleted IS NULL OR child.deleted = 0)
       )`.as('noteCount');
 
+      // Annotations are grandchildren: item → attachment → annotation
+      const annotationCountSubquery = sql<number>`(
+        SELECT COUNT(*) FROM items AS ann
+        WHERE ann.item_type = 'annotation'
+        AND ann.library_id = items.library_id
+        AND (ann.deleted IS NULL OR ann.deleted = 0)
+        AND ann.raw_json LIKE '%"parentItem":"%'
+        AND EXISTS (
+          SELECT 1 FROM items AS att
+          WHERE att.item_type = 'attachment'
+          AND att.library_id = items.library_id
+          AND att.raw_json LIKE '%"parentItem":"' || items.key || '"%'
+          AND ann.raw_json LIKE '%"parentItem":"' || att.key || '"%'
+        )
+      )`.as('annotationCount');
+
       const results = await db.select({
         key: items.key,
         title: items.title,
@@ -1393,6 +1409,7 @@ const commands: Command[] = [
         collectionKeys: items.collectionKeys,
         attachmentCount: attachmentCountSubquery,
         noteCount: noteCountSubquery,
+        annotationCount: annotationCountSubquery,
       })
         .from(items)
         .where(whereConditions)
@@ -1491,8 +1508,10 @@ const commands: Command[] = [
 
           const attCount = Number(item.attachmentCount) || 0;
           const noteCount = Number(item.noteCount) || 0;
+          const annCount = Number(item.annotationCount) || 0;
           if (attCount > 0) details.push(`${attCount} attachment${attCount > 1 ? 's' : ''}`);
           if (noteCount > 0) details.push(`${noteCount} note${noteCount > 1 ? 's' : ''}`);
+          if (annCount > 0) details.push(`${annCount} annotation${annCount > 1 ? 's' : ''}`);
 
           const tagList: any[] = (() => { try { return JSON.parse(item.tags || '[]'); } catch { return []; } })();
           if (tagList.length > 0) {
@@ -1533,10 +1552,12 @@ const commands: Command[] = [
 
           const attCount = Number(item.attachmentCount) || 0;
           const noteCount = Number(item.noteCount) || 0;
-          if (attCount > 0 || noteCount > 0) {
+          const annCount = Number(item.annotationCount) || 0;
+          if (attCount > 0 || noteCount > 0 || annCount > 0) {
             const children: string[] = [];
             if (attCount > 0) children.push(`${attCount} attachment${attCount > 1 ? 's' : ''}`);
             if (noteCount > 0) children.push(`${noteCount} note${noteCount > 1 ? 's' : ''}`);
+            if (annCount > 0) children.push(`${annCount} annotation${annCount > 1 ? 's' : ''}`);
             meta.push(children.join(', '));
           }
 
@@ -5689,9 +5710,14 @@ For more info: https://github.com/altairwei/Zotero-Headless
         return;
       }
 
-      // Parse item data
-      const raw = JSON.parse(item.rawJson);
-      const creators = (raw.creators || []) as Array<{ firstName?: string; lastName?: string; creatorType?: string }>;
+      // Parse item data - rawJson may be { data: { ... } } (from API) or { data: { ... } } (locally created)
+      const rawJson = JSON.parse(item.rawJson);
+      const raw = rawJson.data || rawJson;
+      let creators = raw.creators || [];
+      if (typeof creators === 'string') {
+        try { creators = JSON.parse(creators); } catch { creators = []; }
+      }
+      creators = creators as Array<{ firstName?: string; lastName?: string; creatorType?: string }>;
 
       // Generate citation based on style
       let citation = '';
