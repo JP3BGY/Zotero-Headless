@@ -4,6 +4,7 @@ import type { Command } from '../types.js';
 import { initModules, getDb, getItems, getLibraries } from '../modules.js';
 import { symbols } from '@zotero-headless/core';
 import { eq, and } from 'drizzle-orm';
+import { parseItemData, updateItemData } from '@zotero-headless/types';
 
 export const updateCommands: Command[] = [
   {
@@ -54,10 +55,6 @@ export const updateCommands: Command[] = [
           process.exit(1);
         }
 
-        // Parse the raw JSON and update the field
-        const rawData = JSON.parse(item.rawJson || '{}');
-        const data = rawData.data || rawData;
-
         // Map CLI field names to Zotero API field names
         const fieldMap: Record<string, string> = {
           'title': 'title',
@@ -68,14 +65,15 @@ export const updateCommands: Command[] = [
         };
 
         const apiField = fieldMap[field.toLowerCase()] || field;
-        const oldValue = data[apiField];
-        data[apiField] = value;
+        const oldValue = parseItemData(item.rawJson)[apiField];
 
         // Update local database only (do not call API)
         console.log(`   Updating ${key}: ${field} = "${value}"`);
 
-        // Re-serialize the updated data
-        const updatedRawJson = JSON.stringify({ ...rawData, data });
+        // Update the field and re-serialize
+        const updatedRawJson = updateItemData(item.rawJson, (data) => {
+          data[apiField] = value;
+        });
 
         // Update local item: mark as unsynced and update rawJson
         await db.update(getItems())

@@ -8,6 +8,7 @@ import { ZoteroAPIClient } from '@zotero-headless/api';
 import { appConfig, symbols } from '@zotero-headless/core';
 import { ConflictResolver, conflictResolver } from './conflict.js';
 import { PayloadBuilder } from './payload-builder.js';
+import { parseItemData, parseRawJson } from '@zotero-headless/types';
 import type { SyncOptions, SyncResult, Library, Item } from '@zotero-headless/types';
 import { eq, gt, and, inArray, like, desc } from 'drizzle-orm';
 
@@ -615,13 +616,11 @@ export class SyncManager extends EventEmitter {
     // Separate parent items and attachment items
     // Parent items must be uploaded before attachments (which reference them via parentItem)
     const parentItems = unsyncedItems.filter(item => {
-      const rawData = JSON.parse(item.rawJson || '{}');
-      return rawData.data?.itemType !== 'attachment';
+      return parseItemData(item.rawJson).itemType !== 'attachment';
     });
-    
+
     const attachmentItems = unsyncedItems.filter(item => {
-      const rawData = JSON.parse(item.rawJson || '{}');
-      return rawData.data?.itemType === 'attachment';
+      return parseItemData(item.rawJson).itemType === 'attachment';
     });
 
     if (attachmentItems.length > 0) {
@@ -631,8 +630,8 @@ export class SyncManager extends EventEmitter {
     // Upload parent items first
     for (const item of parentItems) {
       try {
-        const rawData = JSON.parse(item.rawJson);
-        let data = rawData.data;
+        const rawEnvelope = parseRawJson(item.rawJson);
+        let data = rawEnvelope.data;
         
         // Add key and version from item to data for new items
         if (item.version === 0 && item.key) {
@@ -841,10 +840,10 @@ export class SyncManager extends EventEmitter {
                 for (const att of affectedAttachments) {
                   const updates: any = { parentItemKey: newKey };
                   try {
-                    const rawData = JSON.parse(att.rawJson || '{}');
-                    if (rawData.data?.parentItem === item.key) {
-                      rawData.data.parentItem = newKey;
-                      updates.rawJson = JSON.stringify(rawData);
+                    const attEnvelope = parseRawJson(att.rawJson);
+                    if (attEnvelope.data.parentItem === item.key) {
+                      attEnvelope.data.parentItem = newKey;
+                      updates.rawJson = JSON.stringify(attEnvelope);
                     }
                   } catch (e) {
                     // ignore parse error
@@ -873,11 +872,11 @@ export class SyncManager extends EventEmitter {
 
                 for (const child of childItems) {
                   try {
-                    const rawData = JSON.parse(child.rawJson || '{}');
-                    if (rawData.data?.parentItem === item.key) {
-                      rawData.data.parentItem = newKey;
+                    const childEnvelope = parseRawJson(child.rawJson);
+                    if (childEnvelope.data.parentItem === item.key) {
+                      childEnvelope.data.parentItem = newKey;
                       await tx.update(items)
-                        .set({ rawJson: JSON.stringify(rawData) })
+                        .set({ rawJson: JSON.stringify(childEnvelope) })
                         .where(and(eq(items.key, child.key), eq(items.libraryId, libraryId)))
                         .run();
                     }
@@ -953,8 +952,8 @@ export class SyncManager extends EventEmitter {
     // This ensures parentItem references exist in Zotero
     for (const item of attachmentItems) {
       try {
-        const rawData = JSON.parse(item.rawJson);
-        let data = rawData.data;
+        const attEnvelope = parseRawJson(item.rawJson);
+        let data = attEnvelope.data;
         
         // Add key and version from item to data for new items
         if (item.version === 0 && item.key) {

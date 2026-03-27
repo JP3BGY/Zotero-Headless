@@ -2,6 +2,7 @@
 
 import { symbols } from '@zotero-headless/core';
 import { eq, and } from 'drizzle-orm';
+import { parseItemData, updateItemData } from '@zotero-headless/types';
 import { Command } from '../types.js';
 import { initModules, getDb, getItems, getLibraries } from '../modules.js';
 import { generateKey, formatDate } from '../utils.js';
@@ -158,8 +159,7 @@ Notes:
           }
 
           // Parse existing data
-          const rawData = JSON.parse(note.rawJson || '{}');
-          const data = rawData.data || rawData;
+          const data = parseItemData(note.rawJson);
 
           // If no new content provided, open external editor
           if (!newContent) {
@@ -227,7 +227,6 @@ Notes:
 
           // Convert new content to HTML
           const newHtmlContent = ensureHtml(newContent);
-          data.note = newHtmlContent;
 
           // Update local database
           const now = Math.floor(Date.now() / 1000);
@@ -236,7 +235,7 @@ Notes:
               synced: false,
               updatedAt: now,
               title: htmlToPlainText(newHtmlContent, 50) || '(empty note)',
-              rawJson: JSON.stringify({ ...rawData, data }),
+              rawJson: updateItemData(note.rawJson, (d) => { d.note = newHtmlContent; }),
             })
             .where(and(eq(items.key, noteKey), eq(items.libraryId, library.id)))
             .run();
@@ -274,8 +273,7 @@ Notes:
           }
 
           // Parse data
-          const rawData = JSON.parse(note.rawJson || '{}');
-          const data = rawData.data || rawData;
+          const data = parseItemData(note.rawJson);
           const htmlContent = data.note || '';
 
           // Convert to Markdown for display
@@ -312,13 +310,8 @@ Notes:
 
           // Filter notes that belong to this parent
           const parentNotes = notes.filter(note => {
-            try {
-              const rawData = JSON.parse(note.rawJson || '{}');
-              const data = rawData.data || rawData;
-              return data.parentItem === parentKey;
-            } catch {
-              return false;
-            }
+            const data = parseItemData(note.rawJson);
+            return data.parentItem === parentKey;
           });
 
           if (parentNotes.length === 0) {
@@ -329,8 +322,7 @@ Notes:
           console.log(`\nNotes for ${parentKey} (${parentNotes.length}):\n`);
 
           for (const note of parentNotes) {
-            const rawData = JSON.parse(note.rawJson || '{}');
-            const data = rawData.data || rawData;
+            const data = parseItemData(note.rawJson);
             const htmlContent = data.note || '';
             const preview = htmlToPlainText(htmlContent, 60) || '(empty note)';
             const syncStatus = note.synced ? symbols.success : '';
@@ -381,8 +373,7 @@ Notes:
             let exported = 0;
             for (const note of allNotes) {
               try {
-                const rawData = JSON.parse(note.rawJson || '{}');
-                const data = rawData.data || rawData;
+                const data = parseItemData(note.rawJson);
                 const htmlContent = data.note || '';
 
                 // Convert to Markdown
@@ -424,8 +415,7 @@ Notes:
           }
 
           try {
-            const rawData = JSON.parse(note.rawJson || '{}');
-            const data = rawData.data || rawData;
+            const data = parseItemData(note.rawJson);
             const htmlContent = data.note || '';
 
             // Convert to Markdown

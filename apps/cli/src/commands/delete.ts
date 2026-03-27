@@ -6,6 +6,7 @@ import { symbols } from '@zotero-headless/core';
 import { eq, and, like, count } from 'drizzle-orm';
 import { isInteractive, createPrompt } from '../conflict-resolver.js';
 import { t } from '../i18n.js';
+import { updateItemData } from '@zotero-headless/types';
 
 export const deleteCommands: Command[] = [
   {
@@ -161,9 +162,9 @@ export const deleteCommands: Command[] = [
           console.log(`   Moving ${key} to trash...`);
 
           // Get current data and set deleted flag
-          const rawData = JSON.parse(item.rawJson || '{}');
-          const data = rawData.data || rawData;
-          data.deleted = true;
+          const updatedRawJson = updateItemData(item.rawJson, (data) => {
+            data.deleted = true;
+          });
 
           await getLogDeletion()({
             itemKey: key,
@@ -182,7 +183,7 @@ export const deleteCommands: Command[] = [
               synced: false,
               updatedAt: Math.floor(Date.now() / 1000),  // 使用秒级时间戳
               deletedAt: Math.floor(Date.now() / 1000),  // Track when trashed
-              rawJson: JSON.stringify({ ...rawData, data })
+              rawJson: updatedRawJson
             })
             .where(and(eq(getItems().key, key), eq(getItems().libraryId, library.id)))
             .run();

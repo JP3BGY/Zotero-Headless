@@ -1,6 +1,10 @@
 // Type Definitions for Zotero-Headless
 // See Zotero-Headless-Complete-Design.md Section 3.3
 
+// ============ rawJson Utilities ============
+export { parseItemData, parseRawJson, updateItemData, extractDenormalizedColumns } from './raw-json.js';
+export type { ZoteroItemData, ZoteroApiResponse, RawJsonContent } from './raw-json.js';
+
 // ============ Item Types ============
 
 export type ItemType = 

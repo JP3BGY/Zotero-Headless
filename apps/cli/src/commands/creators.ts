@@ -4,6 +4,7 @@ import type { Command } from '../types.js';
 import { initModules, getDb, getItems, getLibraries } from '../modules.js';
 import { symbols } from '@zotero-headless/core';
 import { eq, and } from 'drizzle-orm';
+import { parseItemData, parseRawJson, updateItemData } from '@zotero-headless/types';
 
 export const creatorsCommands: Command[] = [
   // ============ Creator Management ============
@@ -59,8 +60,7 @@ export const creatorsCommands: Command[] = [
           return;
         }
 
-        const rawJson = JSON.parse(item.rawJson);
-        const raw = rawJson.data || rawJson;
+        const raw = parseItemData(item.rawJson);
         let creators = raw.creators || [];
         if (typeof creators === 'string') {
           try { creators = JSON.parse(creators); } catch { creators = []; }
@@ -106,22 +106,22 @@ export const creatorsCommands: Command[] = [
           return;
         }
 
-        const rawJson2 = JSON.parse(item.rawJson);
-        const rawData2 = rawJson2.data || rawJson2;
-        const creators2 = rawData2.creators || [];
-
-        creators2.push({
-          firstName,
-          lastName,
-          creatorType
+        let updatedCreators2: any[];
+        const updatedRawJson2 = updateItemData(item.rawJson, (data) => {
+          const creators2 = data.creators || [];
+          creators2.push({
+            firstName,
+            lastName,
+            creatorType
+          });
+          data.creators = creators2;
+          updatedCreators2 = creators2;
         });
-
-        rawData2.creators = creators2;
 
         await db.update(items)
           .set({
-            rawJson: JSON.stringify(rawJson2),
-            creators: JSON.stringify(creators2),
+            rawJson: updatedRawJson2,
+            creators: JSON.stringify(updatedCreators2!),
             synced: false
           })
           .where(eq(items.key, itemKey));
@@ -150,8 +150,7 @@ export const creatorsCommands: Command[] = [
           return;
         }
 
-        const rawJson3 = JSON.parse(item.rawJson);
-        const rawData3 = rawJson3.data || rawJson3;
+        const rawData3 = parseItemData(item.rawJson);
         const creators3 = rawData3.creators || [];
 
         if (creatorIdx < 0 || creatorIdx >= creators3.length) {
@@ -159,13 +158,19 @@ export const creatorsCommands: Command[] = [
           return;
         }
 
-        const removed = creators3.splice(creatorIdx, 1)[0];
-        rawData3.creators = creators3;
+        const removed = creators3[creatorIdx];
+        let updatedCreators3: any[];
+        const updatedRawJson3 = updateItemData(item.rawJson, (data) => {
+          const c = data.creators || [];
+          c.splice(creatorIdx, 1);
+          data.creators = c;
+          updatedCreators3 = c;
+        });
 
         await db.update(items)
           .set({
-            rawJson: JSON.stringify(rawJson3),
-            creators: JSON.stringify(creators3),
+            rawJson: updatedRawJson3,
+            creators: JSON.stringify(updatedCreators3!),
             synced: false
           })
           .where(eq(items.key, itemKey));
@@ -194,8 +199,7 @@ export const creatorsCommands: Command[] = [
           return;
         }
 
-        const rawJson4 = JSON.parse(item.rawJson);
-        const rawData4 = rawJson4.data || rawJson4;
+        const rawData4 = parseItemData(item.rawJson);
         const creators4 = rawData4.creators || [];
 
         if (creatorIdx < 0 || creatorIdx >= creators4.length) {
@@ -203,15 +207,21 @@ export const creatorsCommands: Command[] = [
           return;
         }
 
+        const selected = creators4[creatorIdx];
+        let updatedCreators4: any[];
         // Move creator to front
-        const selected = creators4.splice(creatorIdx, 1)[0];
-        creators4.unshift(selected);
-        rawData4.creators = creators4;
+        const updatedRawJson4 = updateItemData(item.rawJson, (data) => {
+          const c = data.creators || [];
+          c.splice(creatorIdx, 1);
+          c.unshift(selected);
+          data.creators = c;
+          updatedCreators4 = c;
+        });
 
         await db.update(items)
           .set({
-            rawJson: JSON.stringify(rawJson4),
-            creators: JSON.stringify(creators4),
+            rawJson: updatedRawJson4,
+            creators: JSON.stringify(updatedCreators4!),
             synced: false
           })
           .where(eq(items.key, itemKey));

@@ -3,6 +3,7 @@
 import type { Command } from '../types.js';
 import { initModules, getDb, getItems, getLibraries } from '../modules.js';
 import { symbols } from '@zotero-headless/core';
+import { parseItemData } from '@zotero-headless/types';
 import { eq, and } from 'drizzle-orm';
 
 export const searchesCommands: Command[] = [
@@ -49,11 +50,10 @@ export const searchesCommands: Command[] = [
 
         console.log(`\nSaved searches (${searchItems.length}):\n`);
         for (const item of searchItems) {
-          const rawJson = JSON.parse(item.rawJson);
-          const raw = rawJson.data || rawJson;
+          const data = parseItemData(item.rawJson);
           console.log(`  [${item.key}] ${item.title || 'Unnamed search'}`);
-          if (raw.conditions) {
-            console.log(`      Conditions: ${JSON.stringify(raw.conditions).substring(0, 60)}...`);
+          if (data.conditions) {
+            console.log(`      Conditions: ${JSON.stringify(data.conditions).substring(0, 60)}...`);
           }
         }
         return;
@@ -78,9 +78,8 @@ export const searchesCommands: Command[] = [
         }
 
         // Parse search conditions and execute
-        const rawJson = JSON.parse(searchItem.rawJson);
-        const raw = rawJson.data || rawJson;
-        const conditions = raw.conditions || [];
+        const data = parseItemData(searchItem.rawJson);
+        const conditions = data.conditions || [];
 
         // Simple condition matching - iterate items and filter
         let results = await db.select()

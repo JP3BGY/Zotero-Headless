@@ -2,6 +2,7 @@
 // Zotero Desktop compatible structure: /zotero/<item_key>.zip and .prop (XML format)
 
 import { getDatabase, attachments, libraries, webdavConfig, items } from '@zotero-headless/database';
+import { parseItemData } from '@zotero-headless/types';
 import { zoteroApi } from '@zotero-headless/api';
 import { symbols } from '@zotero-headless/core';
 import { WebDAVClient, createWebDAVClient } from '@zotero-headless/webdav-client';
@@ -343,15 +344,13 @@ export class AttachmentManager {
             let url = existingItem.data.url || '';
             let accessDate = existingItem.data.accessDate || '';
             let charset = existingItem.data.charset || '';
-            try {
-              const rawData = JSON.parse(attachment.rawJson || '{}');
-              attachmentTitle = rawData.data?.title || existingItem.data.title || 'Attachment';
-              linkMode = rawData.data?.linkMode || existingItem.data.linkMode || 'imported_file';
-              url = rawData.data?.url || existingItem.data.url || '';
-              accessDate = rawData.data?.accessDate || existingItem.data.accessDate || '';
-              charset = rawData.data?.charset || existingItem.data.charset || '';
-            } catch (e) {
-              // Use existing values
+            {
+              const attData = parseItemData(attachment.rawJson);
+              attachmentTitle = attData.title || existingItem.data.title || 'Attachment';
+              linkMode = attData.linkMode || existingItem.data.linkMode || 'imported_file';
+              url = attData.url || existingItem.data.url || '';
+              accessDate = attData.accessDate || existingItem.data.accessDate || '';
+              charset = attData.charset || existingItem.data.charset || '';
             }
             
             const updateData: any = {
@@ -408,15 +407,13 @@ export class AttachmentManager {
       let url = '';
       let accessDate = '';
       let charset = '';
-      try {
-        const rawData = JSON.parse(attachment.rawJson || '{}');
-        attachmentTitle = rawData.data?.title || attachment.filename || 'Attachment';
-        linkMode = rawData.data?.linkMode || 'imported_file';
-        url = rawData.data?.url || '';
-        accessDate = rawData.data?.accessDate || '';
-        charset = rawData.data?.charset || '';
-      } catch (e) {
-        attachmentTitle = attachment.filename || 'Attachment';
+      {
+        const attData = parseItemData(attachment.rawJson);
+        attachmentTitle = attData.title || attachment.filename || 'Attachment';
+        linkMode = attData.linkMode || 'imported_file';
+        url = attData.url || '';
+        accessDate = attData.accessDate || '';
+        charset = attData.charset || '';
       }
       
       const attachmentItem: any = {

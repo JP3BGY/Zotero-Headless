@@ -198,6 +198,9 @@ importers:
       '@zotero-headless/database':
         specifier: workspace:*
         version: link:../database
+      '@zotero-headless/types':
+        specifier: workspace:*
+        version: link:../types
       '@zotero-headless/webdav-client':
         specifier: workspace:*
         version: link:../webdav-client
@@ -3632,6 +3635,7 @@ packages:
       '@zotero-headless/api': link:packages/api
       '@zotero-headless/core': link:packages/core
       '@zotero-headless/database': link:packages/database
+      '@zotero-headless/types': link:packages/types
       '@zotero-headless/webdav-client': link:packages/webdav-client
       adm-zip: 0.5.16
       drizzle-orm: 0.30.10(@types/better-sqlite3@7.5.0)

@@ -5,6 +5,7 @@ import { eq, and, like } from 'drizzle-orm';
 import { Command } from '../types.js';
 import { initModules, getDb, getItems, getLibraries } from '../modules.js';
 import { t } from '../i18n.js';
+import { parseItemData } from '@zotero-headless/types';
 
 export const annotationCommands: Command[] = [
 
@@ -102,8 +103,7 @@ export const annotationCommands: Command[] = [
 
         // Parse annotation data
         let annotations = allAnnotations.map((row: any) => {
-          const raw = JSON.parse(row.rawJson || '{}');
-          const d = raw.data || raw;
+          const d = parseItemData(row.rawJson);
           return {
             key: row.key,
             parentAttachmentKey: d.parentItem || '',

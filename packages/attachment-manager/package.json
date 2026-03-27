@@ -15,6 +15,7 @@
     "@zotero-headless/api": "workspace:*",
     "@zotero-headless/core": "workspace:*",
     "@zotero-headless/database": "workspace:*",
+    "@zotero-headless/types": "workspace:*",
     "@zotero-headless/webdav-client": "workspace:*",
     "adm-zip": "^0.5.10",
     "drizzle-orm": "^0.30.10"

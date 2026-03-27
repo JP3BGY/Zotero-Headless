@@ -5,6 +5,7 @@ import { initModules, getDb, getItems, getLibraries } from '../modules.js';
 import { symbols } from '@zotero-headless/core';
 import { eq, and, like, desc, sql } from 'drizzle-orm';
 import { htmlToPlainText } from '../note-utils.js';
+import { parseItemData } from '@zotero-headless/types';
 
 export const searchCommands: Command[] = [
   {
@@ -101,14 +102,9 @@ export const searchCommands: Command[] = [
         // Also get parent items
         const parentKeys = new Set<string>();
         for (const note of noteResults) {
-          try {
-            const rawData = JSON.parse(note.rawJson || '{}');
-            const data = rawData.data || rawData;
-            if (data.parentItem) {
-              parentKeys.add(data.parentItem);
-            }
-          } catch {
-            // ignore
+          const data = parseItemData(note.rawJson);
+          if (data.parentItem) {
+            parentKeys.add(data.parentItem);
           }
         }
 
@@ -181,17 +177,11 @@ export const searchCommands: Command[] = [
           }
           if (options.field === 'note' && item.itemType === 'note') {
             // Show a snippet of the note content
-            try {
-              // htmlToPlainText imported at top level
-              const rawData = JSON.parse(item.rawJson || '{}');
-              const data = rawData.data || rawData;
-              const content = data.note || '';
-              const snippet = htmlToPlainText(content, 60);
-              if (snippet) {
-                console.log(`      Note: ${snippet}`);
-              }
-            } catch {
-              // ignore
+            const data = parseItemData(item.rawJson);
+            const content = data.note || '';
+            const snippet = htmlToPlainText(content, 60);
+            if (snippet) {
+              console.log(`      Note: ${snippet}`);
             }
           }
         });

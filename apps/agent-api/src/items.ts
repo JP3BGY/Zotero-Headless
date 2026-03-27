@@ -18,6 +18,7 @@ import type {
   BatchResult
 } from './types.js';
 import { ItemNotFoundError, ValidationError, BATCH_DELETE_LIMIT } from './types.js';
+import { parseItemData } from '@zotero-headless/types';
 
 // 延迟加载数据库模块
 let dbModule: any;
@@ -338,8 +339,7 @@ export async function getAnnotations(
 
   // Determine attachment keys to search
   let attachmentKeys: string[] = [];
-  const rawData = JSON.parse(item.rawJson || '{}');
-  const data = rawData.data || rawData;
+  const data = parseItemData(item.rawJson);
 
   if (item.itemType === 'attachment') {
     attachmentKeys = [itemKey];
@@ -376,8 +376,7 @@ export async function getAnnotations(
 
   // Parse and filter annotations
   let result: Annotation[] = allAnnotations.map((row: any) => {
-    const raw = JSON.parse(row.rawJson || '{}');
-    const d = raw.data || raw;
+    const d = parseItemData(row.rawJson);
     return {
       key: row.key,
       parentAttachmentKey: d.parentItem || '',
@@ -387,7 +386,7 @@ export async function getAnnotations(
       annotationColor: d.annotationColor || undefined,
       annotationPageLabel: d.annotationPageLabel || undefined,
       annotationSortIndex: d.annotationSortIndex || undefined,
-      tags: d.tags || undefined,
+      tags: d.tags as any || undefined,
     };
   });
 

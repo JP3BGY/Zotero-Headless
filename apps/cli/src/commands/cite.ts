@@ -4,6 +4,7 @@ import type { Command } from '../types.js';
 import { initModules, getDb, getItems, getLibraries } from '../modules.js';
 import { symbols } from '@zotero-headless/core';
 import { eq, and } from 'drizzle-orm';
+import { parseItemData } from '@zotero-headless/types';
 
 export const citeCommands: Command[] = [
   // ============ Citation/Bibliography Export ============
@@ -117,8 +118,7 @@ export const citeCommands: Command[] = [
       }
 
       // Parse item data
-      const rawJson = JSON.parse(item.rawJson);
-      const raw = rawJson.data || rawJson;
+      const raw = parseItemData(item.rawJson);
       let creators = raw.creators || [];
       if (typeof creators === 'string') {
         try { creators = JSON.parse(creators); } catch { creators = []; }

@@ -3,6 +3,7 @@
 import type { Command } from '../types.js';
 import { initModules, getDb, getItems, getLibraries } from '../modules.js';
 import { symbols } from '@zotero-headless/core';
+import { parseItemData, updateItemData } from '@zotero-headless/types';
 import { eq, and } from 'drizzle-orm';
 
 export const relatedCommands: Command[] = [
@@ -56,9 +57,8 @@ export const relatedCommands: Command[] = [
         }
 
         // Related items stored in rawJson.data.relations
-        const rawJson = JSON.parse(item.rawJson);
-        const raw = rawJson.data || rawJson;
-        const relatedKeys: string[] = raw.related || [];
+        const data = parseItemData(item.rawJson);
+        const relatedKeys: string[] = data.related || [];
 
         if (relatedKeys.length === 0) {
           console.log(`No related items for [${itemKey}]`);
@@ -112,21 +112,23 @@ export const relatedCommands: Command[] = [
           return;
         }
 
-        const rawJson = JSON.parse(item.rawJson);
-        const raw = rawJson.data || rawJson;
-        const related: string[] = raw.related || [];
+        const data = parseItemData(item.rawJson);
+        const related: string[] = data.related || [];
 
         if (related.includes(relatedKey)) {
           console.log(`${symbols.info} Item ${relatedKey} already related`);
           return;
         }
 
-        related.push(relatedKey);
-        raw.related = related;
+        const newRawJson = updateItemData(item.rawJson, (d) => {
+          const rel: string[] = d.related || [];
+          rel.push(relatedKey);
+          d.related = rel;
+        });
 
         await db.update(items)
           .set({
-            rawJson: JSON.stringify(rawJson),
+            rawJson: newRawJson,
             synced: false
           })
           .where(eq(items.key, itemKey));
@@ -155,9 +157,8 @@ export const relatedCommands: Command[] = [
           return;
         }
 
-        const rawJson = JSON.parse(item.rawJson);
-        const raw = rawJson.data || rawJson;
-        const related: string[] = raw.related || [];
+        const data = parseItemData(item.rawJson);
+        const related: string[] = data.related || [];
         const filtered = related.filter(k => k !== relatedKey);
 
         if (filtered.length === related.length) {
@@ -165,11 +166,13 @@ export const relatedCommands: Command[] = [
           return;
         }
 
-        raw.related = filtered;
+        const newRawJson = updateItemData(item.rawJson, (d) => {
+          d.related = filtered;
+        });
 
         await db.update(items)
           .set({
-            rawJson: JSON.stringify(rawJson),
+            rawJson: newRawJson,
             synced: false
           })
           .where(eq(items.key, itemKey));

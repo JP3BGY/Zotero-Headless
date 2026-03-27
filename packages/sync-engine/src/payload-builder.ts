@@ -10,6 +10,7 @@
  * - itemType: Type of item (book, journalArticle, etc.)
  */
 
+import { parseRawJson } from '@zotero-headless/types';
 import type { Item } from '@zotero-headless/types';
 
 export interface CreatePayload {
@@ -39,8 +40,8 @@ export class PayloadBuilder {
    * @throws Error if critical fields are missing
    */
   static buildCreatePayload(item: Item): CreatePayload {
-    const rawData = JSON.parse(item.rawJson || '{}');
-    let data = rawData.data || {};
+    const envelope = parseRawJson(item.rawJson);
+    let data: Record<string, any> = envelope.data;
     
     // Ensure key is set from item
     if (!data.key && item.key) {
