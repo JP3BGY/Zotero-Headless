@@ -5,20 +5,7 @@ import { initModules, getDb, getItems, getLibraries, getAttachments, getWebdavCo
 import { generateKey, getContentType } from '../utils.js';
 import { symbols } from '@zotero-headless/core';
 
-export const addByIdCommands: Command[] = [
-  {
-    name: 'add-by-id',
-    aliases: ['addby'],
-    description: 'Add item(s) by identifier (DOI, ISBN, PMID, arXiv). Options: -a/--attachment <path> (multiple allowed)',
-    options: [
-      { name: '--attachment', alias: '-a', description: 'Add attachment file', value: '<file>' },
-      { name: '--collection', alias: '-c', description: 'Add to collection', value: '<key>' },
-    ],
-    examples: [
-      'zotero add-by-id "10.1000/xyz"',
-      'zotero addby "978-0-123456-78-9" -a file.pdf',
-    ],
-    execute: async (args) => {
+export async function executeAddById(args: string[]) {
       // Parse arguments for attachments
       const attachmentPaths: string[] = [];
       const otherArgs: string[] = [];
@@ -38,7 +25,7 @@ export const addByIdCommands: Command[] = [
         console.log(`
 ${symbols.error} 请提供至少一个标识符
 
-用法: zotero add-by-id <identifier> [identifier2 ...] [-a/--attachment <path>...]
+用法: zotero add byid <identifier> [identifier2 ...] [-a/--attachment <path>...]
 
 支持的标识符类型:
   • DOI    - 如 10.1007/s11263-019-01228-7
@@ -53,22 +40,22 @@ ${symbols.error} 请提供至少一个标识符
 WebDAV 同步:
   微信文章会自动生成 Snapshot 附件，可通过以下方式同步到 WebDAV:
 
-  1. 手动同步: 运行 zotero webdav:sync
+  1. 手动同步: 运行 zotero webdav sync
   2. 自动同步: 配置 autoSync (见下文)
 
   配置自动同步:
-    zotero webdav:config <url> <username> <password> --auto-sync
+    zotero webdav config <url> <username> <password> --auto-sync
 
   查看 WebDAV 状态:
-    zotero webdav:status
+    zotero webdav status
 
 示例:
-  zotero add-by-id "10.1007/s11263-019-01228-7"
-  zotero add-by-id "978-3-642-15515-4"
-  zotero add-by-id "1234567"
-  zotero add-by-id "https://mp.weixin.qq.com/s/xxxxx"
-  zotero add-by-id "10.1007/xyz" -a /path/to/supplemental.pdf
-  zotero add-by-id "10.1007/xyz" -a file1.pdf -a file2.pdf
+  zotero add byid "10.1007/s11263-019-01228-7"
+  zotero add byid "978-3-642-15515-4"
+  zotero add byid "1234567"
+  zotero add byid "https://mp.weixin.qq.com/s/xxxxx"
+  zotero add byid "10.1007/xyz" -a /path/to/supplemental.pdf
+  zotero add byid "10.1007/xyz" -a file1.pdf -a file2.pdf
         `);
         return;
       }
@@ -237,9 +224,9 @@ WebDAV 同步:
                 console.log(`      自动同步到 WebDAV (autoSync enabled)...`);
                 console.log(`      父条目将在下次 sync 时上传到 Zotero，然后附件自动关联`);
               } else {
-                console.log(`      运行 "zotero sync" 上传条目，然后 "zotero webdav:sync" 上传附件`);
+                console.log(`      运行 "zotero sync" 上传条目，然后 "zotero webdav sync" 上传附件`);
                 if (!wdc) {
-                  console.log(`         或先配置: zotero webdav:config <url> <user> <pass>`);
+                  console.log(`         或先配置: zotero webdav config <url> <user> <pass>`);
                 }
               }
             }
@@ -312,10 +299,10 @@ WebDAV 同步:
                   console.log(`      ${symbols.success} ${syncCount} 个附件已上传`);
                 }
                 if (failCount > 0) {
-                  console.log(`      !  ${failCount} 个附件上传失败，运行 "zotero webdav:sync" 重试`);
+                  console.log(`      !  ${failCount} 个附件上传失败，运行 "zotero webdav sync" 重试`);
                 }
               } else if (!wdc?.autoSync && addedAttKeys.length > 0) {
-                console.log(`      运行 "zotero webdav:sync" 上传这些附件`);
+                console.log(`      运行 "zotero webdav sync" 上传这些附件`);
               }
             }
           }
@@ -343,6 +330,7 @@ WebDAV 同步:
         console.log('   2. 网络连接是否正常');
         console.log('   3. API 密钥配置是否正确');
       }
-    }
-  },
-];
+}
+
+// Keep empty array - add-by-id is now a subcommand of 'add'
+export const addByIdCommands: Command[] = [];

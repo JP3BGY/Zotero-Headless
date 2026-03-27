@@ -19,11 +19,13 @@ export const helpCommands: Command[] = [
       console.log(`
  Zotero-Headless CLI
 
-Usage: zotero <command> [options]
+Usage: zotero <command> [subcommand] [options]
 
 Core Commands:
   sync (s, pull, fetch)        Synchronize library
+    sync upload                Upload local changes only
   list (ls, ll, la)            List items (ls=standard, ll=detailed, la=compact)
+    list unsynced              List unsynced items
   search (find, grep, f)       Search by title/author/tags
   get (show, cat, view)        Show item details
   stats (st, info, df)         Show statistics
@@ -31,14 +33,25 @@ Core Commands:
 
 Item Management:
   add (a, new, touch)          Add new item with optional attachments
-  add-by-id (addby)            Add by DOI/ISBN/PMID/arXiv with optional attachments
+    add byid                   Add by DOI/ISBN/PMID/arXiv with optional attachments
   update (u, edit, set)        Update item field
-  delete (rm, del, d, trash)   Delete/trash item
+  delete (rm, del, d)          Delete/trash item
   export (e, out, save)        Export to bibtex/ris/csv/json
 
 Notes & Attachments:
   note (n, notes)              Note management (Markdown support)
-  attachments (att, files)     List attachments
+    note add/edit/show/list    Subcommands
+  attachment (att, files)      Attachment management
+    attachment list            List attachments (default)
+    attachment download        Download from WebDAV
+    attachment open            Open with system app
+    attachment dedup           Find duplicate attachments
+
+Trash Management:
+  trash                        Trash management
+    trash list                 List trash items (default)
+    trash empty                Permanently empty trash
+    trash restore              Restore item from trash
 
 Group Libraries:
   groups (g, team)             List group libraries
@@ -48,10 +61,11 @@ Tags & Collections:
   collections (col, folder)    Manage collections (folders)
 
 WebDAV:
-  webdav:config (wdc)          Configure WebDAV
-  webdav:sync (wds)            Sync attachments to WebDAV
-  webdav:status (wdst)         Show WebDAV status
-  webdav:scan (wdscan)         Scan WebDAV attachments
+  webdav                       WebDAV management
+    webdav config              Configure WebDAV server
+    webdav sync                Sync attachments to WebDAV
+    webdav status              Show WebDAV configuration status
+    webdav scan                Scan WebDAV for attachments
 
 Global Options:
   --lang=en|zh                 Set language (default: zh)
@@ -66,7 +80,7 @@ Quick Examples:
 
 With Attachments:
   zotero add book "Title" "Author" -a file1.pdf -a file2.pdf
-  zotero add-by-id "10.1000/xyz" -a supplement.pdf
+  zotero add byid "10.1000/xyz" -a supplement.pdf
   zotero ls                             # Shows N count for each item
 
 With Notes (Markdown):

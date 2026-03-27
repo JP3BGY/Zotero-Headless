@@ -4,12 +4,19 @@ import type { Command } from '../types.js';
 import { initModules, getDb, getItems, getLibraries, getAttachments } from '../modules.js';
 import { symbols } from '@zotero-headless/core';
 import { generateKey, getContentType } from '../utils.js';
+import { executeAddById } from './add-by-id.js';
+
+// Alias-to-subcommand mapping for backward compatibility
+const ADD_ALIAS_MAP: Record<string, string> = {
+  'add-by-id': 'byid',
+  'addby': 'byid',
+};
 
 export const addCommands: Command[] = [
   {
     name: 'add',
-    aliases: ['a', 'new', 'touch', 'create'],
-    description: 'Add a new item. Aliases: a, new, touch, create. Options: -a/--attachment <path> (multiple allowed)',
+    aliases: ['a', 'new', 'touch', 'create', 'add-by-id', 'addby'],
+    description: 'Add a new item. Subcommands: byid. Aliases: a, new, touch, create',
     options: [
       { name: '--type', alias: '-t', description: 'Item type (book|journalArticle|webpage|...) ', value: '<type>' },
       { name: '--attachment', alias: '-a', description: 'Add attachment file (can specify multiple)', value: '<file>' },
@@ -20,7 +27,14 @@ export const addCommands: Command[] = [
       'zotero touch journalArticle "Title" -a file.pdf',
       'zotero new webpage "Title" --collection ABC123',
     ],
-    execute: async (args) => {
+    execute: async (args, invokedAs) => {
+      // Handle 'byid' subcommand (also via add-by-id / addby aliases)
+      const subcommand = ADD_ALIAS_MAP[invokedAs || ''] || args[0];
+      if (subcommand === 'byid') {
+        const subArgs = ADD_ALIAS_MAP[invokedAs || ''] ? args : args.slice(1);
+        return executeAddById(subArgs);
+      }
+
       await initModules();
       console.log('Adding new item to library...\n');
 

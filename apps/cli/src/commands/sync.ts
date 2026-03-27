@@ -8,11 +8,22 @@ import { ProgressBar } from '../progress-bar.js';
 import { resolveConflictsInteractive, isInteractive, ConflictItem } from '../conflict-resolver.js';
 import { t } from '../i18n.js';
 
+// Alias-to-subcommand mapping for backward compatibility
+const SYNC_ALIAS_MAP: Record<string, string> = {
+  'sync:upload': 'upload',
+  'su': 'upload',
+};
+
+async function executeSyncUpload(args: string[]) {
+  console.log('This would upload local changes...');
+  // Implementation for upload-only would go here
+}
+
 export const syncCommands: Command[] = [
   {
     name: 'sync',
-    aliases: ['s', 'pull', 'fetch', 'refresh'],
-    description: 'Synchronize library with Zotero servers',
+    aliases: ['s', 'pull', 'fetch', 'refresh', 'sync:upload', 'su'],
+    description: 'Synchronize library with Zotero servers. Subcommands: upload',
     options: [
       { name: '--full-sync', alias: '-f', description: 'Perform a full sync (ignore version cache)' },
       { name: '--groups', alias: '-g', description: 'Sync all group libraries' },
@@ -25,8 +36,17 @@ export const syncCommands: Command[] = [
       'zotero sync -f',
       'zotero sync -g',
       'zotero sync -G12345',
+      'zotero sync upload',
     ],
-    execute: async (args) => {
+    execute: async (args, invokedAs) => {
+      // Resolve subcommand from alias or first arg
+      const subcommand = SYNC_ALIAS_MAP[invokedAs || ''] || args[0];
+
+      if (subcommand === 'upload') {
+        const subArgs = SYNC_ALIAS_MAP[invokedAs || ''] ? args : args.slice(1);
+        return executeSyncUpload(subArgs);
+      }
+
       await initModules();
       const fullSync = args.includes('--full-sync') || args.includes('-f');
       const syncGroups = args.includes('--groups') || args.includes('-g');
@@ -147,22 +167,6 @@ export const syncCommands: Command[] = [
         }
         throw new Error(`Sync completed with ${result.errors.length} errors`);
       }
-    }
-  },
-  {
-    name: 'sync:upload',
-    aliases: ['su'],
-    description: 'Upload local changes only',
-    options: [
-      { name: '--force', alias: '-f', description: 'Force upload even if unchanged' },
-    ],
-    examples: [
-      'zotero sync:upload',
-      'zotero sync:upload -f',
-    ],
-    execute: async () => {
-      console.log('This would upload local changes...');
-      // Implementation for upload-only would go here
     }
   },
 ];

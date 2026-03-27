@@ -7,7 +7,7 @@ _zotero_complete() {
     _init_completion || return
 
     # Main commands
-    local commands="sync list search get stats verify add add-by-id update delete export note attachments attachment-download attachment-open attachment-dedup config history help shell"
+    local commands="sync list search get stats verify add update delete export note attachment trash webdav config history help shell groups collections tags batch cite creators duplicates related searches annotations"
 
     # Get the command (first non-option argument)
     local cmd=""
@@ -41,13 +41,9 @@ _zotero_complete() {
                 COMPREPLY=($(compgen -W "--field --since --unsynced --limit -f -s -u -l" -- "$cur"))
                 ;;
             add|a|new|touch)
-                # add command takes type and title as positional args
                 COMPREPLY=($(compgen -W "--attachment -a" -- "$cur"))
                 ;;
-            add-by-id|addby)
-                COMPREPLY=($(compgen -W "--attachment -a" -- "$cur"))
-                ;;
-            delete|rm|del|trash)
+            delete|rm|del)
                 COMPREPLY=($(compgen -W "--permanent --force -p -f" -- "$cur"))
                 ;;
             export|e|out|save)
@@ -62,11 +58,14 @@ _zotero_complete() {
             groups|g)
                 COMPREPLY=($(compgen -W "--sync" -- "$cur"))
                 ;;
-            webdav|wd)
-                COMPREPLY=($(compgen -W "config sync status scan" -- "$cur"))
+            trash)
+                COMPREPLY=($(compgen -W "--count --all --yes --dry-run -c -a -y -n" -- "$cur"))
                 ;;
-            attachment-dedup|attdedup|dedup)
-                COMPREPLY=($(compgen -W "--delete" -- "$cur"))
+            attachment|att|files)
+                COMPREPLY=($(compgen -W "--item --limit --force --wait --delete --dry-run -l -f -w -d" -- "$cur"))
+                ;;
+            webdav|wd)
+                COMPREPLY=($(compgen -W "--auto-sync --base-path --download --upload --verbose --orphaned -d -u -v -o" -- "$cur"))
                 ;;
             *)
                 COMPREPLY=()
@@ -77,31 +76,68 @@ _zotero_complete() {
 
     # Command-specific completions for positional arguments
     case "$cmd" in
-        get|show|cat|view|update|u|edit|set|delete|rm|del|trash)
+        get|show|cat|view|update|u|edit|set|delete|rm|del)
             # Complete with recent item keys from history
             if [ -f ~/.local/share/zotero-headless/history.json ]; then
                 local keys=$(cat ~/.local/share/zotero-headless/history.json 2>/dev/null | grep -o '"key":"[^"]*"' | cut -d'"' -f4 | head -20)
                 COMPREPLY=($(compgen -W "$keys" -- "$cur"))
             fi
             ;;
-        
-        note|n|notes)
+
+        sync|s|pull|fetch)
             if [ $((cword - cmd_index)) -eq 1 ]; then
-                COMPREPLY=($(compgen -W "add edit show list export" -- "$cur"))
-            elif [ "$prev" = "edit" ] || [ "$prev" = "show" ] || [ "$prev" = "list" ] || [ "$prev" = "export" ]; then
-                # Complete with note keys
+                COMPREPLY=($(compgen -W "upload" -- "$cur"))
+            fi
+            ;;
+
+        list|ls|ll|la)
+            if [ $((cword - cmd_index)) -eq 1 ]; then
+                COMPREPLY=($(compgen -W "unsynced" -- "$cur"))
+            fi
+            ;;
+
+        add|a|new|touch)
+            if [ $((cword - cmd_index)) -eq 1 ]; then
+                COMPREPLY=($(compgen -W "byid journalArticle book bookSection conferencePaper thesis report webpage document" -- "$cur"))
+            fi
+            ;;
+
+        trash)
+            if [ $((cword - cmd_index)) -eq 1 ]; then
+                COMPREPLY=($(compgen -W "list empty restore" -- "$cur"))
+            elif [ "$prev" = "restore" ]; then
+                if [ -f ~/.local/share/zotero-headless/history.json ]; then
+                    local keys=$(cat ~/.local/share/zotero-headless/history.json 2>/dev/null | grep -o '"key":"[^"]*"' | cut -d'"' -f4 | head -20)
+                    COMPREPLY=($(compgen -W "$keys --all" -- "$cur"))
+                fi
+            fi
+            ;;
+
+        webdav|wd)
+            if [ $((cword - cmd_index)) -eq 1 ]; then
+                COMPREPLY=($(compgen -W "config sync status scan" -- "$cur"))
+            fi
+            ;;
+
+        attachment|att|files)
+            if [ $((cword - cmd_index)) -eq 1 ]; then
+                COMPREPLY=($(compgen -W "list download open dedup" -- "$cur"))
+            elif [ "$prev" = "download" ] || [ "$prev" = "open" ]; then
                 if [ -f ~/.local/share/zotero-headless/history.json ]; then
                     local keys=$(cat ~/.local/share/zotero-headless/history.json 2>/dev/null | grep -o '"key":"[^"]*"' | cut -d'"' -f4 | head -20)
                     COMPREPLY=($(compgen -W "$keys" -- "$cur"))
                 fi
             fi
             ;;
-        
-        attachment-download|attachment-open|attdl|atto|down|open)
-            # Complete with attachment keys
-            if [ -f ~/.local/share/zotero-headless/history.json ]; then
-                local keys=$(cat ~/.local/share/zotero-headless/history.json 2>/dev/null | grep -o '"key":"[^"]*"' | cut -d'"' -f4 | head -20)
-                COMPREPLY=($(compgen -W "$keys" -- "$cur"))
+
+        note|n|notes)
+            if [ $((cword - cmd_index)) -eq 1 ]; then
+                COMPREPLY=($(compgen -W "add edit show list export" -- "$cur"))
+            elif [ "$prev" = "edit" ] || [ "$prev" = "show" ] || [ "$prev" = "list" ] || [ "$prev" = "export" ]; then
+                if [ -f ~/.local/share/zotero-headless/history.json ]; then
+                    local keys=$(cat ~/.local/share/zotero-headless/history.json 2>/dev/null | grep -o '"key":"[^"]*"' | cut -d'"' -f4 | head -20)
+                    COMPREPLY=($(compgen -W "$keys" -- "$cur"))
+                fi
             fi
             ;;
 
@@ -110,13 +146,6 @@ _zotero_complete() {
             COMPREPLY=($(compgen -W "$commands" -- "$cur"))
             ;;
 
-        groups|g)
-            if [ "$prev" = "--sync" ]; then
-                # Could complete with group IDs if we had them cached
-                COMPREPLY=()
-            fi
-            ;;
-        
         *)
             COMPREPLY=()
             ;;

@@ -192,7 +192,7 @@ zotero add journalArticle "论文标题" "作者名"      # 完整命令
 zotero a journalArticle "论文标题" "作者名"        # 短别名
 zotero new journalArticle "论文标题"               # 类似 Unix 风格
 zotero touch journalArticle "论文标题"             # 类似 Unix touch
-zotero add-by-id "10.1038/nature23477"            # 通过标识符添加
+zotero add byid "10.1038/nature23477"              # 通过标识符添加
 ```
 
 ### 6. 更新文献 (update / u / edit / set)
@@ -215,22 +215,22 @@ zotero rm ABCD1234 -n               # --dry-run 预览删除
 zotero del ABCD1234                 # del 别名
 ```
 
-### 8. 回收站管理 (trash / restore / trash:empty)
+### 8. 回收站管理 (trash)
 
 ```bash
 zotero trash                        # 列出回收站中的条目
-zotero trash --list                 # 同上
-zotero restore ABCD1234             # 恢复单个条目
-zotero restore --all                # 恢复所有条目
-zotero trash:empty                  # 清空回收站（永久删除）
-zotero trash:empty --dry-run        # 预览将删除的内容
+zotero trash list                   # 同上
+zotero trash restore ABCD1234       # 恢复单个条目
+zotero trash restore --all          # 恢复所有条目
+zotero trash empty                  # 清空回收站（永久删除）
+zotero trash empty --dry-run        # 预览将删除的内容
 ```
 
 ### 9. 附件同步 (WebDAV)
 
 ```bash
-zotero webdav:config https://dav.example.com/dav user pass
-zotero webdav:sync
+zotero webdav config https://dav.example.com/dav user pass
+zotero webdav sync
 ```
 
 ---
@@ -483,8 +483,8 @@ zotero list -<Tab><Tab>
 | `zotero sync --group=ID` | `-G<ID>` | 同步指定群组 |
 | `zotero sync --quiet` | `-q` | 静默模式（无进度条） |
 | `zotero sync --interactive` | `-i` | 交互式冲突解决 |
-| `zotero sync:upload` | `su` | 仅上传本地修改 |
-| `zotero sync:download` | `sd` | 仅下载远程修改 |
+| `zotero sync upload` | `su` | 仅上传本地修改 |
+| `zotero sync download` | `sd` | 仅下载远程修改 |
 
 ### 群组库命令
 
@@ -506,11 +506,11 @@ zotero list -<Tab><Tab>
 | `zotero list --since 2024-01-01` | `-s 2024-01-01` | 显示指定日期后修改的项 |
 | `zotero list --sort title` | `-S title` | 按字段排序 |
 | `zotero list --order desc` | `-o desc` | 降序排列 |
-| `zotero list:unsynced` | `lsu` | 列出未同步文献 |
+| `zotero list unsynced` | `lsu` | 列出未同步文献 |
 | `zotero get <key>` | `show`, `cat`, `view` | 查看单条文献详情 |
 | `zotero stats` | `st`, `info`, `status`, `df` | 库统计信息 |
-| `zotero attachments` | `att`, `files`, `docs` | 列出附件 |
-| `zotero attachments --item ABCD1234` | | 查看指定项的附件 |
+| `zotero attachment list` | `att`, `files`, `docs` | 列出附件 |
+| `zotero attachment list --item ABCD1234` | | 查看指定项的附件 |
 
 ### 搜索命令
 
@@ -526,7 +526,7 @@ zotero list -<Tab><Tab>
 
 | 命令 | 别名 | 说明 | 同步需求 |
 |------|------|------|----------|
-| `zotero add-by-id <id>` | `addby` | 通过 DOI/arXiv/ISBN/PMID 添加 | 自动同步 |
+| `zotero add byid <id>` | `addby` | 通过 DOI/arXiv/ISBN/PMID 添加 | 自动同步 |
 | `zotero add <类型> <标题>` | `a`, `new`, `touch`, `create` | 手动添加新文献 | 自动同步 |
 | `zotero update <key> <字段> <值>` | `u`, `edit`, `set`, `mod` | 更新文献（仅本地） | 需运行 `sync` |
 | `zotero delete <key>` | `rm`, `del`, `d` | 删除/移至回收站 | 需运行 `sync` |
@@ -538,12 +538,12 @@ zotero list -<Tab><Tab>
 
 | 命令 | 别名 | 说明 |
 |------|------|------|
-| `zotero trash` | `trash:list`, `trash:view` | 列出回收站中的条目 |
-| `zotero trash --list` | | 同上 |
-| `zotero restore <key>` | `undelete`, `untrash` | 恢复已删除条目 |
-| `zotero restore --all` | | 恢复所有已删除条目 |
-| `zotero trash:empty` | `trash:clear`, `empty-trash` | 清空回收站（永久删除） |
-| `zotero trash:empty --dry-run` | | 预览将要永久删除的内容 |
+| `zotero trash` | | 列出回收站中的条目 |
+| `zotero trash list` | | 同上 |
+| `zotero trash restore <key>` | `undelete`, `untrash` | 恢复已删除条目 |
+| `zotero trash restore --all` | | 恢复所有已删除条目 |
+| `zotero trash empty` | | 清空回收站（永久删除） |
+| `zotero trash empty --dry-run` | | 预览将要永久删除的内容 |
 
 ### 集合/文件夹命令
 
@@ -633,26 +633,26 @@ zotero list -<Tab><Tab>
 | `zotero searches --run <key>` | | 运行保存的搜索 |
 | `zotero searches --delete <key>` | | 删除保存的搜索 |
 
-### add-by-id 命令
+### add byid 命令
 
 通过学术标识符自动获取元数据：
 
 ```bash
 # DOI
-zotero add-by-id "10.1038/nature23477"
-zotero add-by-id "https://doi.org/10.1038/nature23477"
+zotero add byid "10.1038/nature23477"
+zotero add byid "https://doi.org/10.1038/nature23477"
 
 # arXiv
-zotero add-by-id "1706.03762"
+zotero add byid "1706.03762"
 
 # ISBN
-zotero add-by-id "978-0-13-110362-7"
+zotero add byid "978-0-13-110362-7"
 
 # PMID
-zotero add-by-id "27626369"
+zotero add byid "27626369"
 
 # 批量添加
-zotero add-by-id "10.1038/nature23477, 1706.03762"
+zotero add byid "10.1038/nature23477, 1706.03762"
 ```
 
 **支持的标识符**：
@@ -665,10 +665,10 @@ zotero add-by-id "10.1038/nature23477, 1706.03762"
 
 | 命令 | 说明 |
 |------|------|
-| `zotero webdav:config <url> <user> <pass>` | 配置 WebDAV 服务器 |
-| `zotero webdav:sync` | 同步所有附件到 WebDAV |
-| `zotero webdav:status` | 查看 WebDAV 配置状态 |
-| `zotero webdav:scan` | 扫描 WebDAV 上的附件 |
+| `zotero webdav config <url> <user> <pass>` | 配置 WebDAV 服务器 |
+| `zotero webdav sync` | 同步所有附件到 WebDAV |
+| `zotero webdav status` | 查看 WebDAV 配置状态 |
+| `zotero webdav scan` | 扫描 WebDAV 上的附件 |
 
 > ℹ️ WebDAV 附件目录固定为 `/zotero`（与官方 Zotero 客户端一致），不支持自定义 basePath。
 
@@ -676,13 +676,13 @@ zotero add-by-id "10.1038/nature23477, 1706.03762"
 
 ```bash
 # 坚果云
-zotero webdav:config https://dav.jianguoyun.com/dav/zotero user pass
+zotero webdav config https://dav.jianguoyun.com/dav/zotero user pass
 
 # NextCloud
-zotero webdav:config https://cloud.example.com/remote.php/dav/files/user/zotero user pass
+zotero webdav config https://cloud.example.com/remote.php/dav/files/user/zotero user pass
 
 # 同步附件
-zotero webdav:sync
+zotero webdav sync
 ```
 
 ### 导出命令
@@ -1031,22 +1031,22 @@ Zotero-Headless 支持完整的附件管理功能，包括 WebDAV 同步、本�
 
 | 命令 | 说明 |
 |------|------|
-| `zotero attachments list` | 列出附件 |
-| `zotero attachment-download <key>` | 从 WebDAV 下载附件 |
-| `zotero attachment-open <key>` | 用系统默认程序打开附件 |
-| `zotero attachment-dedup` | 检测并删除重复附件 |
+| `zotero attachment list` | 列出附件 |
+| `zotero attachment download <key>` | 从 WebDAV 下载附件 |
+| `zotero attachment open <key>` | 用系统默认程序打开附件 |
+| `zotero attachment dedup` | 检测并删除重复附件 |
 
 ### 列出附件
 
 ```bash
 # 列出所有附件
-zotero attachments list
+zotero attachment list
 
 # 列出特定条目的附件
-zotero attachments list --item ABC123
+zotero attachment list --item ABC123
 
 # 限制数量
-zotero attachments list --limit 10
+zotero attachment list --limit 10
 ```
 
 输出示例：
@@ -1070,7 +1070,7 @@ zotero attachments list --limit 10
 
 ```bash
 # 下载单个附件
-zotero attachment-download XYZ789
+zotero attachment download XYZ789
 
 # 输出：
 # 📥 Downloading attachment XYZ789...
@@ -1085,7 +1085,7 @@ zotero attachment-download XYZ789
 
 ```bash
 # 打开 PDF（使用系统默认的 PDF 阅读器）
-zotero attachment-open XYZ789
+zotero attachment open XYZ789
 
 # 输出：
 # 📂 Opening attachment XYZ789...
@@ -1104,7 +1104,7 @@ zotero attachment-open XYZ789
 
 ```bash
 # 扫描重复
-zotero attachment-dedup
+zotero attachment dedup
 
 # 输出示例：
 # 🔍 Scanning for duplicate attachments...
@@ -1117,7 +1117,7 @@ zotero attachment-dedup
 # 💡 Use --delete to remove duplicates
 
 # 删除重复（保留第一个）
-zotero attachment-dedup --delete
+zotero attachment dedup --delete
 
 # 输出：
 # 🗑️  Removing duplicates...
@@ -1130,13 +1130,13 @@ zotero attachment-dedup --delete
 
 ```bash
 # 配置 WebDAV
-zotero webdav:config https://dav.example.com/dav user password
+zotero webdav config https://dav.example.com/dav user password
 
 # 测试连接
-zotero webdav:status
+zotero webdav status
 
 # 同步所有附件到本地
-zotero webdav:sync
+zotero webdav sync
 ```
 
 ---
@@ -1172,7 +1172,7 @@ zotero sync
 **解决**：
 ```bash
 # 查看未同步项目
-zotero list:unsynced
+zotero list unsynced
 
 # 交互式解决冲突
 zotero sync --interactive

@@ -9,7 +9,7 @@ import { formatDate, resolveCollectionPath } from '../utils.js';
 export const listCommands: Command[] = [
   {
     name: 'list',
-    aliases: ['ls', 'll', 'la'],
+    aliases: ['ls', 'll', 'la', 'list:unsynced', 'lsu'],
     description: 'List items in the library',
     options: [
       { name: '--type', alias: '-t', description: 'Filter by item type', value: '<type>' },
@@ -35,6 +35,36 @@ export const listCommands: Command[] = [
       'zotero ll --sort title',
     ],
     execute: async (args, invokedAs) => {
+      // Handle 'unsynced' subcommand (also via list:unsynced / lsu aliases)
+      const isUnsyncedAlias = invokedAs === 'list:unsynced' || invokedAs === 'lsu';
+      if (isUnsyncedAlias || args[0] === 'unsynced') {
+        await initModules();
+        const db = getDb()();
+        const items = getItems();
+        const libraries = getLibraries();
+        const library = await db.select().from(libraries).get();
+        if (!library) {
+          console.log(`${symbols.error} No library found. Run "sync" first.`);
+          return;
+        }
+        const results = await db.select()
+          .from(items)
+          .where(and(
+            eq(items.libraryId, library.id),
+            eq(items.synced, false)
+          ))
+          .all();
+        console.log(`\nUnsynced items (${results.length}):\n`);
+        if (results.length === 0) {
+          console.log('   All items are synced!');
+        } else {
+          results.forEach(item => {
+            console.log(`  [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}`);
+          });
+        }
+        return;
+      }
+
       const isDetailed = invokedAs === 'll';  // Check if invoked as 'll'
       const isCompact = invokedAs === 'la';   // Check if invoked as 'la'
       await initModules();
@@ -403,44 +433,4 @@ export const listCommands: Command[] = [
     }
   },
 
-  {
-    name: 'list:unsynced',
-    aliases: ['lsu'],
-    description: 'List unsynced items',
-    options: [
-      { name: '--limit', alias: '-l', description: 'Limit number of results', value: '<N>' },
-    ],
-    examples: [
-      'zotero list:unsynced',
-      'zotero list:unsynced -l 50',
-    ],
-    execute: async () => {
-      await initModules();
-      const db = getDb()();
-      const items = getItems();
-      const libraries = getLibraries();
-      const library = await db.select().from(libraries).get();
-      if (!library) {
-        console.log(`${symbols.error} No library found. Run "sync" first.`);
-        return;
-      }
-
-      const results = await db.select()
-        .from(items)
-        .where(and(
-          eq(items.libraryId, library.id),
-          eq(items.synced, false)
-        ))
-        .all();
-
-      console.log(`\nUnsynced items (${results.length}):\n`);
-      if (results.length === 0) {
-        console.log('   All items are synced!');
-      } else {
-        results.forEach(item => {
-          console.log(`  [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}`);
-        });
-      }
-    }
-  },
 ];
