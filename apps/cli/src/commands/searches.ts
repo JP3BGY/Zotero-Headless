@@ -49,7 +49,8 @@ export const searchesCommands: Command[] = [
 
         console.log(`\nSaved searches (${searchItems.length}):\n`);
         for (const item of searchItems) {
-          const raw = JSON.parse(item.rawJson);
+          const rawJson = JSON.parse(item.rawJson);
+          const raw = rawJson.data || rawJson;
           console.log(`  [${item.key}] ${item.title || 'Unnamed search'}`);
           if (raw.conditions) {
             console.log(`      Conditions: ${JSON.stringify(raw.conditions).substring(0, 60)}...`);
@@ -77,7 +78,8 @@ export const searchesCommands: Command[] = [
         }
 
         // Parse search conditions and execute
-        const raw = JSON.parse(searchItem.rawJson);
+        const rawJson = JSON.parse(searchItem.rawJson);
+        const raw = rawJson.data || rawJson;
         const conditions = raw.conditions || [];
 
         // Simple condition matching - iterate items and filter

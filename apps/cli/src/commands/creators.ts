@@ -59,8 +59,13 @@ export const creatorsCommands: Command[] = [
           return;
         }
 
-        const raw = JSON.parse(item.rawJson);
-        const creators = (raw.creators || []) as Array<{ firstName?: string; lastName?: string; creatorType?: string }>;
+        const rawJson = JSON.parse(item.rawJson);
+        const raw = rawJson.data || rawJson;
+        let creators = raw.creators || [];
+        if (typeof creators === 'string') {
+          try { creators = JSON.parse(creators); } catch { creators = []; }
+        }
+        creators = creators as Array<{ firstName?: string; lastName?: string; creatorType?: string }>;
 
         if (creators.length === 0) {
           console.log(`No creators for [${itemKey}]`);
@@ -101,21 +106,22 @@ export const creatorsCommands: Command[] = [
           return;
         }
 
-        const raw = JSON.parse(item.rawJson);
-        const creators = raw.creators || [];
+        const rawJson2 = JSON.parse(item.rawJson);
+        const rawData2 = rawJson2.data || rawJson2;
+        const creators2 = rawData2.creators || [];
 
-        creators.push({
+        creators2.push({
           firstName,
           lastName,
           creatorType
         });
 
-        raw.creators = creators;
+        rawData2.creators = creators2;
 
         await db.update(items)
           .set({
-            rawJson: JSON.stringify(raw),
-            version: item.version + 1,
+            rawJson: JSON.stringify(rawJson2),
+            creators: JSON.stringify(creators2),
             synced: false
           })
           .where(eq(items.key, itemKey));
@@ -144,21 +150,22 @@ export const creatorsCommands: Command[] = [
           return;
         }
 
-        const raw = JSON.parse(item.rawJson);
-        const creators = raw.creators || [];
+        const rawJson3 = JSON.parse(item.rawJson);
+        const rawData3 = rawJson3.data || rawJson3;
+        const creators3 = rawData3.creators || [];
 
-        if (creatorIdx < 0 || creatorIdx >= creators.length) {
-          console.log(`${symbols.error} Invalid creator index. Valid: 1-${creators.length}`);
+        if (creatorIdx < 0 || creatorIdx >= creators3.length) {
+          console.log(`${symbols.error} Invalid creator index. Valid: 1-${creators3.length}`);
           return;
         }
 
-        const removed = creators.splice(creatorIdx, 1)[0];
-        raw.creators = creators;
+        const removed = creators3.splice(creatorIdx, 1)[0];
+        rawData3.creators = creators3;
 
         await db.update(items)
           .set({
-            rawJson: JSON.stringify(raw),
-            version: item.version + 1,
+            rawJson: JSON.stringify(rawJson3),
+            creators: JSON.stringify(creators3),
             synced: false
           })
           .where(eq(items.key, itemKey));
@@ -187,23 +194,24 @@ export const creatorsCommands: Command[] = [
           return;
         }
 
-        const raw = JSON.parse(item.rawJson);
-        const creators = raw.creators || [];
+        const rawJson4 = JSON.parse(item.rawJson);
+        const rawData4 = rawJson4.data || rawJson4;
+        const creators4 = rawData4.creators || [];
 
-        if (creatorIdx < 0 || creatorIdx >= creators.length) {
-          console.log(`${symbols.error} Invalid creator index. Valid: 1-${creators.length}`);
+        if (creatorIdx < 0 || creatorIdx >= creators4.length) {
+          console.log(`${symbols.error} Invalid creator index. Valid: 1-${creators4.length}`);
           return;
         }
 
         // Move creator to front
-        const selected = creators.splice(creatorIdx, 1)[0];
-        creators.unshift(selected);
-        raw.creators = creators;
+        const selected = creators4.splice(creatorIdx, 1)[0];
+        creators4.unshift(selected);
+        rawData4.creators = creators4;
 
         await db.update(items)
           .set({
-            rawJson: JSON.stringify(raw),
-            version: item.version + 1,
+            rawJson: JSON.stringify(rawJson4),
+            creators: JSON.stringify(creators4),
             synced: false
           })
           .where(eq(items.key, itemKey));

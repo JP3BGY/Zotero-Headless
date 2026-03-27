@@ -55,8 +55,9 @@ export const relatedCommands: Command[] = [
           return;
         }
 
-        // Related items stored in rawJson.related
-        const raw = JSON.parse(item.rawJson);
+        // Related items stored in rawJson.data.relations
+        const rawJson = JSON.parse(item.rawJson);
+        const raw = rawJson.data || rawJson;
         const relatedKeys: string[] = raw.related || [];
 
         if (relatedKeys.length === 0) {
@@ -111,7 +112,8 @@ export const relatedCommands: Command[] = [
           return;
         }
 
-        const raw = JSON.parse(item.rawJson);
+        const rawJson = JSON.parse(item.rawJson);
+        const raw = rawJson.data || rawJson;
         const related: string[] = raw.related || [];
 
         if (related.includes(relatedKey)) {
@@ -124,8 +126,7 @@ export const relatedCommands: Command[] = [
 
         await db.update(items)
           .set({
-            rawJson: JSON.stringify(raw),
-            version: item.version + 1,
+            rawJson: JSON.stringify(rawJson),
             synced: false
           })
           .where(eq(items.key, itemKey));
@@ -154,7 +155,8 @@ export const relatedCommands: Command[] = [
           return;
         }
 
-        const raw = JSON.parse(item.rawJson);
+        const rawJson = JSON.parse(item.rawJson);
+        const raw = rawJson.data || rawJson;
         const related: string[] = raw.related || [];
         const filtered = related.filter(k => k !== relatedKey);
 
@@ -167,8 +169,7 @@ export const relatedCommands: Command[] = [
 
         await db.update(items)
           .set({
-            rawJson: JSON.stringify(raw),
-            version: item.version + 1,
+            rawJson: JSON.stringify(rawJson),
             synced: false
           })
           .where(eq(items.key, itemKey));

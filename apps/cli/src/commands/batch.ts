@@ -91,7 +91,8 @@ export const batchCommands: Command[] = [
             continue;
           }
 
-          const raw = JSON.parse(item.rawJson);
+          const rawJson = JSON.parse(item.rawJson);
+          const raw = rawJson.data || rawJson;
           const itemTags = raw.tags || [];
           const existingTags = new Set(itemTags.map((t: any) => typeof t === 'string' ? t.toLowerCase() : (t.tag || '').toLowerCase()));
 
@@ -107,8 +108,8 @@ export const batchCommands: Command[] = [
             raw.tags = itemTags;
             await db.update(items)
               .set({
-                rawJson: JSON.stringify(raw),
-                version: item.version + 1,
+                rawJson: JSON.stringify(rawJson),
+                tags: JSON.stringify(itemTags),
                 synced: false
               })
               .where(eq(items.key, key));
@@ -149,7 +150,8 @@ export const batchCommands: Command[] = [
 
           if (!item) continue;
 
-          const raw = JSON.parse(item.rawJson);
+          const rawJson = JSON.parse(item.rawJson);
+          const raw = rawJson.data || rawJson;
           const itemTags = (raw.tags || []).filter((t: any) => {
             const tagName = typeof t === 'string' ? t.toLowerCase() : (t.tag || '').toLowerCase();
             return !tagsToRemove.has(tagName);
@@ -158,8 +160,8 @@ export const batchCommands: Command[] = [
           raw.tags = itemTags;
           await db.update(items)
             .set({
-              rawJson: JSON.stringify(raw),
-              version: item.version + 1,
+              rawJson: JSON.stringify(rawJson),
+              tags: JSON.stringify(itemTags),
               synced: false
             })
             .where(eq(items.key, key));
@@ -197,15 +199,16 @@ export const batchCommands: Command[] = [
 
           if (!item) continue;
 
-          const raw = JSON.parse(item.rawJson);
+          const rawJson = JSON.parse(item.rawJson);
+          const raw = rawJson.data || rawJson;
           const colKeys: string[] = raw.collections || [];
           if (!colKeys.includes(collectionKey)) {
             colKeys.push(collectionKey);
             raw.collections = colKeys;
             await db.update(items)
               .set({
-                rawJson: JSON.stringify(raw),
-                version: item.version + 1,
+                rawJson: JSON.stringify(rawJson),
+                collectionKeys: JSON.stringify(colKeys),
                 synced: false
               })
               .where(eq(items.key, key));
@@ -234,13 +237,14 @@ export const batchCommands: Command[] = [
 
           if (!item) continue;
 
-          const raw = JSON.parse(item.rawJson);
+          const rawJson = JSON.parse(item.rawJson);
+          const raw = rawJson.data || rawJson;
           const colKeys: string[] = (raw.collections || []).filter((k: string) => k !== collectionKey);
           raw.collections = colKeys;
           await db.update(items)
             .set({
-              rawJson: JSON.stringify(raw),
-              version: item.version + 1,
+              rawJson: JSON.stringify(rawJson),
+              collectionKeys: JSON.stringify(colKeys),
               synced: false
             })
             .where(eq(items.key, key));
@@ -310,7 +314,8 @@ export const batchCommands: Command[] = [
           output = JSON.stringify(exportItems.map(i => JSON.parse(i.rawJson)), null, 2);
         } else if (format === 'bibtex') {
           for (const item of exportItems) {
-            const raw = JSON.parse(item.rawJson);
+            const rawJson = JSON.parse(item.rawJson);
+            const raw = rawJson.data || rawJson;
             const key = item.key.toLowerCase();
             const author = (raw.creators || [])
               .filter((c: any) => c.creatorType === 'author')
@@ -330,7 +335,8 @@ export const batchCommands: Command[] = [
         } else if (format === 'csv') {
           output = 'key,title,itemType,doi,isbn,year\n';
           for (const item of exportItems) {
-            const raw = JSON.parse(item.rawJson);
+            const rawJson = JSON.parse(item.rawJson);
+            const raw = rawJson.data || rawJson;
             const year = raw.date ? new Date(raw.date).getFullYear() : '';
             output += `"${item.key}","${(item.title || '').replace(/"/g, '""')}","${item.itemType}","${raw.DOI || ''}","${raw.ISBN || ''}","${year}"
 `;
