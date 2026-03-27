@@ -75,7 +75,7 @@ Notes:
       switch (subcommand) {
         case 'add': {
           const parentKey = subArgs[0];
-          const content = subArgs.slice(1).join(' ');
+          let content = subArgs.slice(1).join(' ');
 
           if (!parentKey) {
             console.log(`${symbols.error} Usage: zotero note add <parent-key> [content]`);
@@ -97,8 +97,59 @@ Notes:
           const noteKey = generateKey();
           const now = Math.floor(Date.now() / 1000);
 
+          // If no content provided, open external editor
+          if (!content) {
+            const { fileSync } = await import('tmp');
+            const { writeFileSync, readFileSync } = await import('fs');
+            const { spawn } = await import('child_process');
+
+            const tmpFile = fileSync({
+              postfix: '.md',
+              prefix: 'zotero-note-'
+            });
+
+            writeFileSync(tmpFile.name, '', 'utf-8');
+
+            const { configManager } = await import('@zotero-headless/core');
+            const editor = configManager.get('editor') || process.env.EDITOR || process.env.VISUAL || 'nano';
+
+            console.log(`Opening external editor: ${editor}`);
+            console.log(`   File: ${tmpFile.name}`);
+            console.log(`   Edit and save the file, then close the editor to apply changes.`);
+            console.log('');
+
+            await new Promise<void>((resolve, reject) => {
+              const child = spawn(editor, [tmpFile.name], {
+                stdio: 'inherit',
+                detached: false
+              });
+
+              child.on('close', (code) => {
+                if (code === 0 || code === null) {
+                  resolve();
+                } else {
+                  reject(new Error(`Editor exited with code ${code}`));
+                }
+              });
+
+              child.on('error', (err) => {
+                reject(err);
+              });
+            });
+
+            const editedContent = readFileSync(tmpFile.name, 'utf-8');
+            tmpFile.removeCallback();
+
+            if (!editedContent.trim()) {
+              console.log('Empty note. Aborting.');
+              return;
+            }
+
+            content = editedContent;
+          }
+
           // Convert Markdown to HTML for storage
-          const htmlContent = ensureHtml(content || '<p></p>');
+          const htmlContent = ensureHtml(content);
 
           // Create note data
           const noteData = {

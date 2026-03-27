@@ -700,24 +700,27 @@ export class SyncManager extends EventEmitter {
         }
         
         // Runtime validation: Ensure critical fields are present
+        // For existing items, 'key' is intentionally removed from data (it's passed via URL)
+        const fieldsToCheck = isNewItem ? CRITICAL_FIELDS : new Set(['version', 'itemType']);
         const missingCriticalFields: string[] = [];
-        for (const field of CRITICAL_FIELDS) {
+        for (const field of fieldsToCheck) {
           if (!(field in data) || data[field] === undefined || data[field] === null) {
             missingCriticalFields.push(field);
           }
         }
-        
+
         if (missingCriticalFields.length > 0) {
           console.error(`🚨 CRITICAL VALIDATION ERROR: Missing required fields: ${missingCriticalFields.join(', ')}`);
           console.error(`   Item key: ${item.key}`);
           console.error(`   Available fields: ${Object.keys(data).join(', ')}`);
           throw new Error(`BUG: Cannot sync item without required fields: ${missingCriticalFields.join(', ')}`);
         }
-        
-        // Validate key format
+
+        // Validate key format (for new items where key is in data, or always validate item.key)
+        const keyToValidate = data.key || item.key;
         const keyPattern = /^[23456789ABCDEFGHIJKLMNPQRSTUVWXYZ]{8}$/;
-        if (!keyPattern.test(data.key)) {
-          console.warn(`!  WARNING: Key format may be invalid: ${data.key}`);
+        if (!keyPattern.test(keyToValidate)) {
+          console.warn(`!  WARNING: Key format may be invalid: ${keyToValidate}`);
           console.warn(`   Expected format: 8 chars from [23456789ABCDEFGHIJKLMNPQRSTUVWXYZ]`);
         }
 
