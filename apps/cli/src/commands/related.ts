@@ -5,6 +5,7 @@ import { initModules, getDb, getItems, getLibraries } from '../modules.js';
 import { symbols } from '@zotero-headless/core';
 import { parseItemData, updateItemData } from '@zotero-headless/types';
 import { eq, and } from 'drizzle-orm';
+import { displayTitle } from '../utils.js';
 
 export const relatedCommands: Command[] = [
   {
@@ -73,7 +74,7 @@ export const relatedCommands: Command[] = [
             .get();
 
           if (relItem) {
-            console.log(`  [${relKey}] ${relItem.title || '(no title)'}`);
+            console.log(`  [${relKey}] ${displayTitle(relItem)}`);
             console.log(`      ${relItem.itemType}`);
           } else {
             console.log(`  [${relKey}] (not in library)`);

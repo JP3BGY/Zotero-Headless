@@ -6,6 +6,7 @@ import { symbols } from '@zotero-headless/core';
 import { eq, and, like, desc, sql } from 'drizzle-orm';
 import { htmlToPlainText } from '../note-utils.js';
 import { parseItemData } from '@zotero-headless/types';
+import { displayTitle } from '../utils.js';
 
 export const searchCommands: Command[] = [
   {
@@ -171,7 +172,7 @@ export const searchCommands: Command[] = [
         results.forEach(item => {
           const syncStatus = item.synced ? symbols.success : '';
           const itemType = item.itemType === 'note' ? '' : '';
-          console.log(`  ${itemType} ${syncStatus} [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}`);
+          console.log(`  ${itemType} ${syncStatus} [${item.key}] ${displayTitle(item, 60)}`);
           if (options.field === 'author' && item.creators) {
             console.log(`      Authors: ${item.creators.substring(0, 50)}`);
           }

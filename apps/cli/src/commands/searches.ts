@@ -5,6 +5,7 @@ import { initModules, getDb, getItems, getLibraries } from '../modules.js';
 import { symbols } from '@zotero-headless/core';
 import { parseItemData } from '@zotero-headless/types';
 import { eq, and } from 'drizzle-orm';
+import { displayTitle } from '../utils.js';
 
 export const searchesCommands: Command[] = [
   {
@@ -115,7 +116,7 @@ export const searchesCommands: Command[] = [
 
         console.log(`\nSearch "${searchItem.title}" returned ${results.length} item(s):\n`);
         for (const item of results.slice(0, 20)) {
-          console.log(`  [${item.key}] ${item.title || '(no title)'}`);
+          console.log(`  [${item.key}] ${displayTitle(item)}`);
         }
         if (results.length > 20) {
           console.log(`  ... and ${results.length - 20} more`);

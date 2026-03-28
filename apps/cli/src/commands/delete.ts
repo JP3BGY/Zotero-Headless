@@ -7,6 +7,7 @@ import { eq, and, like, count } from 'drizzle-orm';
 import { isInteractive, createPrompt } from '../conflict-resolver.js';
 import { t } from '../i18n.js';
 import { updateItemData } from '@zotero-headless/types';
+import { displayTitle } from '../utils.js';
 
 export const deleteCommands: Command[] = [
   {
@@ -75,7 +76,7 @@ export const deleteCommands: Command[] = [
             process.exit(1);
           }
 
-          const title = item.title || '(no title)';
+          const title = displayTitle(item);
           const promptMsg = isPermanent
             ? t('commands.delete.confirmPermanent', title, key)
             : t('commands.delete.confirmTrash', title, key);
@@ -121,6 +122,15 @@ export const deleteCommands: Command[] = [
           return;
         }
 
+        // Find child items (notes, attachments) of this item
+        const childItems = await db.select()
+          .from(getItems())
+          .where(and(
+            eq(getItems().libraryId, library.id),
+            like(getItems().rawJson, `%"parentItem":"${key}"%`)
+          ))
+          .all();
+
         if (isPermanent) {
           // Check trash retention period
           if (item.deletedAt) {
@@ -152,14 +162,26 @@ export const deleteCommands: Command[] = [
             rawJsonSnapshot: item.rawJson,
           });
 
+          // Delete child items first
+          for (const child of childItems) {
+            await db.delete(getItems())
+              .where(and(eq(getItems().key, child.key), eq(getItems().libraryId, library.id)))
+              .run();
+          }
+
           await db.delete(getItems())
             .where(and(eq(getItems().key, key), eq(getItems().libraryId, library.id)))
             .run();
 
           console.log(`${symbols.success} Item marked for permanent deletion!`);
+          if (childItems.length > 0) {
+            console.log(`   Also deleted ${childItems.length} child item(s).`);
+          }
         } else {
           // Soft delete (move to trash): mark as deleted locally
           console.log(`   Moving ${key} to trash...`);
+
+          const now = Math.floor(Date.now() / 1000);
 
           // Get current data and set deleted flag
           const updatedRawJson = updateItemData(item.rawJson, (data) => {
@@ -176,19 +198,39 @@ export const deleteCommands: Command[] = [
             rawJsonSnapshot: item.rawJson,
           });
 
+          // Trash child items first
+          for (const child of childItems) {
+            const childUpdatedRawJson = updateItemData(child.rawJson, (data) => {
+              data.deleted = true;
+            });
+            await db.update(getItems())
+              .set({
+                deleted: true,
+                synced: false,
+                updatedAt: now,
+                deletedAt: now,
+                rawJson: childUpdatedRawJson,
+              })
+              .where(and(eq(getItems().key, child.key), eq(getItems().libraryId, library.id)))
+              .run();
+          }
+
           // Update local item: mark as deleted and unsynced
           await db.update(getItems())
             .set({
               deleted: true,
               synced: false,
-              updatedAt: Math.floor(Date.now() / 1000),  // 使用秒级时间戳
-              deletedAt: Math.floor(Date.now() / 1000),  // Track when trashed
+              updatedAt: now,
+              deletedAt: now,
               rawJson: updatedRawJson
             })
             .where(and(eq(getItems().key, key), eq(getItems().libraryId, library.id)))
             .run();
 
           console.log(`${symbols.success} Item moved to trash locally!`);
+          if (childItems.length > 0) {
+            console.log(`   Also trashed ${childItems.length} child item(s).`);
+          }
         }
 
         console.log(`\nRun "zotero sync" to sync deletion to remote.`);

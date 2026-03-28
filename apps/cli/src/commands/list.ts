@@ -3,8 +3,9 @@
 import type { Command } from '../types.js';
 import { initModules, getDb, getItems, getLibraries, getCollections } from '../modules.js';
 import { symbols } from '@zotero-headless/core';
-import { eq, and, like, notLike, desc, asc, count, isNull, sql } from 'drizzle-orm';
-import { formatDate, resolveCollectionPath } from '../utils.js';
+import { eq, and, like, notLike, notInArray, desc, asc, count, isNull, sql } from 'drizzle-orm';
+import { parseItemData } from '@zotero-headless/types';
+import { formatDate, resolveCollectionPath, displayTitle } from '../utils.js';
 
 export const listCommands: Command[] = [
   {
@@ -24,6 +25,8 @@ export const listCommands: Command[] = [
       { name: '--offset', alias: '-o', description: 'Offset for pagination', value: '<N>' },
       { name: '--compact', alias: '-c', description: 'Compact output format' },
       { name: '--all', alias: '-a', description: 'Show all items including child items (notes, attachments)' },
+      { name: '--tree', alias: '-T', description: 'Show items in tree view with parent-child hierarchy (implies --all)' },
+      { name: '--annotations', alias: '-A', description: 'Include annotations in tree view (hidden by default)' },
     ],
     examples: [
       'zotero list',
@@ -47,7 +50,13 @@ export const listCommands: Command[] = [
           console.log(`${symbols.error} No library found. Run "sync" first.`);
           return;
         }
-        const results = await db.select()
+        const results = await db.select({
+            key: items.key,
+            title: items.title,
+            itemType: items.itemType,
+            rawJson: items.rawJson,
+            synced: items.synced,
+          })
           .from(items)
           .where(and(
             eq(items.libraryId, library.id),
@@ -59,7 +68,7 @@ export const listCommands: Command[] = [
           console.log('   All items are synced!');
         } else {
           results.forEach(item => {
-            console.log(`  [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}`);
+            console.log(`  [${item.key}] ${displayTitle(item)}`);
           });
         }
         return;
@@ -89,6 +98,8 @@ export const listCommands: Command[] = [
         offset: number;
         compact?: boolean;
         all?: boolean;
+        tree?: boolean;
+        annotations?: boolean;
       } = { limit: configLimit, offset: 0 };
 
       const positionalArgs: string[] = [];
@@ -119,6 +130,11 @@ export const listCommands: Command[] = [
           options.compact = true;
         } else if (arg === '--all' || arg === '-a') {
           options.all = true;
+        } else if (arg === '--tree' || arg === '-T') {
+          options.tree = true;
+          options.all = true;  // --tree implies --all
+        } else if (arg === '--annotations' || arg === '-A') {
+          options.annotations = true;
         } else if (!arg.startsWith('-')) {
           positionalArgs.push(arg);
         }
@@ -194,6 +210,10 @@ export const listCommands: Command[] = [
         // Skip this filter when listing children of a specific item
         whereConditions = and(whereConditions, notLike(items.rawJson, '%"parentItem":%'));
       }
+      if (options.tree && !options.annotations) {
+        // Tree view: exclude annotations by default (too many), use --annotations to include
+        whereConditions = and(whereConditions, sql`${items.itemType} != 'annotation'`);
+      }
       if (options.since) {
         const sinceDate = new Date(options.since).getTime();
         if (!isNaN(sinceDate)) {
@@ -249,7 +269,7 @@ export const listCommands: Command[] = [
         )
       )`.as('annotationCount');
 
-      const results = await db.select({
+      const selectFields: Record<string, any> = {
         key: items.key,
         title: items.title,
         itemType: items.itemType,
@@ -262,7 +282,10 @@ export const listCommands: Command[] = [
         attachmentCount: attachmentCountSubquery,
         noteCount: noteCountSubquery,
         annotationCount: annotationCountSubquery,
-      })
+        rawJson: items.rawJson,
+      };
+
+      const results = await db.select(selectFields)
         .from(items)
         .where(whereConditions)
         .orderBy(orderDirection(orderByColumn))
@@ -276,7 +299,8 @@ export const listCommands: Command[] = [
       if (options.type) filters.push(`type:${options.type}`);
       if (options.unsynced) filters.push('unsynced');
       if (options.deleted) filters.push('deleted');
-      if (options.all) filters.push('all');
+      if (options.tree) filters.push('tree');
+      else if (options.all) filters.push('all');
       if (options.since) filters.push(`since:${options.since}`);
       if (options.until) filters.push(`until:${options.until}`);
       if (options.sort) filters.push(`sort:${options.sort}(${options.order || 'desc'})`);
@@ -290,6 +314,80 @@ export const listCommands: Command[] = [
 
       if (results.length === 0) {
         console.log('   No items match the criteria.');
+        return;
+      }
+
+      if (options.tree) {
+        // Tree view: group items by parent-child hierarchy
+        // 1. Build a map of key -> item and parentKey -> children
+        const itemMap = new Map<string, typeof results[0]>();
+        const childrenMap = new Map<string, typeof results>();
+        const topLevel: typeof results = [];
+        const orphans: typeof results = [];
+
+        for (const item of results) {
+          itemMap.set(item.key, item);
+        }
+
+        for (const item of results) {
+          const data = parseItemData(item.rawJson);
+          const parentKey = data.parentItem as string | undefined;
+          if (!parentKey) {
+            topLevel.push(item);
+          } else if (itemMap.has(parentKey)) {
+            if (!childrenMap.has(parentKey)) childrenMap.set(parentKey, []);
+            childrenMap.get(parentKey)!.push(item);
+          } else {
+            orphans.push(item);
+          }
+        }
+
+        // 2. Render tree
+        const renderItem = (item: typeof results[0], prefix: string, isLast: boolean, isRoot: boolean) => {
+          const connector = isRoot ? '' : (isLast ? '└── ' : '├── ');
+          const syncIcon = item.synced ? symbols.success : '●';
+          const delTag = item.deleted ? ' (deleted)' : '';
+          const indent = isRoot ? '' : (isLast ? '    ' : '│   ');
+
+          if (item.itemType === 'annotation') {
+            const data = parseItemData(item.rawJson);
+            const color = data.annotationColor ? ` ${data.annotationColor}` : '';
+            const type = data.annotationType || 'highlight';
+            console.log(`${prefix}${connector}${syncIcon} [${item.key}] ${displayTitle(item, 55)}${delTag}`);
+            console.log(`${prefix}${indent}      ${type}${color} | ${formatDate(item.updatedAt)}`);
+          } else {
+            console.log(`${prefix}${connector}${syncIcon} [${item.key}] ${displayTitle(item, 55)}${delTag}`);
+            console.log(`${prefix}${indent}      ${item.itemType} | ${formatDate(item.updatedAt)}`);
+          }
+
+          const children = childrenMap.get(item.key) || [];
+          for (let i = 0; i < children.length; i++) {
+            const childPrefix = prefix + (isRoot ? '' : (isLast ? '    ' : '│   '));
+            renderItem(children[i], childPrefix, i === children.length - 1, false);
+          }
+        };
+
+        for (const item of topLevel) {
+          renderItem(item, '  ', false, true);
+          console.log();
+        }
+
+        // 3. Show orphaned child items (parentItem not in result set)
+        if (orphans.length > 0) {
+          console.log(`  ── Orphaned items (parent not found) ──\n`);
+          for (const item of orphans) {
+            const data = parseItemData(item.rawJson);
+            const syncIcon = item.synced ? symbols.success : '●';
+            const delTag = item.deleted ? ' (deleted)' : '';
+            console.log(`  ${symbols.warning} [${item.key}] ${displayTitle(item, 55)}${delTag}`);
+            console.log(`        ${item.itemType} | parent: ${data.parentItem} (missing) | ${formatDate(item.updatedAt)}`);
+            console.log();
+          }
+        }
+
+        // 4. Summary
+        const childCount = results.length - topLevel.length - orphans.length;
+        console.log(`Total: ${topLevel.length} top-level, ${childCount} children, ${orphans.length} orphaned`);
         return;
       }
 
@@ -328,7 +426,7 @@ export const listCommands: Command[] = [
           const attDisplay = attCount > 0 ? String(attCount).padStart(2, ' ') : '  ';
 
           const dateStr = formatCompactDate(item.updatedAt);
-          const titleStr = (item.title?.substring(0, 50) || '(no title)').padEnd(50, ' ');
+          const titleStr = displayTitle(item, 50).padEnd(50, ' ');
           const typeStr = item.itemType.padEnd(12, ' ');
 
           // Format: [S][D][A] [#] [date] [type] [title]
@@ -346,7 +444,7 @@ export const listCommands: Command[] = [
         results.forEach(item => {
           const syncStatus = item.synced ? symbols.success : '';
           const delStatus = item.deleted ? ' (deleted)' : '';
-          console.log(`  ${syncStatus} [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}${delStatus}`);
+          console.log(`  ${syncStatus} [${item.key}] ${displayTitle(item)}${delStatus}`);
 
           // Line 2: type, date, key
           const meta: string[] = [];
@@ -395,7 +493,7 @@ export const listCommands: Command[] = [
         results.forEach(item => {
           const syncStatus = item.synced ? symbols.success : '';
           const delStatus = item.deleted ? ' (deleted)' : '';
-          console.log(`  ${syncStatus} [${item.key}] ${item.title?.substring(0, 60) || '(no title)'}${delStatus}`);
+          console.log(`  ${syncStatus} [${item.key}] ${displayTitle(item)}${delStatus}`);
 
           // Build metadata segments for the second line
           const meta: string[] = [];

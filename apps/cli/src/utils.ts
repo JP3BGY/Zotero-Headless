@@ -1,6 +1,7 @@
 // @ts-nocheck
 
 import { and, eq } from 'drizzle-orm';
+import { parseItemData } from '@zotero-headless/types';
 
 /**
  * 格式化日期显示
@@ -174,4 +175,40 @@ export function getContentType(filename: string): string {
     'xml': 'application/xml',
   };
   return mimeTypes[ext] || 'application/octet-stream';
+}
+
+/**
+ * Get a meaningful display title for any item type.
+ * - Annotations: show annotationText or annotationComment content
+ * - Notes: show first line of note content (stripped of HTML)
+ * - Others: use item.title as-is
+ *
+ * @param item must have at least { title, itemType, rawJson }
+ * @param maxLen max characters for the display string
+ */
+export function displayTitle(item: { title?: string | null; itemType?: string; rawJson?: string }, maxLen = 60): string {
+  // If title is already set and meaningful, use it
+  if (item.title && item.title.trim()) {
+    return item.title.substring(0, maxLen);
+  }
+
+  // For annotations: extract annotation text/comment from rawJson
+  if (item.itemType === 'annotation' && item.rawJson) {
+    const data = parseItemData(item.rawJson);
+    const text = (data.annotationText || data.annotationComment || '').replace(/\n/g, ' ').trim();
+    if (text) return text.substring(0, maxLen);
+    return `(empty ${data.annotationType || 'annotation'})`;
+  }
+
+  // For notes: extract first line of note HTML content from rawJson
+  if (item.itemType === 'note' && item.rawJson) {
+    const data = parseItemData(item.rawJson);
+    const html = data.note || '';
+    // Strip HTML tags and get first meaningful line
+    const plain = html.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+    if (plain) return plain.substring(0, maxLen);
+    return '(empty note)';
+  }
+
+  return '(no title)';
 }

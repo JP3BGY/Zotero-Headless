@@ -3,7 +3,7 @@
 import type { Command } from '../types.js';
 import { isShellMode } from '../types.js';
 import { initModules, getDb, getItems, getLibraries, getAttachments, getLogDeletion } from '../modules.js';
-import { formatDate } from '../utils.js';
+import { formatDate, displayTitle } from '../utils.js';
 import { symbols } from '@zotero-headless/core';
 import { t } from '../i18n.js';
 import { isInteractive, createPrompt } from '../conflict-resolver.js';
@@ -67,7 +67,7 @@ async function executeTrashList(args: string[]) {
   console.log(`\nItems in trash (${trashedItems.length}):\n`);
   for (const item of trashedItems) {
     const deletedAt = item.deletedAt ? formatDate(item.deletedAt) : 'unknown';
-    console.log(`  [${item.key}] ${item.title || '(no title)'}`);
+    console.log(`  [${item.key}] ${displayTitle(item)}`);
     console.log(`      Type: ${item.itemType} | Deleted: ${deletedAt}`);
   }
   console.log('\nTo restore: zotero trash restore <key>');
@@ -192,7 +192,7 @@ async function executeTrashEmpty(args: string[]) {
   if (dryRun) {
     console.log(`Would permanently delete ${trashedItems.length} item(s):`);
     for (const item of trashedItems) {
-      console.log(`  [${item.key}] ${item.title || '(no title)'}`);
+      console.log(`  [${item.key}] ${displayTitle(item)}`);
     }
     return;
   }

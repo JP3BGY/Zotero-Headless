@@ -2,7 +2,7 @@
 
 import type { Command } from '../types.js';
 import { initModules, getDb, getItems, getLibraries } from '../modules.js';
-import { formatDate } from '../utils.js';
+import { formatDate, displayTitle } from '../utils.js';
 import { symbols } from '@zotero-headless/core';
 import { eq, and } from 'drizzle-orm';
 
@@ -117,7 +117,7 @@ export const duplicatesCommands: Command[] = [
           for (const item of sorted) {
             itemToGroup.set(item.key, groupNum);
             const created = formatDate(item.createdAt);
-            console.log(`  [${item.key}] ${item.title || '(no title)'}`);
+            console.log(`  [${item.key}] ${displayTitle(item)}`);
             console.log(`      ${item.itemType} | Created: ${created}`);
             if (item.doi) console.log(`      DOI: ${item.doi}`);
             if (item.isbn) console.log(`      ISBN: ${item.isbn}`);
@@ -158,7 +158,7 @@ export const duplicatesCommands: Command[] = [
 
         console.log(`\nMerging group ${groupKey}: keeping [${keep.key}]`);
         for (const item of toDelete) {
-          console.log(`  Deleting: [${item.key}] ${item.title || '(no title)'}`);
+          console.log(`  Deleting: [${item.key}] ${displayTitle(item)}`);
           await db.update(items)
             .set({
               deleted: true,
