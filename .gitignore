@@ -47,3 +47,5 @@ coverage/
 
 # Reference codes
 references/
+
+tmp/

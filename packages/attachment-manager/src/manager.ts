@@ -363,20 +363,17 @@ export class AttachmentManager {
       // Create new attachment item in Zotero
       console.log(`   Creating attachment item ${attachment.key} in Zotero...`);
       
-      // Check if parent item exists in Zotero first
+      // Check if parent item has been synced to remote
       if (attachment.parentItemKey) {
-        try {
-          await zoteroApi.getItem(zoteroId, attachment.parentItemKey, libraryType);
-          console.log(`   ${symbols.success} Parent item ${attachment.parentItemKey} exists`);
-        } catch (e: any) {
-          if (e.message?.includes('404')) {
-            console.warn(`   !  Parent item ${attachment.parentItemKey} not found in Zotero`);
-            console.warn(`   !  Skipping attachment creation - will retry after parent syncs`);
-            return { 
-              success: false, 
-              error: `Parent item ${attachment.parentItemKey} not found. Please sync the parent item first.` 
-            };
-          }
+        const parent = await this.db.select({ key: items.key, version: items.version })
+          .from(items)
+          .where(eq(items.key, attachment.parentItemKey))
+          .get();
+        if (!parent) {
+          return { success: false, error: `Parent item ${attachment.parentItemKey} not found locally` };
+        }
+        if (parent.version === 0) {
+          return { success: false, error: `Parent item ${attachment.parentItemKey} not synced yet. Will retry after parent syncs.` };
         }
       }
       
@@ -418,17 +415,18 @@ export class AttachmentManager {
       }
 
       const result = await zoteroApi.createItems(zoteroId, [attachmentItem], libraryType);
-      console.log(`   API Response:`, JSON.stringify(result, null, 2));
-      
+
       // Check for success
       if (result.failed && result.failed['0']) {
         const errorMsg = result.failed['0'].message || 'Unknown error';
         console.error(`   ${symbols.error} Attachment creation failed: ${errorMsg}`);
         return { success: false, error: errorMsg };
       }
-      
+
       if (result.successful && result.successful['0']) {
-        console.log(`   ${symbols.success} Created attachment item: ${result.successful['0']}`);
+        const created = result.successful['0'] as any;
+        const key = typeof created === 'string' ? created : created?.key || attachment.key;
+        console.log(`   ${symbols.success} Created attachment item: ${key}`);
         return { success: true };
       }
 
@@ -604,11 +602,12 @@ export class AttachmentManager {
       ))
       .all();
 
-    // Filter out orphaned attachments whose parent items no longer exist locally
+    // Filter out orphaned and not-yet-ready attachments
     const validUnsynced: typeof unsynced = [];
+    let skippedParentNotSynced = 0;
     for (const att of unsynced) {
       if (att.parentItemKey) {
-        const parent = await this.db.select({ key: items.key })
+        const parent = await this.db.select({ key: items.key, version: items.version, synced: items.synced })
           .from(items)
           .where(eq(items.key, att.parentItemKey))
           .get();
@@ -619,8 +618,16 @@ export class AttachmentManager {
             .run();
           continue;
         }
+        // Skip if parent hasn't been synced to remote yet — will retry next sync
+        if (parent.version === 0) {
+          skippedParentNotSynced++;
+          continue;
+        }
       }
       validUnsynced.push(att);
+    }
+    if (skippedParentNotSynced > 0) {
+      console.log(`   Skipped ${skippedParentNotSynced} attachment(s) waiting for parent items to sync`);
     }
 
     const errors: string[] = [];

@@ -1,12 +1,14 @@
 // @ts-nocheck
 
 import type { Command } from '../types.js';
-import { initModules, getDb, getItems, getLibraries } from '../modules.js';
-import { symbols } from '@zotero-headless/core';
-import { generateKey, resolveCollectionPath } from '../utils.js';
+import { initModules, getDb, getItems, getLibraries, getAttachments, getCollections } from '../modules.js';
+import { symbols, appConfig } from '@zotero-headless/core';
+import { generateKey, resolveCollectionPath, getContentType } from '../utils.js';
 import { extractDenormalizedColumns } from '@zotero-headless/types';
 import { importFromFile, importFromString } from '@zotero-headless/translator';
+import type { TranslatedCollection } from '@zotero-headless/translator';
 import { and, eq } from 'drizzle-orm';
+import { ProgressBar } from '../progress-bar.js';
 
 export const importCommands: Command[] = [
   {
@@ -100,13 +102,16 @@ export const importCommands: Command[] = [
 
       // Parse using Zotero translator framework
       let translatedItems: any[];
+      let translatedCollections: TranslatedCollection[] = [];
       try {
         if (formatFlag) {
-          // User specified a translator label — use importFromString with format hint
-          translatedItems = await importFromString(content, formatFlag);
+          const result = await importFromString(content, formatFlag);
+          translatedItems = result.items;
+          translatedCollections = result.collections;
         } else {
-          // Auto-detect from file extension
-          translatedItems = await importFromFile(resolvedPath);
+          const result = await importFromFile(resolvedPath);
+          translatedItems = result.items;
+          translatedCollections = result.collections;
         }
       } catch (err: any) {
         console.log(`${symbols.error} Failed to parse file: ${err.message || err}`);
@@ -118,10 +123,13 @@ export const importCommands: Command[] = [
         return;
       }
 
-      console.log(`Parsed ${translatedItems.length} item(s) from ${path.basename(resolvedPath)}\n`);
+      const colMsg = translatedCollections.length > 0
+        ? ` and ${translatedCollections.length} collection(s)` : '';
+      console.log(`Parsed ${translatedItems.length} item(s)${colMsg} from ${path.basename(resolvedPath)}\n`);
 
       // Dry run: just show parsed items
       if (dryRun) {
+        let totalAttachments = 0;
         for (let i = 0; i < translatedItems.length; i++) {
           const item = translatedItems[i];
           const creators = (item.creators || []).map((c: any) =>
@@ -132,8 +140,27 @@ export const importCommands: Command[] = [
           if (item.date) console.log(`     Date: ${item.date}`);
           if (item.DOI) console.log(`     DOI: ${item.DOI}`);
           if (item.ISBN) console.log(`     ISBN: ${item.ISBN}`);
+          if (item.attachments?.length > 0) {
+            totalAttachments += item.attachments.length;
+            for (const att of item.attachments) {
+              const attPath = att.path ? path.resolve(path.dirname(resolvedPath), att.path) : null;
+              const exists = attPath && fs.existsSync(attPath);
+              const marker = exists ? symbols.success : symbols.warning;
+              console.log(`     ${marker} ${att.title || att.path || '(attachment)'}${!exists && attPath ? ' (file missing)' : ''}`);
+            }
+          }
         }
-        console.log(`\n${symbols.success} Dry run complete. ${translatedItems.length} item(s) would be imported.`);
+        if (translatedCollections.length > 0) {
+          console.log(`\n  Collections:`);
+          function printCollection(col: TranslatedCollection, indent: string) {
+            const itemCount = col.children.filter(c => c.type === 'item').length;
+            const subCols = col.children.filter(c => c.type === 'collection') as TranslatedCollection[];
+            console.log(`${indent}${symbols.success} ${col.name} (${itemCount} items)`);
+            for (const sub of subCols) printCollection(sub, indent + '  ');
+          }
+          for (const col of translatedCollections) printCollection(col, '    ');
+        }
+        console.log(`\n${symbols.success} Dry run complete. ${translatedItems.length} item(s), ${totalAttachments} attachment(s), ${translatedCollections.length} collection(s) would be imported.`);
         return;
       }
 
@@ -142,6 +169,7 @@ export const importCommands: Command[] = [
       const db = getDb()();
       const items = getItems();
       const libraries = getLibraries();
+      const attachmentsTbl = getAttachments();
 
       const library = await db.select().from(libraries).get();
       if (!library) {
@@ -162,15 +190,16 @@ export const importCommands: Command[] = [
       }
 
       // Load existing DOIs/ISBNs for duplicate detection
-      let existingDois = new Set<string>();
-      let existingIsbns = new Set<string>();
+      // Also map DOI/ISBN -> existing key so skipped items can still be linked to collections
+      let existingDois = new Map<string, string>();  // lowercase DOI -> itemKey
+      let existingIsbns = new Map<string, string>(); // normalized ISBN -> itemKey
       if (skipDuplicates) {
-        const allItems = await db.select({ doi: items.doi, isbn: items.isbn })
+        const allItems = await db.select({ key: items.key, doi: items.doi, isbn: items.isbn })
           .from(items)
           .where(and(eq(items.libraryId, library.id), eq(items.deleted, false)));
         for (const item of allItems) {
-          if (item.doi) existingDois.add(item.doi.toLowerCase());
-          if (item.isbn) existingIsbns.add(item.isbn.replace(/[-\s]/g, ''));
+          if (item.doi) existingDois.set(item.doi.toLowerCase(), item.key);
+          if (item.isbn) existingIsbns.set(item.isbn.replace(/[-\s]/g, ''), item.key);
         }
       }
 
@@ -178,26 +207,49 @@ export const importCommands: Command[] = [
       let imported = 0;
       let skipped = 0;
       let failed = 0;
+      let attachmentsImported = 0;
+      let attachmentsFailed = 0;
       const now = Math.floor(Date.now() / 1000);
+
+      // Resolve the base directory of the source file (for relative attachment paths)
+      const sourceDir = path.dirname(resolvedPath);
+      // Storage directory for imported attachments
+      const storageDir = path.join(appConfig.dataDir, 'storage');
+
+      // Map from translator itemID -> assigned DB key (for collection linking)
+      const itemIdToKey = new Map<string, string>();
+
+      // Count total attachments for progress
+      const totalAttachments = translatedItems.reduce(
+        (sum, item) => sum + (item.attachments?.filter((a: any) => a.path)?.length || 0), 0
+      );
+      const progress = new ProgressBar({
+        total: translatedItems.length + totalAttachments,
+        label: 'Importing items...',
+      });
 
       for (const translatedItem of translatedItems) {
         try {
           // Translator items are already in Zotero format — use directly
           const zoteroData = { ...translatedItem };
+          const itemAttachments = zoteroData.attachments || [];
 
           // Remove framework-internal fields not needed in DB
           delete zoteroData.itemID;
           delete zoteroData.seeAlso;
           delete zoteroData.attachments;
 
-          // Check for duplicates
+          // Check for duplicates — still record itemID mapping for collection linking
           if (skipDuplicates) {
-            if (zoteroData.DOI && existingDois.has(zoteroData.DOI.toLowerCase())) {
+            const doiKey = zoteroData.DOI && existingDois.get(zoteroData.DOI.toLowerCase());
+            const isbnKey = zoteroData.ISBN && existingIsbns.get(zoteroData.ISBN.replace(/[-\s]/g, ''));
+            const existingKey = doiKey || isbnKey;
+            if (existingKey) {
+              if (translatedItem.itemID) {
+                itemIdToKey.set(translatedItem.itemID, existingKey);
+              }
               skipped++;
-              continue;
-            }
-            if (zoteroData.ISBN && existingIsbns.has(zoteroData.ISBN.replace(/[-\s]/g, ''))) {
-              skipped++;
+              progress.increment();
               continue;
             }
           }
@@ -233,24 +285,172 @@ export const importCommands: Command[] = [
           }).run();
 
           imported++;
+          if (translatedItem.itemID) {
+            itemIdToKey.set(translatedItem.itemID, itemKey);
+          }
+          const title = (zoteroData.title || '').substring(0, 40);
+          progress.increment(title);
+
+          // Process attachments (PDF, HTML snapshots, etc.)
+          for (const att of itemAttachments) {
+            try {
+              if (!att.path) continue;
+
+              const srcPath = path.resolve(sourceDir, att.path);
+              if (!fs.existsSync(srcPath)) {
+                progress.increment();
+                continue;
+              }
+
+              const attKey = generateKey();
+              const filename = path.basename(srcPath);
+              const contentType = att.mimeType || getContentType(filename);
+
+              // Create Zotero-style storage: storage/<key>/<filename>
+              const attStorageDir = path.join(storageDir, attKey);
+              fs.mkdirSync(attStorageDir, { recursive: true });
+              const destPath = path.join(attStorageDir, filename);
+              fs.copyFileSync(srcPath, destPath);
+
+              const stats = fs.statSync(destPath);
+              const linkMode = att.linkMode === '1' || att.linkMode === 1
+                ? 'imported_url' : 'imported_file';
+
+              const attRawJson = {
+                data: {
+                  key: attKey,
+                  itemType: 'attachment',
+                  title: att.title || filename,
+                  filename: filename,
+                  contentType: contentType,
+                  charset: att.charset || '',
+                  parentItem: itemKey,
+                  linkMode: linkMode,
+                  url: att.url || '',
+                  accessDate: att.accessDate || att.date || '',
+                }
+              };
+
+              await db.insert(attachmentsTbl).values({
+                key: attKey,
+                parentItemKey: itemKey,
+                libraryId: library.id,
+                filename: filename,
+                contentType: contentType,
+                fileType: path.extname(filename).toLowerCase(),
+                path: destPath,
+                url: att.url || null,
+                version: 0,
+                createdAt: now,
+                updatedAt: now,
+                deleted: false,
+                size: stats.size,
+                webdavSynced: false,
+                rawJson: JSON.stringify(attRawJson),
+              }).run();
+
+              attachmentsImported++;
+              progress.increment(filename);
+            } catch (attErr: any) {
+              attachmentsFailed++;
+              progress.increment();
+            }
+          }
 
           // Track newly added DOI/ISBN for intra-file dedup
           if (skipDuplicates) {
-            if (zoteroData.DOI) existingDois.add(zoteroData.DOI.toLowerCase());
-            if (zoteroData.ISBN) existingIsbns.add(zoteroData.ISBN.replace(/[-\s]/g, ''));
+            if (zoteroData.DOI) existingDois.set(zoteroData.DOI.toLowerCase(), itemKey);
+            if (zoteroData.ISBN) existingIsbns.set(zoteroData.ISBN.replace(/[-\s]/g, ''), itemKey);
           }
         } catch (err: any) {
           failed++;
+          progress.increment();
           const title = translatedItem.title || '(unknown)';
-          console.log(`${symbols.error} Failed to import "${title}": ${err.message || err}`);
+          console.log(`\n${symbols.error} Failed to import "${title}": ${err.message || err}`);
+        }
+      }
+      progress.complete();
+
+      // Create collections and link items
+      let collectionsCreated = 0;
+      if (translatedCollections.length > 0 && imported > 0) {
+        const collectionsTbl = getCollections();
+
+        function createCollection(
+          col: TranslatedCollection,
+          parentCollectionKey: string | null,
+        ): void {
+          const colKey = generateKey();
+          const childItemKeys: string[] = [];
+          const now = Math.floor(Date.now() / 1000);
+
+          // Resolve child items
+          for (const child of col.children) {
+            if (child.type === 'item') {
+              const itemKey = itemIdToKey.get(child.id);
+              if (itemKey) childItemKeys.push(itemKey);
+            }
+          }
+
+          // Insert collection record
+          db.insert(collectionsTbl).values({
+            key: colKey,
+            libraryId: library.id,
+            name: col.name,
+            parentKey: parentCollectionKey || collectionKey || null,
+            version: 0,
+            createdAt: now,
+            updatedAt: now,
+            deleted: false,
+            rawJson: JSON.stringify({
+              data: {
+                key: colKey,
+                name: col.name,
+                parentCollection: parentCollectionKey || collectionKey || false,
+              }
+            }),
+          }).run();
+          collectionsCreated++;
+
+          // Update items to reference this collection
+          for (const itemKey of childItemKeys) {
+            const row = db.select({ collectionKeys: items.collectionKeys })
+              .from(items)
+              .where(and(eq(items.key, itemKey), eq(items.libraryId, library.id)))
+              .get();
+            if (row) {
+              const existing: string[] = JSON.parse(row.collectionKeys || '[]');
+              if (!existing.includes(colKey)) {
+                existing.push(colKey);
+                db.update(items)
+                  .set({ collectionKeys: JSON.stringify(existing) })
+                  .where(and(eq(items.key, itemKey), eq(items.libraryId, library.id)))
+                  .run();
+              }
+            }
+          }
+
+          // Process sub-collections recursively
+          for (const child of col.children) {
+            if (child.type === 'collection') {
+              createCollection(child as TranslatedCollection, colKey);
+            }
+          }
+        }
+
+        for (const col of translatedCollections) {
+          createCollection(col, null);
         }
       }
 
       // Summary
       console.log('');
       if (imported > 0) console.log(`${symbols.success} Imported ${imported} item(s)`);
+      if (attachmentsImported > 0) console.log(`${symbols.success} Imported ${attachmentsImported} attachment(s)`);
+      if (collectionsCreated > 0) console.log(`${symbols.success} Created ${collectionsCreated} collection(s)`);
       if (skipped > 0) console.log(`${symbols.warning} Skipped ${skipped} duplicate(s)`);
       if (failed > 0) console.log(`${symbols.error} Failed ${failed} item(s)`);
+      if (attachmentsFailed > 0) console.log(`${symbols.error} Failed ${attachmentsFailed} attachment(s)`);
 
       if (imported > 0) {
         console.log(`\nRun "zotero sync" to upload to remote.`);

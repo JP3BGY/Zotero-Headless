@@ -46,6 +46,27 @@ export interface TranslatedItem {
   [key: string]: unknown;
 }
 
+/**
+ * A collection from the Zotero translator framework (e.g. from Zotero RDF import).
+ * Children reference items via their itemID or nested sub-collections.
+ */
+export interface TranslatedCollection {
+  type: 'collection';
+  name: string;
+  children: Array<
+    | { type: 'item'; id: string }
+    | TranslatedCollection
+  >;
+}
+
+/**
+ * Result from an import operation, including both items and collections.
+ */
+export interface ImportResult {
+  items: TranslatedItem[];
+  collections: TranslatedCollection[];
+}
+
 export interface TranslatorEngineOptions {
   /** Path to the translators directory. Default: <repoRoot>/references/translators */
   translatorsDir?: string;

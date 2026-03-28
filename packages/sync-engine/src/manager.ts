@@ -647,6 +647,24 @@ export class SyncManager extends EventEmitter {
             data.creators = [];
           }
         }
+        // Sanitize creators for Zotero API:
+        // - fieldMode is internal, not accepted by API
+        // - fieldMode=1 means single-name creator: use { name, creatorType }
+        // - fieldMode=0 or absent means two-field: use { firstName, lastName, creatorType }
+        if (Array.isArray(data.creators)) {
+          data.creators = data.creators.map((c: any) => {
+            const { fieldMode, ...rest } = c;
+            if (fieldMode === 1 || (c.lastName && !c.firstName && !c.name)) {
+              // Single-field creator (e.g., "BBC News")
+              return { name: c.lastName || c.name || '', creatorType: c.creatorType || 'author' };
+            }
+            // Two-field creator: ensure firstName exists
+            if (rest.lastName != null && rest.firstName == null) {
+              rest.firstName = '';
+            }
+            return rest;
+          });
+        }
 
         // Parse tags if it's a string (stored as JSON in DB, needs to be array for API)
         if (typeof data.tags === 'string') {

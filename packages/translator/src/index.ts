@@ -5,10 +5,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { initTranslatorEngine, getZotero, isInitialized } from './engine.js';
-import type { TranslatedItem, TranslatorEngineOptions } from './types.js';
+import type { TranslatedItem, TranslatedCollection, ImportResult, TranslatorEngineOptions } from './types.js';
 
 export { initTranslatorEngine, getZotero, isInitialized } from './engine.js';
-export type { TranslatedItem, TranslatorEngineOptions } from './types.js';
+export type { TranslatedItem, TranslatedCollection, ImportResult, TranslatorEngineOptions } from './types.js';
 
 /**
  * Ensure the engine is initialized.
@@ -33,9 +33,9 @@ async function findTranslatorByLabel(label: string, type: string = 'import'): Pr
 /**
  * Import items from a file. Format is auto-detected from file extension.
  * @param filePath - Path to the file to import
- * @returns Array of translated items in Zotero format
+ * @returns Import result with items and collections
  */
-export async function importFromFile(filePath: string): Promise<TranslatedItem[]> {
+export async function importFromFile(filePath: string): Promise<ImportResult> {
   await ensureInit();
   const Zotero = getZotero();
 
@@ -48,16 +48,19 @@ export async function importFromFile(filePath: string): Promise<TranslatedItem[]
   translate.setLocation(resolvedPath);
 
   const items = await translate.translate({ libraryID: false, saveAttachments: false });
-  return items || [];
+  return {
+    items: items || [],
+    collections: translate.newCollections || [],
+  };
 }
 
 /**
  * Import items from a string. Format can be auto-detected or specified by label.
  * @param content - The content string to import
  * @param format - Optional translator label (e.g., "BibTeX", "RIS", "CSL JSON", "Zotero RDF")
- * @returns Array of translated items in Zotero format
+ * @returns Import result with items and collections
  */
-export async function importFromString(content: string, format?: string): Promise<TranslatedItem[]> {
+export async function importFromString(content: string, format?: string): Promise<ImportResult> {
   await ensureInit();
   const Zotero = getZotero();
 
@@ -73,7 +76,10 @@ export async function importFromString(content: string, format?: string): Promis
   }
 
   const items = await translate.translate({ libraryID: false, saveAttachments: false });
-  return items || [];
+  return {
+    items: items || [],
+    collections: translate.newCollections || [],
+  };
 }
 
 /**
