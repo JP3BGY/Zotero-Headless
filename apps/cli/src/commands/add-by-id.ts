@@ -4,6 +4,16 @@ import type { Command } from '../types.js';
 import { initModules, getDb, getItems, getLibraries, getAttachments, getWebdavConfig, getAttachmentManager } from '../modules.js';
 import { generateKey, getContentType } from '../utils.js';
 import { symbols } from '@zotero-headless/core';
+import { extractDenormalizedColumns } from '@zotero-headless/types';
+import { searchByIdentifier, translateFromUrl } from '@zotero-headless/translator';
+
+// Result type for unified processing
+interface FetchResult {
+  identifier: { type: string; value: string };
+  item: any | null;       // Zotero API format item (from translator)
+  error?: string;
+  extra?: any;            // WeChat-specific extra data
+}
 
 export async function executeAddById(args: string[]) {
       // Parse arguments for attachments
@@ -32,6 +42,7 @@ ${symbols.error} 请提供至少一个标识符
   • ISBN   - 如 978-3-642-15515-4
   • PMID   - 如 1234567
   • arXiv  - 如 2001.12345
+  • URL    - 任意网页 URL（使用 Zotero Web Translator）
   • 微信文章 URL - 如 https://mp.weixin.qq.com/s/...
 
 选项:
@@ -53,6 +64,7 @@ WebDAV 同步:
   zotero add byid "10.1007/s11263-019-01228-7"
   zotero add byid "978-3-642-15515-4"
   zotero add byid "1234567"
+  zotero add byid "https://en.wikipedia.org/wiki/Deep_learning"
   zotero add byid "https://mp.weixin.qq.com/s/xxxxx"
   zotero add byid "10.1007/xyz" -a /path/to/supplemental.pdf
   zotero add byid "10.1007/xyz" -a file1.pdf -a file2.pdf
@@ -78,40 +90,89 @@ WebDAV 同步:
       try {
         console.log('正在解析标识符...\n');
 
-        // 导入 identifier 模块
-        const { IdentifierParser, MetadataFetcher } = await import('../identifier/index.js');
-
-        // 1. 解析标识符
+        const { IdentifierParser } = await import('../identifier/index.js');
         const identifiers = IdentifierParser.parse(input);
         console.log(`找到 ${identifiers.length} 个标识符`);
-
-        // 2. 显示识别结果
         identifiers.forEach((id, index) => {
           console.log(`   ${index + 1}. ${id.type.toUpperCase()}: ${id.value}`);
         });
 
-        // 3. 配置获取器
-        const fetcher = new MetadataFetcher({
-          maxConcurrent: 3,
-          timeout: 30000,
-          retries: 2,
-          cacheTTL: 3600000,
-          email: process.env.CROSSREF_EMAIL,
-        });
-
-        // 4. 获取元数据
+        // Fetch metadata using translator framework
         console.log('\n正在获取元数据...');
-        const results = await fetcher.fetchBatch(identifiers);
+        const results: FetchResult[] = [];
 
-        // 5. 显示结果摘要
-        const successCount = results.filter(r => !r.error).length;
-        const failCount = results.filter(r => r.error).length;
+        for (const identifier of identifiers) {
+          try {
+            let item: any = null;
+            let extra: any = undefined;
+
+            if (identifier.type === 'url' && (await import('../identifier/fetchers/wechat-fetcher.js')).WeChatFetcher.isWeChatURL(identifier.value)) {
+              // WeChat: use dedicated fetcher (needs special HTML processing)
+              const { WeChatFetcher } = await import('../identifier/fetchers/wechat-fetcher.js');
+              const fetcher = new WeChatFetcher({ maxConcurrent: 1, timeout: 30000, retries: 2, cacheTTL: 0 });
+              const result = await fetcher.fetchMetadata(identifier);
+              item = result.item;
+              extra = result.extra;
+            } else if (identifier.type === 'url') {
+              // Generic URL: try web translator, fall back to DOI extraction
+              try {
+                const items = await translateFromUrl(identifier.normalized);
+                if (items.length > 0) item = items[0];
+              } catch (webErr: any) {
+                // Web translation failed — try extracting DOI from URL path as fallback
+                // DOI pattern: 10.xxxx/suffix, but URL may have extra path segments after the DOI
+                // e.g. /doi/10.1093/bioinformatics/btae038/7585532 → try progressively shorter candidates
+                const doiMatch = identifier.normalized.match(/\/(10\.\d{4,9}\/[^\s?#]+)/);
+                if (doiMatch) {
+                  const fullCandidate = doiMatch[1].replace(/\/+$/, '');
+                  const segments = fullCandidate.split('/');
+                  // Try from longest to shortest: 10.1093/bioinformatics/btae038/7585532, then .../btae038, etc.
+                  for (let len = segments.length; len >= 2; len--) {
+                    const candidate = segments.slice(0, len).join('/');
+                    console.log(`      Web 翻译失败，尝试 DOI: ${candidate} ...`);
+                    try {
+                      const items = await searchByIdentifier({ DOI: candidate });
+                      if (items.length > 0) { item = items[0]; break; }
+                    } catch { /* try shorter candidate */ }
+                  }
+                }
+                if (!item) throw webErr; // re-throw if all fallbacks failed
+              }
+            } else {
+              // DOI, ISBN, PMID, arXiv: use search translator
+              const searchParam: any = {};
+              switch (identifier.type) {
+                case 'doi': searchParam.DOI = identifier.normalized; break;
+                case 'isbn': searchParam.ISBN = identifier.normalized; break;
+                case 'pmid': searchParam.PMID = identifier.normalized; break;
+                case 'arxiv': searchParam.arXiv = identifier.normalized; break;
+              }
+              const items = await searchByIdentifier(searchParam);
+              if (items.length > 0) item = items[0];
+            }
+
+            if (item) {
+              console.log(`   ${symbols.success} ${identifier.type.toUpperCase()}: ${identifier.value}`);
+              results.push({ identifier, item, extra });
+            } else {
+              console.log(`   ${symbols.error} ${identifier.type.toUpperCase()}: ${identifier.value} - 未找到元数据`);
+              results.push({ identifier, item: null, error: '未找到元数据' });
+            }
+          } catch (error: any) {
+            console.log(`   ${symbols.error} ${identifier.type.toUpperCase()}: ${identifier.value} - ${error.message}`);
+            results.push({ identifier, item: null, error: error.message });
+          }
+        }
+
+        // Summary
+        const successCount = results.filter(r => r.item).length;
+        const failCount = results.filter(r => !r.item).length;
 
         console.log(`\n结果摘要:`);
         console.log(`   ${symbols.success} 成功: ${successCount}`);
         console.log(`   ${symbols.error} 失败: ${failCount}`);
 
-        // 6. 写入数据库
+        // Write to database
         if (successCount > 0) {
           console.log('\n写入本地数据库...');
           const db = getDb()();
@@ -127,26 +188,56 @@ WebDAV 同步:
           }
 
           for (const result of results) {
-            if (result.error || !result.item) continue;
+            if (!result.item) continue;
 
             const itemKey = generateKey();
-            const item = {
-              key: itemKey,
-              libraryId: library.id,
-              version: 0,
-              synced: false,
-              deleted: false,
-              createdAt: Math.floor(Date.now() / 1000),
-              updatedAt: Math.floor(Date.now() / 1000),
-              ...result.item,
-              rawJson: JSON.stringify({ data: result.item }),
-            };
+            const now = Math.floor(Date.now() / 1000);
 
-            await db.insert(items).values(item).run();
-            console.log(`   已添加: ${item.title?.substring(0, 50) || '(无标题)'}...`);
+            // Determine if item is from WeChat (old format) or translator (Zotero API format)
+            const isWeChatItem = result.extra?.isWeChatArticle;
 
-            // 处理微信文章的 snapshot 附件（iOS 兼容性）
-            if (result.extra?.isWeChatArticle && result.extra?.processedHtml) {
+            let dbValues: any;
+            if (isWeChatItem) {
+              // WeChat fetcher returns data in DB column format already
+              dbValues = {
+                key: itemKey,
+                libraryId: library.id,
+                version: 0,
+                synced: false,
+                deleted: false,
+                createdAt: now,
+                updatedAt: now,
+                ...result.item,
+                rawJson: JSON.stringify({ data: result.item }),
+              };
+            } else {
+              // Translator items are in Zotero API format — use extractDenormalizedColumns
+              const zoteroData = { ...result.item };
+              // Remove framework-internal fields not needed in DB
+              delete zoteroData.itemID;
+              delete zoteroData.seeAlso;
+              delete zoteroData.attachments;
+
+              const denormalized = extractDenormalizedColumns(zoteroData);
+              dbValues = {
+                key: itemKey,
+                libraryId: library.id,
+                version: 0,
+                synced: false,
+                deleted: false,
+                createdAt: now,
+                updatedAt: now,
+                ...denormalized,
+                rawJson: JSON.stringify({ data: zoteroData }),
+              };
+            }
+
+            await db.insert(items).values(dbValues).run();
+            const displayTitle = dbValues.title?.substring(0, 50) || result.item.title?.substring(0, 50) || '(无标题)';
+            console.log(`   已添加: ${displayTitle}...`);
+
+            // 处理微信文章的 snapshot 附件
+            if (isWeChatItem && result.extra?.processedHtml) {
               console.log(`   创建微信文章 snapshot...`);
 
               const crypto = await import('crypto');
@@ -154,9 +245,7 @@ WebDAV 同步:
                 crypto.createHash('md5').update(result.extra.processedHtml).digest('hex').substring(0, 16);
               const uniqueFilename = `${contentHash}.html`;
               const attKey = generateKey();
-              const now = Math.floor(Date.now() / 1000);
 
-              // 获取保存路径
               const { appConfig } = await import('@zotero-headless/core');
               const saveDir = path.join(appConfig.dataDir, 'downloads');
               if (!fs.existsSync(saveDir)) {
@@ -166,7 +255,6 @@ WebDAV 同步:
               const htmlPath = path.join(saveDir, uniqueFilename);
               fs.writeFileSync(htmlPath, result.extra.processedHtml);
 
-              // 创建 attachment 记录
               const accessDate = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
               const sourceUrl = result.item.url || '';
 
@@ -218,7 +306,6 @@ WebDAV 同步:
 
               console.log(`      ${symbols.success} Snapshot: ${uniqueFilename} (${(result.extra.processedHtml.length / 1024).toFixed(1)} KB)`);
 
-              // 检查 autoSync 配置
               const wdc = await db.select().from(webdavConfig).get();
               if (wdc?.autoSync) {
                 console.log(`      自动同步到 WebDAV (autoSync enabled)...`);
@@ -243,8 +330,6 @@ WebDAV 同步:
                 const attKey = generateKey();
                 addedAttKeys.push(attKey);
 
-                // Create attachment record
-                const now = Math.floor(Date.now() / 1000);
                 await db.insert(attachments).values({
                   key: attKey,
                   parentItemKey: itemKey,
@@ -274,7 +359,6 @@ WebDAV 同步:
                 console.log(`      ${symbols.success} ${filename} (${(stats.size / 1024).toFixed(1)} KB)`);
               }
 
-              // Auto-sync attachments if enabled
               const wdc = await db.select().from(webdavConfig).get();
               if (wdc?.autoSync && addedAttKeys.length > 0) {
                 console.log(`      自动同步 ${addedAttKeys.length} 个附件到 WebDAV...`);
@@ -314,10 +398,10 @@ WebDAV 同步:
           console.log('运行 "zotero sync" 同步到 Zotero 服务器');
         }
 
-        // 7. 显示失败详情
+        // Show failure details
         if (failCount > 0) {
           console.log('\n! 失败的标识符:');
-          results.filter(r => r.error).forEach((result, index) => {
+          results.filter(r => !r.item).forEach((result, index) => {
             console.log(`   ${index + 1}. ${result.identifier.value}`);
             console.log(`     原因: ${result.error}`);
           });
@@ -328,7 +412,6 @@ WebDAV 同步:
         console.log('\n请检查:');
         console.log('   1. 标识符格式是否正确');
         console.log('   2. 网络连接是否正常');
-        console.log('   3. API 密钥配置是否正确');
       }
 }
 
