@@ -7,11 +7,6 @@
       "inputs": ["src/**", "tsconfig.json", "package.json"],
       "outputs": ["dist/**"]
     },
-    "@zotero-headless/shell#build": {
-      "dependsOn": ["@zotero-headless/cli#build", "^build"],
-      "inputs": ["src/**", "tsconfig.json", "package.json"],
-      "outputs": ["dist/**"]
-    },
     "bundle": {
       "dependsOn": ["build"],
       "inputs": ["src/**", "tsup.config.ts", "package.json", "../../scripts/esbuild-workspace-plugin.mjs"],

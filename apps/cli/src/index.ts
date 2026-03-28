@@ -140,5 +140,8 @@ function showCommandHelp(cmd: Command, invokedName: string) {
 import { fileURLToPath } from 'url';
 import { realpathSync } from 'fs';
 if (process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])) {
-  main();
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
 }
