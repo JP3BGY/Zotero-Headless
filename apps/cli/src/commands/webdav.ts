@@ -149,6 +149,29 @@ async function executeWebdavConfig(args: string[]) {
 async function executeWebdavSync(args: string[]) {
   await initModules();
   const quiet = args.includes('--quiet') || args.includes('-q');
+  const repair = args.includes('--repair') || args.includes('-r');
+
+  if (repair) {
+    console.log(' Repairing missing .prop files on WebDAV...\n');
+    const result = await getAttachmentManager().repairPropFiles();
+
+    const parts: string[] = [];
+    if (result.repaired > 0) parts.push(`repaired ${result.repaired} .prop file(s)`);
+    if (result.reset > 0) parts.push(`reset ${result.reset} stale record(s) for re-upload`);
+    if (parts.length > 0) {
+      console.log(`\n${symbols.success} ${parts.join(', ')}`);
+      if (result.reset > 0) {
+        console.log(`\n   Run "zotero webdav sync" to re-upload the reset attachments.`);
+      }
+    } else {
+      console.log(`\n${symbols.success} All WebDAV attachments are healthy`);
+    }
+    if (result.errors.length > 0) {
+      console.log(`\n   Errors:`);
+      result.errors.forEach(e => console.log(`   - ${e}`));
+    }
+    return;
+  }
 
   if (!quiet) {
     console.log(' Syncing attachments to WebDAV...\n');
@@ -258,7 +281,10 @@ async function executeWebdavScan(args: string[]) {
   console.log(`   Total files: ${totalFiles}`);
   console.log(`   With .prop: ${withProp}`);
   console.log(`   Without .prop: ${withoutProp}`);
-  console.log(`\nTip: Files without .prop can still be used, but metadata may differ.`);
+  if (withoutProp > 0) {
+    console.log(`\nTip: ${withoutProp} file(s) missing .prop — Zotero Desktop cannot download these.`);
+    console.log(`   Run "zotero webdav sync --repair" to fix.`);
+  }
   console.log();
 }
 
@@ -278,6 +304,7 @@ export const webdavCommands: Command[] = [
       { name: '--base-path', description: 'Base path for WebDAV storage (config subcommand)', value: '<path>' },
       { name: '--download', alias: '-d', description: 'Download only (sync subcommand)' },
       { name: '--upload', alias: '-u', description: 'Upload only (sync subcommand)' },
+      { name: '--repair', alias: '-r', description: 'Repair missing .prop files (sync subcommand)' },
       { name: '--verbose', alias: '-v', description: 'Show detailed status (status subcommand)' },
       { name: '--orphaned', alias: '-o', description: 'Show orphaned attachments only (scan subcommand)' },
     ],

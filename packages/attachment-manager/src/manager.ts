@@ -329,47 +329,26 @@ export class AttachmentManager {
       try {
         const existingItem = await zoteroApi.getItem(zoteroId, attachment.key, libraryType);
         if (existingItem && existingItem.data) {
-          // Attachment exists, update if needed (especially md5/mtime for WebDAV)
+          // Attachment exists - only update if contentType or filename actually differ
           const needsUpdate =
-            existingItem.data.linkMode !== 'imported_file' ||
             existingItem.data.contentType !== attachment.contentType ||
             existingItem.data.filename !== attachment.filename;
 
           if (needsUpdate) {
             console.log(`   Updating attachment item ${attachment.key} in Zotero...`);
-            
-            // Extract fields from rawJson if available
-            let attachmentTitle = existingItem.data.title || 'Attachment';
-            let linkMode = existingItem.data.linkMode || 'imported_file';
-            let url = existingItem.data.url || '';
-            let accessDate = existingItem.data.accessDate || '';
-            let charset = existingItem.data.charset || '';
-            {
-              const attData = parseItemData(attachment.rawJson);
-              attachmentTitle = attData.title || existingItem.data.title || 'Attachment';
-              linkMode = attData.linkMode || existingItem.data.linkMode || 'imported_file';
-              url = attData.url || existingItem.data.url || '';
-              accessDate = attData.accessDate || existingItem.data.accessDate || '';
-              charset = attData.charset || existingItem.data.charset || '';
-            }
-            
+
+            const attData = parseItemData(attachment.rawJson);
             const updateData: any = {
               ...existingItem.data,
-              linkMode: linkMode,
-              contentType: attachment.contentType || 'application/octet-stream',
-              filename: attachment.filename || 'attachment.zip',
-              title: attachmentTitle,
-              charset: charset,
-              md5: null, // Will be set after WebDAV upload
-              mtime: null, // Will be set after WebDAV upload
+              contentType: attachment.contentType || existingItem.data.contentType,
+              filename: attachment.filename || existingItem.data.filename,
             };
-            
-            // Preserve URL and accessDate for imported_url attachments
-            if (linkMode === 'imported_url') {
-              if (url) updateData.url = url;
-              if (accessDate) updateData.accessDate = accessDate;
-            }
-            
+
+            // Only override title/linkMode/url if local rawJson has them
+            if (attData.title) updateData.title = attData.title;
+            if (attData.charset) updateData.charset = attData.charset;
+            // Never null out md5/mtime here — they'll be set after WebDAV upload
+
             await zoteroApi.updateItem(zoteroId, attachment.key, updateData, existingItem.version, libraryType);
           }
           return { success: true };
@@ -518,20 +497,21 @@ export class AttachmentManager {
         }
       });
 
-      // Generate and upload .prop file (XML format)
+      // Generate and upload .prop file (XML format, required by Zotero Desktop)
       const propContent = this.generatePropContent(tempZip);
       const propTempPath = path.join(tempDir, propPath);
       fs.writeFileSync(propTempPath, propContent);
 
       try {
-        await this.webdavClient!.uploadFile(propTempPath, propPath);
-        fs.unlinkSync(propTempPath); // Clean up temp file
+        await this.webdavClient!.uploadFile(propTempPath, propPath, undefined, 'text/xml');
+        fs.unlinkSync(propTempPath);
       } catch (propError) {
-        // If .prop upload fails, still consider main sync successful
-        console.warn(`Warning: Failed to upload .prop file: ${propError}`);
         if (fs.existsSync(propTempPath)) {
           fs.unlinkSync(propTempPath);
         }
+        // .prop file is required for Zotero Desktop to download attachments
+        console.error(`ERROR: Failed to upload .prop file for ${attachment.key}: ${propError}`);
+        console.error(`   Zotero Desktop will NOT be able to download this attachment.`);
       }
 
       // Calculate md5 before cleanup
@@ -736,6 +716,101 @@ export class AttachmentManager {
     } catch (error: any) {
       return { success: false, items: [], error: error.message };
     }
+  }
+
+  /**
+   * Repair missing .prop files on WebDAV for already-synced attachments.
+   * Zotero Desktop requires .prop files to recognize remote attachments.
+   */
+  async repairPropFiles(): Promise<{
+    success: boolean;
+    repaired: number;
+    reset: number;
+    errors: string[];
+  }> {
+    if (!this.webdavClient) {
+      const init = await this.initWebDAV();
+      if (!init.success) {
+        return { success: false, repaired: 0, reset: 0, errors: [init.error || 'Unknown error'] };
+      }
+    }
+
+    // Get all synced attachments
+    const syncedAttachments = await this.db.select()
+      .from(attachments)
+      .where(and(
+        eq(attachments.webdavSynced, true),
+        eq(attachments.deleted, false)
+      ))
+      .all();
+
+    // Filter out orphaned attachments (parent item deleted) — sync will clean these up
+    const validAttachments: typeof syncedAttachments = [];
+    for (const att of syncedAttachments) {
+      if (att.parentItemKey) {
+        const parent = await this.db.select({ key: items.key })
+          .from(items)
+          .where(eq(items.key, att.parentItemKey))
+          .get();
+        if (!parent) continue;
+      }
+      validAttachments.push(att);
+    }
+
+    const errors: string[] = [];
+    let repaired = 0;
+    let reset = 0;
+
+    for (const att of validAttachments) {
+      const propPath = `${att.key}.prop`;
+      const zipPath = `${att.key}.zip`;
+
+      try {
+        // Check if .zip exists on WebDAV
+        const zipExists = await this.webdavClient!.exists(zipPath);
+        if (!zipExists) {
+          // .zip missing on WebDAV — reset webdavSynced so next sync re-uploads
+          const hasLocalFile = att.path && fs.existsSync(att.path);
+          await this.db.update(attachments)
+            .set({ webdavSynced: false, updatedAt: Math.floor(Date.now() / 1000) })
+            .where(eq(attachments.key, att.key))
+            .run();
+          reset++;
+          if (hasLocalFile) {
+            console.log(`   Reset ${att.key}: .zip missing on WebDAV, will re-upload on next sync`);
+          } else {
+            console.log(`   Reset ${att.key}: .zip missing on WebDAV (no local file either)`);
+          }
+          continue;
+        }
+
+        // Check if .prop already exists
+        const propExists = await this.webdavClient!.exists(propPath);
+        if (propExists) continue;
+
+        // Download .zip to temp to calculate MD5
+        const tempDir = os.tmpdir();
+        const tempZip = path.join(tempDir, `repair_${att.key}.zip`);
+        await this.webdavClient!.downloadFile(zipPath, tempZip);
+
+        // Generate and upload .prop
+        const propContent = this.generatePropContent(tempZip);
+        const propTempPath = path.join(tempDir, `repair_${att.key}.prop`);
+        fs.writeFileSync(propTempPath, propContent);
+
+        await this.webdavClient!.uploadFile(propTempPath, propPath, undefined, 'text/xml');
+        repaired++;
+        console.log(`   Repaired .prop for ${att.key}`);
+
+        // Cleanup temp files
+        if (fs.existsSync(tempZip)) fs.unlinkSync(tempZip);
+        if (fs.existsSync(propTempPath)) fs.unlinkSync(propTempPath);
+      } catch (error: any) {
+        errors.push(`${att.key}: ${error.message}`);
+      }
+    }
+
+    return { success: errors.length === 0, repaired, reset, errors };
   }
 
   /**

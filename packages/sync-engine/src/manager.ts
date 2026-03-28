@@ -725,90 +725,51 @@ export class SyncManager extends EventEmitter {
         }
 
         if (item.deleted) {
-          // Delete from remote
-          let deletedFromRemote = false;
+          // Soft delete: move to remote trash via PATCH (not permanent delete)
+          // The item stays in both local and remote trash until explicitly purged
           try {
-            await this.apiClient.deleteItem(zoteroId, item.key, item.version, libraryType);
-            console.log(`    Deleted ${item.key} from remote`);
-            deletedFromRemote = true;
+            data.deleted = true;
+            await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
+            console.log(`${symbols.success} Trashed ${item.key} on remote`);
+            await this.markAsSynced(item.key, libraryId);
+            deleted++;
           } catch (e: any) {
             if (e.message?.includes('404')) {
-              // Item already deleted on remote, treat as success
-              console.log(`    Item ${item.key} already deleted on remote (404)`);
-              deletedFromRemote = true;
-            } else if (e.message?.includes('412') || e.statusCode === 412) {
-              // Version conflict - remote has been modified
-              // Zotero Desktop behavior: Check if remote also deleted the item
-              console.log(`   !  Version conflict for ${item.key}, checking remote state...`);
-              
+              // Item doesn't exist on remote - just mark synced locally
+              console.log(`    Item ${item.key} not found on remote, marking synced`);
+              await this.markAsSynced(item.key, libraryId);
+              deleted++;
+            } else if (e.message?.includes('412')) {
+              // Version conflict - get latest version and retry
+              console.log(`   !  Version conflict for ${item.key}, fetching latest version...`);
               try {
-                // Get current remote deleted items
-                const remoteDeleted = await this.apiClient.getDeleted(zoteroId, 0, libraryType);
-                const isRemoteDeleted = remoteDeleted.items.includes(item.key);
-                
-                if (isRemoteDeleted) {
-                  // Remote also deleted this item - treat as success (Zotero Desktop behavior)
-                  console.log(`${symbols.success} Remote already deleted ${item.key}, treating as success`);
-                  deletedFromRemote = true;
+                const remoteItem = await this.apiClient.getItem(zoteroId, item.key, libraryType);
+                const remoteVersion = remoteItem?.data?.version || remoteItem?.version;
+                if (remoteVersion) {
+                  data.deleted = true;
+                  await this.apiClient.updateItem(zoteroId, item.key, data, remoteVersion, libraryType);
+                  console.log(`${symbols.success} Trashed ${item.key} on remote (resolved conflict)`);
+                  // Update local version to match remote
+                  await this.db.update(items)
+                    .set({ version: remoteVersion + 1, synced: true })
+                    .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
+                    .run();
+                  deleted++;
                 } else {
-                  // Remote still exists and was modified - handle based on strategy
-                  console.log(`   !  Remote modified ${item.key}, resolving conflict...`);
-                  
-                  if (this.config.conflictStrategy === 'remote') {
-                    // Cancel local delete, keep remote version
-                    await this.db.update(items)
-                      .set({ deleted: 0, synced: 1 })
-                      .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
-                      .run();
-                    console.log(`${symbols.success} Cancelled delete for ${item.key}, keeping remote version`);
-                  } else if (this.config.conflictStrategy === 'local') {
-                    // Get latest version and retry delete
-                    const remoteItem = await this.apiClient.getItem(zoteroId, item.key, libraryType);
-                    const remoteVersion = remoteItem?.data?.version || item.version + 1;
-                    
-                    try {
-                      await this.apiClient.deleteItem(zoteroId, item.key, remoteVersion, libraryType);
-                      console.log(`    Force deleted ${item.key} with updated version`);
-                      deletedFromRemote = true;
-                    } catch (retryError: any) {
-                      if (retryError.message?.includes('404')) {
-                        // Item was deleted between our check and delete attempt
-                        console.log(`${symbols.success} Item ${item.key} was already deleted (404 on retry)`);
-                        deletedFromRemote = true;
-                      } else {
-                        throw retryError;
-                      }
-                    }
-                  } else {
-                    // Manual mode - still need to check if we can resolve automatically
-                    // If remote wasn't modified meaningfully, try to delete anyway
-                    conflicts.push(item.key);
-                  }
+                  errors.push(`Trash ${item.key} failed: could not resolve version conflict`);
                 }
-              } catch (checkError: any) {
-                console.error(`${symbols.error} Failed to check remote state for ${item.key}:`, checkError.message);
-                conflicts.push(item.key);
+              } catch (retryError: any) {
+                if (retryError.message?.includes('404')) {
+                  console.log(`    Item ${item.key} already gone on remote`);
+                  await this.markAsSynced(item.key, libraryId);
+                  deleted++;
+                } else {
+                  errors.push(`Trash ${item.key} failed: ${retryError}`);
+                }
               }
             } else {
-              throw e; // Re-throw other errors
+              errors.push(`Trash ${item.key} failed: ${e}`);
             }
-          }
-          // Also delete from local DB after successful remote deletion
-          if (deletedFromRemote) {
-            // Cascade delete attachments first
-            await this.db.delete(items)
-              .where(and(
-                eq(items.libraryId, libraryId),
-                eq(items.itemType, 'attachment'),
-                eq(items.rawJson, `%"parentItem":"${item.key}"%`)
-              ))
-              .run();
-            
-            // Then delete the parent item
-            await this.db.delete(items)
-              .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
-              .run();
-            deleted++;
           }
         } else if (item.version === 0) {
           // Create new item
@@ -977,23 +938,21 @@ export class SyncManager extends EventEmitter {
         }
 
         if (item.deleted) {
-          // Delete attachment from remote
+          // Soft delete: move attachment to remote trash via PATCH
           try {
-            await this.apiClient.deleteItem(zoteroId, item.key, item.version, libraryType);
-            await this.db.delete(items)
-              .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
-              .run();
+            data.deleted = true;
+            await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
+            console.log(`${symbols.success} Trashed attachment ${item.key} on remote`);
+            await this.markAsSynced(item.key, libraryId);
             deleted++;
-            console.log(`    Deleted attachment ${item.key}`);
           } catch (e: any) {
-            if (e.message?.includes('404')) {
-              // Already deleted
-              await this.db.delete(items)
-                .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
-                .run();
+            if (e.message?.includes('404') || (e.message?.includes('412') && e.message?.includes('not found'))) {
+              // Item doesn't exist on remote (deleted or parent cascaded)
+              console.log(`    Attachment ${item.key} not found on remote, marking synced`);
+              await this.markAsSynced(item.key, libraryId);
               deleted++;
             } else {
-              errors.push(`Delete attachment ${item.key} failed: ${e}`);
+              errors.push(`Trash attachment ${item.key} failed: ${e}`);
             }
           }
         } else if (item.version === 0) {

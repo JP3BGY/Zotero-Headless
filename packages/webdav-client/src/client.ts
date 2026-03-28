@@ -139,17 +139,21 @@ export class WebDAVClient {
   /**
    * Upload a file
    */
-  async uploadFile(localPath: string, remotePath: string, onProgress?: (uploaded: number, total: number) => void): Promise<void> {
+  async uploadFile(localPath: string, remotePath: string, onProgress?: (uploaded: number, total: number) => void, contentType?: string): Promise<void> {
     const fileBuffer = fs.readFileSync(localPath);
     const fileSize = fileBuffer.length;
-    
-    await this.request('PUT', remotePath, {
+
+    const res = await this.request('PUT', remotePath, {
       body: fileBuffer,
       headers: {
-        'Content-Type': 'application/octet-stream',
+        'Content-Type': contentType || 'application/octet-stream',
         'Content-Length': fileSize.toString(),
       },
     });
+
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`Upload failed for ${remotePath}: HTTP ${res.status}`);
+    }
 
     if (onProgress) {
       onProgress(fileSize, fileSize);

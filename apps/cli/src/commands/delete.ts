@@ -1,7 +1,7 @@
 // @ts-nocheck
 
 import { type Command, isShellMode } from '../types.js';
-import { initModules, getDb, getItems, getLibraries, getLogDeletion } from '../modules.js';
+import { initModules, getDb, getItems, getLibraries, getLogDeletion, getZoteroApi } from '../modules.js';
 import { symbols } from '@zotero-headless/core';
 import { eq, and, like, count } from 'drizzle-orm';
 import { isInteractive, createPrompt } from '../conflict-resolver.js';
@@ -148,9 +148,25 @@ export const deleteCommands: Command[] = [
             }
           }
 
-          // Permanent delete: remove from local DB immediately
-          // Sync will detect it's gone and delete from remote
-          console.log(`   Marking ${key} for permanent deletion...`);
+          // Permanent delete: delete from remote API, then remove local DB rows
+          console.log(`   Permanently deleting ${key}...`);
+
+          // Delete from remote first (if item has been synced)
+          if (item.version > 0) {
+            const api = getZoteroApi();
+            try {
+              await api.deleteItem(library.zoteroId, key, item.version, library.type);
+              console.log(`   ${symbols.success} Deleted ${key} from remote`);
+            } catch (e: any) {
+              if (e.message?.includes('404')) {
+                console.log(`   Item ${key} already gone from remote`);
+              } else {
+                console.log(`${symbols.error} Failed to delete from remote: ${e.message}`);
+                console.log(`   Use "zotero sync" to retry, or add --force to delete locally only.`);
+                process.exit(1);
+              }
+            }
+          }
 
           await getLogDeletion()({
             itemKey: key,
@@ -162,18 +178,19 @@ export const deleteCommands: Command[] = [
             rawJsonSnapshot: item.rawJson,
           });
 
-          // Delete child items first
+          // Delete child items from local DB
           for (const child of childItems) {
             await db.delete(getItems())
               .where(and(eq(getItems().key, child.key), eq(getItems().libraryId, library.id)))
               .run();
           }
 
+          // Delete the item itself from local DB
           await db.delete(getItems())
             .where(and(eq(getItems().key, key), eq(getItems().libraryId, library.id)))
             .run();
 
-          console.log(`${symbols.success} Item marked for permanent deletion!`);
+          console.log(`${symbols.success} Item permanently deleted!`);
           if (childItems.length > 0) {
             console.log(`   Also deleted ${childItems.length} child item(s).`);
           }
