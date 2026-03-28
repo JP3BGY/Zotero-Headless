@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Box, Text, useInput, useStdout } from 'ink';
 import TextInput from 'ink-text-input';
 import { configManager, type ZoteroConfig, appConfig, updateEnvConfig } from '@zotero-headless/core';
+import { getRawSQLite } from '@zotero-headless/database';
 import { useShellState } from '../hooks/useShellState.js';
 import { t } from '../i18n.js';
 
@@ -12,7 +13,8 @@ interface ConfigItem {
   editable: boolean;
   enumValues?: string[];
   configPath: { section: keyof ZoteroConfig; field?: string } | null;
-  source: 'env' | 'zoterrc';
+  source: 'env' | 'zoterrc' | 'database';
+  dbField?: string;          // column name in webdav_config table
   masked?: boolean;          // show masked value in list, edit raw value
   rawValue?: string;         // the actual unmasked value for editing
 }
@@ -140,6 +142,81 @@ function buildConfigItems(): ConfigItem[] {
     source: 'zoterrc',
   });
 
+  // WebDAV settings (from database)
+  try {
+    const db = getRawSQLite({ quiet: true });
+    const row = db.prepare('SELECT * FROM webdav_config LIMIT 1').get() as any;
+    if (row) {
+      items.push({
+        key: 'webdav.url',
+        value: row.url || '',
+        type: 'string',
+        editable: true,
+        configPath: null,
+        source: 'database',
+        dbField: 'url',
+      });
+      items.push({
+        key: 'webdav.username',
+        value: row.username || '',
+        type: 'string',
+        editable: true,
+        configPath: null,
+        source: 'database',
+        dbField: 'username',
+      });
+      items.push({
+        key: 'webdav.password',
+        value: maskApiKey(row.password || ''),
+        rawValue: row.password || '',
+        masked: true,
+        type: 'string',
+        editable: true,
+        configPath: null,
+        source: 'database',
+        dbField: 'password',
+      });
+      items.push({
+        key: 'webdav.basePath',
+        value: row.base_path || '/',
+        type: 'string',
+        editable: true,
+        configPath: null,
+        source: 'database',
+        dbField: 'base_path',
+      });
+      items.push({
+        key: 'webdav.enabled',
+        value: String(!!row.enabled),
+        type: 'boolean',
+        editable: true,
+        configPath: null,
+        source: 'database',
+        dbField: 'enabled',
+      });
+      items.push({
+        key: 'webdav.autoSync',
+        value: String(!!row.auto_sync),
+        type: 'boolean',
+        editable: true,
+        configPath: null,
+        source: 'database',
+        dbField: 'auto_sync',
+      });
+    } else {
+      items.push({
+        key: 'webdav',
+        value: 'not configured',
+        type: 'string',
+        editable: false,
+        configPath: null,
+        source: 'database',
+      });
+    }
+  } catch {
+    // webdav_config table may not exist yet
+  }
+
   // Keybindings
   const kb = cfg.keybindings || {};
   const kbKeys = ['submit', 'historyUp', 'historyDown', 'scrollUp', 'scrollDown', 'complete', 'clear', 'exit'] as const;
@@ -162,6 +239,25 @@ function saveConfigItem(item: ConfigItem, newValue: string): boolean {
   if (item.source === 'env') {
     updateEnvConfig(item.key, newValue);
     return true;
+  }
+
+  if (item.source === 'database' && item.dbField) {
+    try {
+      const db = getRawSQLite({ quiet: true });
+      let dbValue: string | number;
+      if (item.type === 'boolean') {
+        dbValue = newValue === 'true' ? 1 : 0;
+      } else if (item.type === 'number') {
+        dbValue = Number(newValue);
+      } else {
+        dbValue = newValue;
+      }
+      db.prepare(`UPDATE webdav_config SET ${item.dbField} = ?, updated_at = ?`)
+        .run(dbValue, Math.floor(Date.now() / 1000));
+    } catch {
+      // ignore DB errors
+    }
+    return false;
   }
 
   if (!item.configPath) return false;
@@ -351,6 +447,7 @@ export function ConfigPanel() {
               <Text color={isSelected ? 'white' : undefined}>
                 {truncateValue(item.value, 40)}
                 {item.source === 'env' ? <Text color="gray">{` (${t.configRestartTag})`}</Text> : ''}
+                {item.source === 'database' ? <Text color="gray">{' (database)'}</Text> : ''}
               </Text>
             )}
           </Box>
