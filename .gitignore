@@ -44,3 +44,6 @@ coverage/
 
 # Local CLI export scratch file
 /output.json
+
+# Reference codes
+references/
