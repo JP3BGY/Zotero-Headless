@@ -258,7 +258,7 @@ export class ZoteroAPIClient {
     libraryId: string | number,
     items: Array<Record<string, unknown>>,
     libraryType: 'user' | 'group' = 'user'
-  ): Promise<WriteResponse> {
+  ): Promise<WriteResponse & { libraryVersion: number }> {
     // Pre-flight validation: Ensure all items have required fields
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -288,7 +288,7 @@ export class ZoteroAPIClient {
       `${this.getLibraryPath(libraryId, libraryType)}/items`,
       { params: { format: 'json' }, body: items }
     );
-    return response.data;
+    return { ...response.data, libraryVersion: response.version };
   }
 
   /** Update item (PATCH) */

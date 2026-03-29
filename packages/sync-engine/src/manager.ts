@@ -113,7 +113,9 @@ export class SyncManager extends EventEmitter {
         }
 
         const result = await this.twoWaySync(libraryId, zoteroId, 'user', localVersion, remoteVersion, options.fullSync ?? false);
-        await this.updateLibraryVersion(libraryId, remoteVersion);
+        // Re-fetch the actual current library version (uploads may have incremented it)
+        const finalVersion = await this.apiClient.getLibraryVersion(zoteroId, 'user');
+        await this.updateLibraryVersion(libraryId, finalVersion);
         await this.logSync(libraryId, result.success ? 'success' : 'partial', localVersion, remoteVersion, result);
 
         this.emit('sync:complete', result);
@@ -770,7 +772,10 @@ export class SyncManager extends EventEmitter {
       }
     }
 
-    // 1. Find unsynced items
+    // 1. Upload modified existing collections before items (Zotero Desktop order: collections → items)
+    await this.uploadCollectionChanges(libraryId, zoteroId, libraryType, errors);
+
+    // 2. Find unsynced items
     const unsyncedItems = await this.getUnsyncedItems(libraryId);
     console.log(`   Found ${unsyncedItems.length} unsynced items`);
 
@@ -788,8 +793,127 @@ export class SyncManager extends EventEmitter {
       console.log(`   (${parentItems.length} parent items, ${attachmentItems.length} attachments)`);
     }
 
-    // Upload parent items first
-    for (const item of parentItems) {
+    // Separate new items (version=0, not deleted) for batched creation
+    const newParentItems = parentItems.filter(item => item.version === 0 && !item.deleted);
+    const existingOrDeletedParentItems = parentItems.filter(item => item.version !== 0 || item.deleted);
+
+    // 2a. Batch create new parent items (10 per POST, matching Zotero Desktop)
+    if (newParentItems.length > 0) {
+      console.log(`   Batch creating ${newParentItems.length} new item(s)...`);
+      const BATCH_SIZE = 10;
+
+      for (let batchStart = 0; batchStart < newParentItems.length; batchStart += BATCH_SIZE) {
+        const batch = newParentItems.slice(batchStart, batchStart + BATCH_SIZE);
+        const batchData: Array<Record<string, unknown>> = [];
+
+        // Prepare all items in this batch
+        for (const item of batch) {
+          const rawEnvelope = parseRawJson(item.rawJson);
+          let data = rawEnvelope.data;
+
+          data.key = item.key;
+          data.version = item.version;
+
+          // Parse creators if string
+          if (typeof data.creators === 'string') {
+            try { data.creators = JSON.parse(data.creators); } catch { data.creators = []; }
+          }
+          // Sanitize creators
+          if (Array.isArray(data.creators)) {
+            data.creators = data.creators.map((c: any) => {
+              const { fieldMode, ...rest } = c;
+              if (fieldMode === 1 || (c.lastName && !c.firstName && !c.name)) {
+                return { name: c.lastName || c.name || '', creatorType: c.creatorType || 'author' };
+              }
+              if (rest.lastName != null && rest.firstName == null) rest.firstName = '';
+              return rest;
+            });
+          }
+
+          // Parse tags if string
+          if (typeof data.tags === 'string') {
+            try { data.tags = JSON.parse(data.tags); } catch { data.tags = []; }
+          }
+          if (!Array.isArray(data.tags)) data.tags = [];
+
+          if (data.publicationDate) {
+            data.date = data.publicationDate;
+            delete data.publicationDate;
+          }
+
+          // Remove unknown fields
+          const CRITICAL_FIELDS = new Set(['key', 'version', 'itemType']);
+          const zoteroItemFields = new Set([
+            'key', 'itemType', 'title', 'creators', 'abstractNote', 'date', 'url', 'DOI',
+            'accessDate', 'libraryCatalog', 'callNumber', 'rights', 'placeholder',
+            'note', 'parentItem', 'tags', 'collections', 'relations', 'version'
+          ]);
+          for (const field of Object.keys(data)) {
+            if (CRITICAL_FIELDS.has(field)) continue;
+            if (!zoteroItemFields.has(field)) delete data[field];
+          }
+
+          batchData.push(data);
+        }
+
+        try {
+          console.log(`   Uploading batch ${Math.floor(batchStart / BATCH_SIZE) + 1} (${batch.length} items)...`);
+          const result = await this.apiClient.createItems(zoteroId, batchData, libraryType);
+          const resultVersion = result.libraryVersion;
+
+          // Process per-item results
+          for (let i = 0; i < batch.length; i++) {
+            const item = batch[i];
+            const idx = String(i);
+
+            if (result.successful && result.successful[idx]) {
+              const successful0 = result.successful[idx] as any;
+              const newKey = typeof successful0 === 'string' ? successful0 : (successful0.key || successful0);
+              console.log(`${symbols.success} Created new item ${newKey}`);
+
+              if (newKey !== item.key) {
+                console.warn(`   !  WARNING: Server reassigned key for item ${item.key} -> ${newKey}`);
+                await this.db.transaction(async (tx) => {
+                  await tx.update(items)
+                    .set({ key: newKey })
+                    .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
+                    .run();
+                  const affectedAttachments = await tx.select()
+                    .from(attachments)
+                    .where(and(eq(attachments.parentItemKey, item.key), eq(attachments.libraryId, libraryId)))
+                    .all();
+                  for (const att of affectedAttachments) {
+                    const updates: any = { parentItemKey: newKey };
+                    try {
+                      const attEnvelope = parseRawJson(att.rawJson);
+                      if (attEnvelope.data.parentItem === item.key) {
+                        attEnvelope.data.parentItem = newKey;
+                        updates.rawJson = JSON.stringify(attEnvelope);
+                      }
+                    } catch (e) { /* ignore */ }
+                    await tx.update(attachments)
+                      .set(updates)
+                      .where(and(eq(attachments.key, att.key), eq(attachments.libraryId, libraryId)))
+                      .run();
+                  }
+                });
+                console.log(`   Updated local key: ${item.key} -> ${newKey}`);
+              }
+              await this.markAsSynced(newKey !== item.key ? newKey : item.key, libraryId, resultVersion);
+              updated++;
+            } else if (result.failed && result.failed[idx]) {
+              console.log(`${symbols.error} Failed to create item ${item.key}: ${result.failed[idx].message}`);
+              errors.push(`Create ${item.key} failed: ${result.failed[idx].message}`);
+            }
+          }
+        } catch (e: any) {
+          errors.push(`Batch create failed: ${e}`);
+        }
+      }
+    }
+
+    // 2b. Upload existing/deleted parent items individually
+    for (const item of existingOrDeletedParentItems) {
       try {
         const rawEnvelope = parseRawJson(item.rawJson);
         let data = rawEnvelope.data;
@@ -840,15 +964,10 @@ export class SyncManager extends EventEmitter {
           data.tags = [];
         }
 
-        // Remove metadata fields that shouldn't be sent
-        // For 'key'-based writes, we must include 'version' property
-        // CRITICAL: Never delete key for deleted items - they need it for the delete API call
-        const isNewItem = item.version === 0;
-        if (!isNewItem && !item.deleted) {
-          delete data.key;  // Only delete key for existing items that are NOT being deleted
+        // For existing/deleted items, key is passed via URL, not in body
+        if (!item.deleted) {
+          delete data.key;
         }
-        // Keep version for key-based writes
-        // delete data.version;
 
         // Fix: Zotero API uses 'date' not 'publicationDate'
         if (data.publicationDate) {
@@ -856,83 +975,41 @@ export class SyncManager extends EventEmitter {
           delete data.publicationDate;
         }
 
-        // Remove fields that Zotero API doesn't accept (custom fields should be in 'extra')
-        // Include 'key' for client-generated keys
-        // CRITICAL: These fields must never be deleted for key-based writes
+        // Remove fields that Zotero API doesn't accept
         const CRITICAL_FIELDS = new Set(['key', 'version', 'itemType']);
-        const zoteroItemFields = [
+        const zoteroItemFields = new Set([
           'key', 'itemType', 'title', 'creators', 'abstractNote', 'date', 'url', 'DOI',
           'accessDate', 'libraryCatalog', 'callNumber', 'rights', 'placeholder',
           'note', 'parentItem', 'tags', 'collections', 'relations', 'version'
-        ];
-        
-        // Remove any custom/unknown fields, but NEVER remove critical fields
-        const knownFields = new Set(zoteroItemFields);
+        ]);
         for (const field of Object.keys(data)) {
-          // CRITICAL: Never delete key fields - they are required for API
-          if (CRITICAL_FIELDS.has(field)) {
-            continue;
-          }
-          if (!knownFields.has(field)) {
-            delete data[field];
-          }
-        }
-        
-        // Runtime validation: Ensure critical fields are present
-        // For existing items, 'key' is intentionally removed from data (it's passed via URL)
-        const fieldsToCheck = isNewItem ? CRITICAL_FIELDS : new Set(['version', 'itemType']);
-        const missingCriticalFields: string[] = [];
-        for (const field of fieldsToCheck) {
-          if (!(field in data) || data[field] === undefined || data[field] === null) {
-            missingCriticalFields.push(field);
-          }
-        }
-
-        if (missingCriticalFields.length > 0) {
-          console.error(`🚨 CRITICAL VALIDATION ERROR: Missing required fields: ${missingCriticalFields.join(', ')}`);
-          console.error(`   Item key: ${item.key}`);
-          console.error(`   Available fields: ${Object.keys(data).join(', ')}`);
-          throw new Error(`BUG: Cannot sync item without required fields: ${missingCriticalFields.join(', ')}`);
-        }
-
-        // Validate key format (for new items where key is in data, or always validate item.key)
-        const keyToValidate = data.key || item.key;
-        const keyPattern = /^[23456789ABCDEFGHIJKLMNPQRSTUVWXYZ]{8}$/;
-        if (!keyPattern.test(keyToValidate)) {
-          console.warn(`!  WARNING: Key format may be invalid: ${keyToValidate}`);
-          console.warn(`   Expected format: 8 chars from [23456789ABCDEFGHIJKLMNPQRSTUVWXYZ]`);
+          if (CRITICAL_FIELDS.has(field)) continue;
+          if (!zoteroItemFields.has(field)) delete data[field];
         }
 
         if (item.deleted) {
           // Soft delete: move to remote trash via PATCH (not permanent delete)
-          // The item stays in both local and remote trash until explicitly purged
           try {
             data.deleted = true;
-            await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
+            const trashVersion = await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
             console.log(`${symbols.success} Trashed ${item.key} on remote`);
-            await this.markAsSynced(item.key, libraryId);
+            await this.markAsSynced(item.key, libraryId, trashVersion);
             deleted++;
           } catch (e: any) {
             if (e.message?.includes('404')) {
-              // Item doesn't exist on remote - just mark synced locally
               console.log(`    Item ${item.key} not found on remote, marking synced`);
               await this.markAsSynced(item.key, libraryId);
               deleted++;
             } else if (e.message?.includes('412')) {
-              // Version conflict - get latest version and retry
               console.log(`   !  Version conflict for ${item.key}, fetching latest version...`);
               try {
                 const remoteItem = await this.apiClient.getItem(zoteroId, item.key, libraryType);
                 const remoteVersion = remoteItem?.data?.version || remoteItem?.version;
                 if (remoteVersion) {
                   data.deleted = true;
-                  await this.apiClient.updateItem(zoteroId, item.key, data, remoteVersion, libraryType);
+                  const retryVersion = await this.apiClient.updateItem(zoteroId, item.key, data, remoteVersion, libraryType);
                   console.log(`${symbols.success} Trashed ${item.key} on remote (resolved conflict)`);
-                  // Update local version to match remote
-                  await this.db.update(items)
-                    .set({ version: remoteVersion + 1, synced: true })
-                    .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
-                    .run();
+                  await this.markAsSynced(item.key, libraryId, retryVersion);
                   deleted++;
                 } else {
                   errors.push(`Trash ${item.key} failed: could not resolve version conflict`);
@@ -950,106 +1027,14 @@ export class SyncManager extends EventEmitter {
               errors.push(`Trash ${item.key} failed: ${e}`);
             }
           }
-        } else if (item.version === 0) {
-          // Create new item
-          console.log(`   Uploading new item with key: ${data.key || '(none)'}`);
-          const result = await this.apiClient.createItems(zoteroId, [data], libraryType);
-          if (result.successful && result.successful['0']) {
-            const newKey = result.successful['0'].key || result.successful['0'];
-            console.log(`${symbols.success} Created new item ${newKey}`);
-            
-            // 如果 key 改变了，先更新本地数据库中的 key
-            if (newKey !== item.key) {
-              console.warn(`   !  WARNING: Server reassigned key for item ${item.key} -> ${newKey}`);
-              console.warn(`      This may indicate key collision or invalid key format.`);
-              
-              // 使用事务确保一致性
-              await this.db.transaction(async (tx) => {
-                // 1. 更新 items 表
-                await tx.update(items)
-                  .set({ key: newKey })
-                  .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
-                  .run();
-                
-                // 2. 更新 attachments 表的 parentItemKey 和 rawJson 中的 parentItem
-                const affectedAttachments = await tx.select()
-                  .from(attachments)
-                  .where(and(
-                    eq(attachments.parentItemKey, item.key),
-                    eq(attachments.libraryId, libraryId)
-                  ))
-                  .all();
-
-                for (const att of affectedAttachments) {
-                  const updates: any = { parentItemKey: newKey };
-                  try {
-                    const attEnvelope = parseRawJson(att.rawJson);
-                    if (attEnvelope.data.parentItem === item.key) {
-                      attEnvelope.data.parentItem = newKey;
-                      updates.rawJson = JSON.stringify(attEnvelope);
-                    }
-                  } catch (e) {
-                    // ignore parse error
-                  }
-                  await tx.update(attachments)
-                    .set(updates)
-                    .where(and(
-                      eq(attachments.key, att.key),
-                      eq(attachments.libraryId, libraryId)
-                    ))
-                    .run();
-                }
-
-                if (affectedAttachments.length > 0) {
-                  console.log(`   Updated ${affectedAttachments.length} attachment(s) parent reference`);
-                }
-                
-                // 3. 更新子条目（notes 和 attachments）的 rawJson 中的 parentItem
-                const childItems = await tx.select()
-                  .from(items)
-                  .where(and(
-                    eq(items.libraryId, libraryId),
-                    like(items.rawJson, `%"parentItem":"${item.key}"%`)
-                  ))
-                  .all();
-
-                for (const child of childItems) {
-                  try {
-                    const childEnvelope = parseRawJson(child.rawJson);
-                    if (childEnvelope.data.parentItem === item.key) {
-                      childEnvelope.data.parentItem = newKey;
-                      await tx.update(items)
-                        .set({ rawJson: JSON.stringify(childEnvelope) })
-                        .where(and(eq(items.key, child.key), eq(items.libraryId, libraryId)))
-                        .run();
-                    }
-                  } catch (e) {
-                    console.warn(`      Failed to update child ${child.key} parent reference: ${e}`);
-                  }
-                }
-
-                if (childItems.length > 0) {
-                  console.log(`   Updated ${childItems.length} child item(s) parent reference`);
-                }
-              });
-              
-              console.log(`   Updated local key: ${item.key} -> ${newKey}`);
-            }
-            
-            // 使用新的 key 标记为已同步
-            await this.markAsSynced(newKey, libraryId);
-          } else if (result.failed && result.failed['0']) {
-            console.log(`${symbols.error} Failed to create item: ${result.failed['0'].message}`);
-          }
-          updated++;
         } else {
-          // Update existing item
-          await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
+          // Update existing item (version > 0)
+          const newVersion = await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
           console.log(`${symbols.success} Updated ${item.key}`);
           updated++;
-          
-          // Mark as synced
-          await this.markAsSynced(item.key, libraryId);
+
+          // Mark as synced with new version
+          await this.markAsSynced(item.key, libraryId, newVersion);
         }
       } catch (e: any) {
         if (e.message?.includes('412')) {
@@ -1073,8 +1058,8 @@ export class SyncManager extends EventEmitter {
             try {
               const remoteItem = await this.apiClient.getItem(zoteroId, item.key, libraryType);
               const remoteVersion = remoteItem?.data?.version || item.version;
-              await this.apiClient.updateItem(zoteroId, item.key, data, remoteVersion, libraryType);
-              await this.markAsSynced(item.key, libraryId);
+              const forceVersion = await this.apiClient.updateItem(zoteroId, item.key, data, remoteVersion, libraryType);
+              await this.markAsSynced(item.key, libraryId, forceVersion);
               console.log(`${symbols.success} Force updated ${item.key} with local changes`);
               updated++;
             } catch (forceError) {
@@ -1093,40 +1078,90 @@ export class SyncManager extends EventEmitter {
 
     // Upload attachment items after all parent items are uploaded
     // This ensures parentItem references exist in Zotero
-    for (const item of attachmentItems) {
+    const newAttachments = attachmentItems.filter(item => item.version === 0 && !item.deleted);
+    const existingOrDeletedAttachments = attachmentItems.filter(item => item.version !== 0 || item.deleted);
+
+    // Batch create new attachments (10 per POST)
+    if (newAttachments.length > 0) {
+      console.log(`   Batch creating ${newAttachments.length} new attachment(s)...`);
+      const BATCH_SIZE = 10;
+
+      for (let batchStart = 0; batchStart < newAttachments.length; batchStart += BATCH_SIZE) {
+        const batch = newAttachments.slice(batchStart, batchStart + BATCH_SIZE);
+        const batchData: Array<Record<string, unknown>> = [];
+
+        for (const item of batch) {
+          const attEnvelope = parseRawJson(item.rawJson);
+          let data = attEnvelope.data;
+          data.key = item.key;
+          data.version = item.version;
+
+          if (typeof data.tags === 'string') {
+            try { data.tags = JSON.parse(data.tags); } catch { data.tags = []; }
+          }
+          if (!Array.isArray(data.tags)) data.tags = [];
+
+          batchData.push(data);
+        }
+
+        try {
+          const result = await this.apiClient.createItems(zoteroId, batchData, libraryType);
+          const attVersion = result.libraryVersion;
+
+          for (let i = 0; i < batch.length; i++) {
+            const item = batch[i];
+            const idx = String(i);
+
+            if (result.successful && result.successful[idx]) {
+              const successful0att = result.successful[idx] as any;
+              const newKey = typeof successful0att === 'string' ? successful0att : (successful0att.key || successful0att);
+              console.log(`${symbols.success} Created attachment ${newKey}`);
+
+              if (newKey !== item.key) {
+                await this.db.update(items)
+                  .set({ key: newKey, synced: true, version: attVersion })
+                  .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
+                  .run();
+              } else {
+                await this.markAsSynced(item.key, libraryId, attVersion);
+              }
+              updated++;
+            } else if (result.failed && result.failed[idx]) {
+              const errorMsg = result.failed[idx].message || 'Unknown error';
+              if (errorMsg.includes('Parent item') && errorMsg.includes('not found')) {
+                console.log(`   !  Attachment ${item.key}: parent not synced yet, will retry on next sync`);
+              } else {
+                console.error(`${symbols.error} Failed to create attachment ${item.key}: ${errorMsg}`);
+                errors.push(`Create attachment ${item.key} failed: ${errorMsg}`);
+              }
+            }
+          }
+        } catch (e: any) {
+          errors.push(`Batch create attachments failed: ${e}`);
+        }
+      }
+    }
+
+    // Handle existing/deleted attachments individually
+    for (const item of existingOrDeletedAttachments) {
       try {
         const attEnvelope = parseRawJson(item.rawJson);
         let data = attEnvelope.data;
-        
-        // Add key and version from item to data for new items
-        if (item.version === 0 && item.key) {
-          data.key = item.key;
-          data.version = item.version;
-        }
 
-        // Ensure tags is an array
         if (typeof data.tags === 'string') {
-          try {
-            data.tags = JSON.parse(data.tags);
-          } catch (e) {
-            data.tags = [];
-          }
+          try { data.tags = JSON.parse(data.tags); } catch { data.tags = []; }
         }
-        if (!Array.isArray(data.tags)) {
-          data.tags = [];
-        }
+        if (!Array.isArray(data.tags)) data.tags = [];
 
         if (item.deleted) {
-          // Soft delete: move attachment to remote trash via PATCH
           try {
             data.deleted = true;
-            await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
+            const attTrashVer = await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
             console.log(`${symbols.success} Trashed attachment ${item.key} on remote`);
-            await this.markAsSynced(item.key, libraryId);
+            await this.markAsSynced(item.key, libraryId, attTrashVer);
             deleted++;
           } catch (e: any) {
             if (e.message?.includes('404') || (e.message?.includes('412') && e.message?.includes('not found'))) {
-              // Item doesn't exist on remote (deleted or parent cascaded)
               console.log(`    Attachment ${item.key} not found on remote, marking synced`);
               await this.markAsSynced(item.key, libraryId);
               deleted++;
@@ -1134,47 +1169,12 @@ export class SyncManager extends EventEmitter {
               errors.push(`Trash attachment ${item.key} failed: ${e}`);
             }
           }
-        } else if (item.version === 0) {
-          // Create new attachment item
-          console.log(`   Creating attachment item: ${data.key} (parent: ${data.parentItem})`);
-          try {
-            const result = await this.apiClient.createItems(zoteroId, [data], libraryType);
-            if (result.successful && result.successful['0']) {
-              const newKey = result.successful['0'].key || result.successful['0'];
-              console.log(`${symbols.success} Created attachment ${newKey}`);
-              
-              // Update local key if server reassigned
-              if (newKey !== item.key) {
-                await this.db.update(items)
-                  .set({ key: newKey, synced: true, version: 1 })
-                  .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
-                  .run();
-              } else {
-                await this.markAsSynced(item.key, libraryId);
-              }
-              updated++;
-            } else if (result.failed && result.failed['0']) {
-              const errorMsg = result.failed['0'].message || 'Unknown error';
-              console.error(`${symbols.error} Failed to create attachment ${item.key}: ${errorMsg}`);
-              
-              // Check if parent item doesn't exist
-              if (errorMsg.includes('Parent item') && errorMsg.includes('not found')) {
-                console.log(`   !  Parent item not synced yet, will retry on next sync`);
-                // Don't mark as error, just skip for now
-              } else {
-                errors.push(`Create attachment ${item.key} failed: ${errorMsg}`);
-              }
-            }
-          } catch (e: any) {
-            console.error(`${symbols.error} Failed to create attachment ${item.key}:`, e.message);
-            errors.push(`Create attachment ${item.key} failed: ${e}`);
-          }
         } else {
           // Update existing attachment
           try {
-            delete data.key; // Don't send key for updates
-            await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
-            await this.markAsSynced(item.key, libraryId);
+            delete data.key;
+            const attUpdateVer = await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
+            await this.markAsSynced(item.key, libraryId, attUpdateVer);
             updated++;
             console.log(`${symbols.success} Updated attachment ${item.key}`);
           } catch (e: any) {
@@ -1185,9 +1185,6 @@ export class SyncManager extends EventEmitter {
         errors.push(`Process attachment ${item.key} failed: ${e}`);
       }
     }
-
-    // Upload unsynced collections
-    await this.uploadCollectionChanges(libraryId, zoteroId, libraryType, errors);
 
     return { updated, deleted, errors, conflicts };
   }
@@ -1331,9 +1328,11 @@ export class SyncManager extends EventEmitter {
   /**
    * Mark item as synced
    */
-  private async markAsSynced(key: string, libraryId: number): Promise<void> {
+  private async markAsSynced(key: string, libraryId: number, version?: number): Promise<void> {
+    const updates: any = { synced: true };
+    if (version != null) updates.version = version;
     await this.db.update(items)
-      .set({ synced: true })
+      .set(updates)
       .where(and(eq(items.key, key), eq(items.libraryId, libraryId)))
       .run();
   }
@@ -1344,36 +1343,43 @@ export class SyncManager extends EventEmitter {
   private async softDeleteItems(keys: string[], libraryId: number): Promise<void> {
     if (keys.length === 0) return;
 
-    // First, mark attachments of these items as deleted (cascade delete)
-    // Attachments have parentItemKey referencing these items
-    for (const parentKey of keys) {
-      const childAttachments = await this.db.select()
-        .from(items)
+    // First, mark child items (attachments/notes) of these items as deleted (cascade delete)
+    // Query all attachment/note items in this library, then filter by parentItem in JS
+    // This avoids fragile LIKE queries on rawJson that could false-match substrings
+    const parentKeySet = new Set(keys);
+    const candidateChildren = await this.db.select()
+      .from(items)
+      .where(and(
+        eq(items.libraryId, libraryId),
+        eq(items.deleted, false),
+      ))
+      .all();
+
+    const childItems = candidateChildren.filter(child => {
+      try {
+        const data = parseItemData(child.rawJson);
+        return data.parentItem && parentKeySet.has(data.parentItem);
+      } catch { return false; }
+    });
+
+    if (childItems.length > 0) {
+      console.log(`    Cascading delete: ${childItems.length} child item(s)`);
+      const childKeys: string[] = [];
+      for (const child of childItems) {
+        await logDeletion({
+          itemKey: child.key, libraryId, title: child.title,
+          itemType: child.itemType, operationType: 'soft', caller: 'sync',
+          rawJsonSnapshot: child.rawJson,
+        });
+        childKeys.push(child.key);
+      }
+      await this.db.update(items)
+        .set({ deleted: true, deletedAt: Math.floor(Date.now() / 1000), updatedAt: Math.floor(Date.now() / 1000), synced: false })
         .where(and(
           eq(items.libraryId, libraryId),
-          eq(items.itemType, 'attachment'),
-          eq(items.rawJson, `%"parentItem":"${parentKey}"%`)
+          inArray(items.key, childKeys)
         ))
-        .all();
-
-      if (childAttachments.length > 0) {
-        console.log(`    Cascading delete: ${childAttachments.length} attachment(s) of ${parentKey}`);
-        for (const child of childAttachments) {
-          await logDeletion({
-            itemKey: child.key, libraryId, title: child.title,
-            itemType: child.itemType, operationType: 'soft', caller: 'sync',
-            rawJsonSnapshot: child.rawJson,
-          });
-        }
-        await this.db.update(items)
-          .set({ deleted: true, deletedAt: Math.floor(Date.now() / 1000), updatedAt: Math.floor(Date.now() / 1000), synced: false })
-          .where(and(
-            eq(items.libraryId, libraryId),
-            eq(items.itemType, 'attachment'),
-            eq(items.rawJson, `%"parentItem":"${parentKey}"%`)
-          ))
-          .run();
-      }
+        .run();
     }
 
     // Log parent item deletions
