@@ -21,7 +21,8 @@ export const listCommands: Command[] = [
       { name: '--until', alias: '-e', description: 'Show items updated until date', value: '<YYYY-MM-DD>' },
       { name: '--sort', description: 'Sort by field (title|date|updated|type)', value: '<field>' },
       { name: '--order', description: 'Sort order (asc|desc)', value: '<order>' },
-      { name: '--limit', alias: '-l', description: 'Limit number of results', value: '<N>' },
+      { name: '--limit', alias: '-l', description: 'Limit number of results (page size)', value: '<N>' },
+      { name: '--page', alias: '-p', description: 'Page number (1-based)', value: '<N>' },
       { name: '--offset', alias: '-o', description: 'Offset for pagination', value: '<N>' },
       { name: '--compact', alias: '-c', description: 'Compact output format' },
       { name: '--all', alias: '-a', description: 'Show all items including child items (notes, attachments)' },
@@ -95,6 +96,7 @@ export const listCommands: Command[] = [
         sort?: 'title' | 'date' | 'updated' | 'type';
         order?: 'asc' | 'desc';
         limit: number;
+        page?: number;
         offset: number;
         compact?: boolean;
         all?: boolean;
@@ -124,6 +126,8 @@ export const listCommands: Command[] = [
           options.order = args[++i] as any;
         } else if (arg === '--limit' || arg === '-l') {
           options.limit = parseInt(args[++i]) || 20;
+        } else if (arg === '--page' || arg === '-p') {
+          options.page = parseInt(args[++i]) || 1;
         } else if (arg === '--offset' || arg === '-o') {
           options.offset = parseInt(args[++i]) || 0;
         } else if (arg === '--compact' || arg === '-c') {
@@ -140,14 +144,20 @@ export const listCommands: Command[] = [
         }
       }
 
-      // Positional arg: if it looks like a key (non-numeric), list children of that item
+      // Positional arg: try as collection name/key first, then item key for children
       let parentItemKey: string | undefined;
+      let positionalCollectionQuery: string | undefined;
       if (positionalArgs.length > 0 && isNaN(Number(positionalArgs[0]))) {
-        parentItemKey = positionalArgs[0];
+        positionalCollectionQuery = positionalArgs[0];
       } else {
         // Backward compatibility: positional args as limit/offset
         if (positionalArgs.length > 0) options.limit = parseInt(positionalArgs[0]) || 20;
         if (positionalArgs.length > 1) options.offset = parseInt(positionalArgs[1]) || 0;
+      }
+
+      // --page overrides --offset
+      if (options.page != null) {
+        options.offset = (Math.max(1, options.page) - 1) * options.limit;
       }
 
       // Determine output mode: compact if --compact, -c, or invoked as 'la'
@@ -159,6 +169,33 @@ export const listCommands: Command[] = [
         return;
       }
 
+      // Resolve collection filter (from --dir or positional arg)
+      const collectionQuery = options.dir || positionalCollectionQuery;
+      let collectionInfo: { key: string; name: string; path: string } | null = null;
+      if (collectionQuery) {
+        collectionInfo = await resolveCollectionPath(db, library.id, collectionQuery);
+        if (!collectionInfo) {
+          // Check for ambiguous matches
+          const ambiguous = (resolveCollectionPath as any)._ambiguousMatches as Array<{ key: string; name: string; path: string }> | undefined;
+          (resolveCollectionPath as any)._ambiguousMatches = undefined;
+          if (ambiguous && ambiguous.length > 0) {
+            console.log(`${symbols.error} Ambiguous collection name "${collectionQuery}". Did you mean:`);
+            for (const m of ambiguous) {
+              console.log(`   [${m.key}] ${m.path}`);
+            }
+            console.log(`\n   Use the key to be specific: zotero list ${ambiguous[0].key}`);
+            return;
+          }
+          // Not a collection — if from positional arg, fall back to item children
+          if (positionalCollectionQuery) {
+            parentItemKey = positionalCollectionQuery;
+          } else {
+            console.log(`${symbols.error} Collection not found: ${collectionQuery}`);
+            return;
+          }
+        }
+      }
+
       // Validate parent item key if listing children
       let parentItemTitle: string | undefined;
       if (parentItemKey) {
@@ -167,20 +204,10 @@ export const listCommands: Command[] = [
           .where(and(eq(items.key, parentItemKey), eq(items.libraryId, library.id)))
           .get();
         if (!parentItem) {
-          console.log(`${symbols.error} Item ${parentItemKey} not found.`);
+          console.log(`${symbols.error} Item or collection "${parentItemKey}" not found.`);
           return;
         }
         parentItemTitle = parentItem.title || '(no title)';
-      }
-
-      // Resolve collection filter
-      let collectionInfo: { key: string; name: string; path: string } | null = null;
-      if (options.dir) {
-        collectionInfo = await resolveCollectionPath(db, library.id, options.dir);
-        if (!collectionInfo) {
-          console.log(`${symbols.error} Collection not found: ${options.dir}`);
-          return;
-        }
       }
 
       // Build where conditions
@@ -293,6 +320,15 @@ export const listCommands: Command[] = [
         .offset(options.offset)
         .all();
 
+      // Get total count for pagination info
+      const totalResult = await db.select({ total: count() })
+        .from(items)
+        .where(whereConditions)
+        .get();
+      const totalCount = totalResult?.total || 0;
+      const currentPage = Math.floor(options.offset / options.limit) + 1;
+      const totalPages = Math.ceil(totalCount / options.limit);
+
       // Build filter description
       const filters: string[] = [];
       if (collectionInfo) filters.push(`dir:${collectionInfo.path}`);
@@ -305,11 +341,16 @@ export const listCommands: Command[] = [
       if (options.until) filters.push(`until:${options.until}`);
       if (options.sort) filters.push(`sort:${options.sort}(${options.order || 'desc'})`);
 
-      const filterDesc = filters.length > 0 ? ` (filtered: ${filters.join(', ')})` : '';
+      const filterDesc = filters.length > 0 ? ` [${filters.join(', ')}]` : '';
+      const rangeStart = options.offset + 1;
+      const rangeEnd = options.offset + results.length;
+      const pageInfo = totalPages > 1
+        ? ` ${rangeStart}-${rangeEnd} of ${totalCount}, page ${currentPage}/${totalPages}`
+        : ` ${totalCount} total`;
       if (parentItemKey) {
-        console.log(`\nChildren of [${parentItemKey}] ${parentItemTitle} (${results.length} shown)${filterDesc}:\n`);
+        console.log(`\nChildren of [${parentItemKey}] ${parentItemTitle}${pageInfo}${filterDesc}:\n`);
       } else {
-        console.log(`\nItems (${results.length} shown)${filterDesc}:\n`);
+        console.log(`\nItems${pageInfo}${filterDesc}:\n`);
       }
 
       if (results.length === 0) {
@@ -527,6 +568,14 @@ export const listCommands: Command[] = [
           console.log(`      ${meta.join(' | ')}`);
           console.log();
         });
+      }
+
+      // Pagination footer
+      if (totalPages > 1) {
+        const nav: string[] = [];
+        if (currentPage > 1) nav.push(`prev: -p ${currentPage - 1}`);
+        if (currentPage < totalPages) nav.push(`next: -p ${currentPage + 1}`);
+        console.log(`   Page ${currentPage}/${totalPages} | ${nav.join(' | ')}`);
       }
     }
   },

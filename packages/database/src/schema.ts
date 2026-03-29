@@ -81,15 +81,16 @@ export const items = sqliteTable('items', {
 export const collections = sqliteTable('collections', {
   key: textCol('key').notNull(),
   libraryId: integer('library_id').notNull(),
-  
+
   name: textCol('name').notNull(),
   parentKey: textCol('parent_key'),
   version: integer('version').notNull().default(0),
-  
+  synced: integer('synced', { mode: 'boolean' }).notNull().default(true),
+
   createdAt: integer('created_at', {  }).notNull(),
   updatedAt: integer('updated_at', {  }).notNull(),
   deleted: integer('deleted', { mode: 'boolean' }).notNull().default(false),
-  
+
   rawJson: textCol('raw_json').notNull(),
 }, (table) => ({
   pk: primaryKey({ columns: [table.key, table.libraryId] }),

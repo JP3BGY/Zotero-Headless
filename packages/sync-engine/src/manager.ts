@@ -94,7 +94,14 @@ export class SyncManager extends EventEmitter {
         const unsyncedItems = await this.getUnsyncedItems(libraryId);
         const hasUnsyncedChanges = unsyncedItems.length > 0;
 
-        if (remoteVersion <= localVersion && !options.fullSync && !hasUnsyncedChanges) {
+        // Check for unsynced collections too
+        const unsyncedColCount = await this.db.select({ key: collections.key })
+          .from(collections)
+          .where(and(eq(collections.libraryId, libraryId), eq(collections.synced, false)))
+          .all();
+        const hasUnsyncedCollections = unsyncedColCount.length > 0;
+
+        if (remoteVersion <= localVersion && !options.fullSync && !hasUnsyncedChanges && !hasUnsyncedCollections) {
           // Items are up to date, but still sync collections (lightweight version check)
           try {
             await this.syncCollections(libraryId, zoteroId, 'user', localVersion);
@@ -465,6 +472,16 @@ export class SyncManager extends EventEmitter {
       await this.softDeleteItems(deletedData.items, libraryId);
     }
 
+    // 3b. Handle deleted collections
+    if (deletedData.collections && deletedData.collections.length > 0) {
+      console.log(`   Removing ${deletedData.collections.length} deleted collection(s)...`);
+      for (const collKey of deletedData.collections) {
+        await this.db.delete(collections)
+          .where(and(eq(collections.key, collKey), eq(collections.libraryId, libraryId)))
+          .run();
+      }
+    }
+
     // 4. Sync collections
     try {
       await this.syncCollections(libraryId, zoteroId, libraryType, sinceVersion);
@@ -486,7 +503,7 @@ export class SyncManager extends EventEmitter {
     sinceVersion: number
   ): Promise<void> {
     const db = this.db;
-    const { eq, and, count } = await import('drizzle-orm');
+    const { eq, and, count, notInArray } = await import('drizzle-orm');
 
     // If no local collections exist yet, do a full collection sync from version 0
     const localCount = await db.select({ cnt: count() })
@@ -499,7 +516,24 @@ export class SyncManager extends EventEmitter {
     const versionMap = await this.apiClient.getCollectionVersions(zoteroId, effectiveSince, libraryType);
     const changedKeys = Object.keys(versionMap);
 
-    if (changedKeys.length === 0) return;
+    if (changedKeys.length === 0 && effectiveSince > 0) {
+      // No incremental changes — still reconcile to catch missed deletions
+      // Fetch all remote collection keys
+      const allRemoteVersions = await this.apiClient.getCollectionVersions(zoteroId, 0, libraryType);
+      const remoteKeys = Object.keys(allRemoteVersions);
+      if (remoteKeys.length > 0) {
+        const deleted = await db.delete(collections)
+          .where(and(
+            eq(collections.libraryId, libraryId),
+            notInArray(collections.key, remoteKeys)
+          ))
+          .run();
+        if (deleted.changes > 0) {
+          console.log(`   Removed ${deleted.changes} stale collection(s) not present on remote`);
+        }
+      }
+      return;
+    }
 
     console.log(`   Syncing ${changedKeys.length} collection(s)...`);
 
@@ -527,6 +561,7 @@ export class SyncManager extends EventEmitter {
             name,
             parentKey: parentKey || null,
             version,
+            synced: true,
             updatedAt: now,
             deleted: false,
             rawJson: JSON.stringify(apiCol),
@@ -539,11 +574,31 @@ export class SyncManager extends EventEmitter {
           name,
           parentKey: parentKey || null,
           version,
+          synced: true,
           createdAt: now,
           updatedAt: now,
           deleted: false,
           rawJson: JSON.stringify(apiCol),
         });
+      }
+    }
+
+    // Reconcile: remove local collections not present on remote
+    // Use the full remote version map if we fetched all (effectiveSince=0),
+    // otherwise fetch all keys for reconciliation
+    const allRemoteVersions = effectiveSince === 0
+      ? versionMap
+      : await this.apiClient.getCollectionVersions(zoteroId, 0, libraryType);
+    const allRemoteKeys = Object.keys(allRemoteVersions);
+    if (allRemoteKeys.length > 0) {
+      const purged = await db.delete(collections)
+        .where(and(
+          eq(collections.libraryId, libraryId),
+          notInArray(collections.key, allRemoteKeys)
+        ))
+        .run();
+      if (purged.changes > 0) {
+        console.log(`   Removed ${purged.changes} stale collection(s) not present on remote`);
       }
     }
 
@@ -608,6 +663,112 @@ export class SyncManager extends EventEmitter {
     let deleted = 0;
     const errors: string[] = [];
     const conflicts: string[] = [];
+
+    // 0. Upload new collections (version=0) before items, since items reference collection keys
+    const newCollections = await this.db.select()
+      .from(collections)
+      .where(and(eq(collections.libraryId, libraryId), eq(collections.version, 0)))
+      .all();
+
+    if (newCollections.length > 0) {
+      console.log(`   Uploading ${newCollections.length} new collection(s)...`);
+
+      // Sort: parents before children (null parentKey first, then by dependency)
+      const keySet = new Set(newCollections.map(c => c.key));
+      const sorted: typeof newCollections = [];
+      const pending = [...newCollections];
+      const added = new Set<string>();
+
+      // Iteratively resolve dependencies
+      while (pending.length > 0) {
+        const before = pending.length;
+        for (let i = pending.length - 1; i >= 0; i--) {
+          const c = pending[i];
+          // Can add if: no parent, or parent is not a new collection, or parent already added
+          if (!c.parentKey || !keySet.has(c.parentKey) || added.has(c.parentKey)) {
+            sorted.push(c);
+            added.add(c.key);
+            pending.splice(i, 1);
+          }
+        }
+        if (pending.length === before) {
+          // Circular or unresolvable — add remaining as-is
+          sorted.push(...pending);
+          break;
+        }
+      }
+
+      // Map from local key -> remote key (in case server reassigns)
+      const collectionKeyMap = new Map<string, string>();
+
+      for (const col of sorted) {
+        try {
+          // Resolve parentKey: could be a new local key that was remapped
+          let remoteParentKey = col.parentKey || undefined;
+          if (remoteParentKey && collectionKeyMap.has(remoteParentKey)) {
+            remoteParentKey = collectionKeyMap.get(remoteParentKey);
+          }
+
+          const result = await this.apiClient.createCollection(
+            zoteroId, col.name, remoteParentKey, libraryType
+          );
+
+          // API returns the created collection — extract the server key and version
+          const serverKey = result?.key || col.key;
+          const serverVersion = result?.version || 1;
+          collectionKeyMap.set(col.key, serverKey);
+
+          if (serverKey !== col.key) {
+            // Server assigned a different key — update local DB and item references
+            await this.db.update(collections)
+              .set({ key: serverKey, version: serverVersion })
+              .where(and(eq(collections.key, col.key), eq(collections.libraryId, libraryId)))
+              .run();
+
+            // Update child collections' parentKey
+            await this.db.update(collections)
+              .set({ parentKey: serverKey })
+              .where(and(eq(collections.parentKey, col.key), eq(collections.libraryId, libraryId)))
+              .run();
+
+            // Update items' collectionKeys that reference the old key
+            const affectedItems = await this.db.select({ key: items.key, collectionKeys: items.collectionKeys, rawJson: items.rawJson })
+              .from(items)
+              .where(and(eq(items.libraryId, libraryId), like(items.collectionKeys, `%${col.key}%`)))
+              .all();
+
+            for (const item of affectedItems) {
+              const colKeys: string[] = JSON.parse(item.collectionKeys || '[]');
+              const idx = colKeys.indexOf(col.key);
+              if (idx !== -1) {
+                colKeys[idx] = serverKey;
+                let rawEnvelope: any;
+                try { rawEnvelope = JSON.parse(item.rawJson); } catch { rawEnvelope = { data: {} }; }
+                if (rawEnvelope.data) rawEnvelope.data.collections = colKeys;
+                await this.db.update(items)
+                  .set({
+                    collectionKeys: JSON.stringify(colKeys),
+                    rawJson: JSON.stringify(rawEnvelope),
+                  })
+                  .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
+                  .run();
+              }
+            }
+
+            console.log(`${symbols.success} Created collection "${col.name}" (key: ${col.key} -> ${serverKey})`);
+          } else {
+            await this.db.update(collections)
+              .set({ version: serverVersion })
+              .where(and(eq(collections.key, col.key), eq(collections.libraryId, libraryId)))
+              .run();
+            console.log(`${symbols.success} Created collection "${col.name}" (${serverKey})`);
+          }
+          updated++;
+        } catch (e: any) {
+          errors.push(`Create collection "${col.name}" failed: ${e.message || e}`);
+        }
+      }
+    }
 
     // 1. Find unsynced items
     const unsyncedItems = await this.getUnsyncedItems(libraryId);
@@ -1025,7 +1186,54 @@ export class SyncManager extends EventEmitter {
       }
     }
 
+    // Upload unsynced collections
+    await this.uploadCollectionChanges(libraryId, zoteroId, libraryType, errors);
+
     return { updated, deleted, errors, conflicts };
+  }
+
+  /**
+   * Upload locally modified collections to remote
+   */
+  private async uploadCollectionChanges(
+    libraryId: number,
+    zoteroId: string,
+    libraryType: 'user' | 'group',
+    errors: string[]
+  ): Promise<void> {
+    const unsyncedCollections = await this.db.select()
+      .from(collections)
+      .where(and(eq(collections.libraryId, libraryId), eq(collections.synced, false)))
+      .all();
+
+    if (unsyncedCollections.length === 0) return;
+
+    console.log(`   Uploading ${unsyncedCollections.length} collection change(s)...`);
+
+    for (const col of unsyncedCollections) {
+      try {
+        const data: { name: string; parentCollection?: string | false } = {
+          name: col.name,
+          parentCollection: col.parentKey || false,
+        };
+
+        const newVersion = await this.apiClient.updateCollection(
+          zoteroId, col.key, data, col.version, libraryType
+        );
+
+        await this.db.update(collections)
+          .set({
+            version: newVersion,
+            synced: true,
+            updatedAt: Math.floor(Date.now() / 1000),
+          })
+          .where(and(eq(collections.key, col.key), eq(collections.libraryId, libraryId)));
+
+        console.log(`   ${symbols.success} Synced collection "${col.name}"`);
+      } catch (e: any) {
+        errors.push(`Collection ${col.key} (${col.name}): ${e.message || e}`);
+      }
+    }
   }
 
   /**

@@ -243,6 +243,20 @@ export function initializeDatabase(options?: { quiet?: boolean }): Database {
     console.warn(`${symbols.warning} Database migration warning:`, e);
   }
 
+  // Migration: Add synced column to collections table
+  try {
+    const colColumns2 = sqliteInstance.prepare(`PRAGMA table_info(collections)`).all() as any[];
+    const hasSynced = colColumns2.some(col => col.name === 'synced');
+
+    if (!hasSynced) {
+      if (!quiet) console.log('Migrating database: Adding synced column to collections...');
+      sqliteInstance.exec(`ALTER TABLE collections ADD COLUMN synced INTEGER NOT NULL DEFAULT 1;`);
+      if (!quiet) console.log(`${symbols.success} Migration complete`);
+    }
+  } catch (e) {
+    console.warn(`${symbols.warning} Database migration warning:`, e);
+  }
+
   if (!quiet) {
     console.log(`${symbols.success} Database initialized: ${dbPath}`);
   }

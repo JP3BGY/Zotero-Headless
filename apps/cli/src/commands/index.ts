@@ -31,6 +31,7 @@ import { historyCommands } from './history.js';
 import { helpCommands } from './help.js';
 import { shellCommands } from './shell.js';
 import { importCommands } from './import-cmd.js';
+import { mvCommands } from './mv.js';
 
 export const commands: Command[] = [
   ...syncCommands,
@@ -63,4 +64,5 @@ export const commands: Command[] = [
   ...creatorsCommands,
   ...webdavCommands,
   ...importCommands,
+  ...mvCommands,
 ];

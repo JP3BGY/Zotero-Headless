@@ -384,8 +384,8 @@ export class ZoteroAPIClient {
     name: string,
     parentKey?: string,
     libraryType: 'user' | 'group' = 'user'
-  ): Promise<ZoteroCollectionResponse> {
-    const response = await this.request<ZoteroCollectionResponse[]>(
+  ): Promise<{ key: string; version: number }> {
+    const response = await this.request<WriteResponse>(
       'POST',
       `${this.getLibraryPath(libraryId, libraryType)}/collections`,
       {
@@ -395,28 +395,34 @@ export class ZoteroAPIClient {
         }]
       }
     );
-    return response.data[0];
+    const result = response.data;
+    if (result.successful && result.successful['0']) {
+      const created = result.successful['0'] as any;
+      return { key: created.key || created, version: created.version ?? response.version };
+    }
+    if (result.failed && result.failed['0']) {
+      throw new Error(`Create collection failed: ${result.failed['0'].message}`);
+    }
+    throw new Error('Unexpected response from Zotero API');
   }
 
   /** Update a collection */
   async updateCollection(
     libraryId: string | number,
     collectionKey: string,
-    name: string,
-    parentKey: string | null,
+    data: { name: string; parentCollection?: string | false },
+    version: number,
     libraryType: 'user' | 'group' = 'user'
-  ): Promise<{ successful: Record<string, string> }> {
-    const response = await this.request<{ successful: Record<string, string> }>(
+  ): Promise<number> {
+    const response = await this.request<unknown>(
       'PATCH',
       `${this.getLibraryPath(libraryId, libraryType)}/collections/${collectionKey}`,
       {
-        body: [{
-          name,
-          parentKey: parentKey === null ? null : (parentKey || undefined)
-        }]
+        body: data,
+        headers: { 'If-Unmodified-Since-Version': String(version) }
       }
     );
-    return response.data;
+    return response.version;
   }
 
   /** Delete a collection */

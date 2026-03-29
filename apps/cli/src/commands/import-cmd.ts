@@ -412,9 +412,9 @@ export const importCommands: Command[] = [
           }).run();
           collectionsCreated++;
 
-          // Update items to reference this collection
+          // Update items to reference this collection (both collectionKeys column and rawJson)
           for (const itemKey of childItemKeys) {
-            const row = db.select({ collectionKeys: items.collectionKeys })
+            const row = db.select({ collectionKeys: items.collectionKeys, rawJson: items.rawJson })
               .from(items)
               .where(and(eq(items.key, itemKey), eq(items.libraryId, library.id)))
               .get();
@@ -422,8 +422,17 @@ export const importCommands: Command[] = [
               const existing: string[] = JSON.parse(row.collectionKeys || '[]');
               if (!existing.includes(colKey)) {
                 existing.push(colKey);
+                // Also update rawJson so sync engine sends correct collections to API
+                let rawEnvelope: any;
+                try { rawEnvelope = JSON.parse(row.rawJson); } catch { rawEnvelope = { data: {} }; }
+                if (!rawEnvelope.data) rawEnvelope.data = {};
+                rawEnvelope.data.collections = existing;
                 db.update(items)
-                  .set({ collectionKeys: JSON.stringify(existing) })
+                  .set({
+                    collectionKeys: JSON.stringify(existing),
+                    rawJson: JSON.stringify(rawEnvelope),
+                    synced: false,
+                  })
                   .where(and(eq(items.key, itemKey), eq(items.libraryId, library.id)))
                   .run();
               }

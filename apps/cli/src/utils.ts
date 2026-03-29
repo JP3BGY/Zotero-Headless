@@ -120,11 +120,34 @@ export async function resolveCollectionPath(db: any, libraryId: number, pathOrKe
     return '/' + parts.join('/');
   };
 
-  // If it doesn't start with '/', treat as a collection key
+  // If it doesn't start with '/', try as collection key first, then match by name
   if (!pathOrKey.startsWith('/')) {
     const col = byKey.get(pathOrKey);
-    if (!col) return null;
-    return { key: col.key, name: col.name, path: buildPath(col) };
+    if (col) return { key: col.key, name: col.name, path: buildPath(col) };
+
+    // Try exact name match
+    const byName = allCols.filter(c => c.name === pathOrKey);
+    if (byName.length === 1) return { key: byName[0].key, name: byName[0].name, path: buildPath(byName[0]) };
+
+    // Try case-insensitive name match
+    const needle = pathOrKey.toLowerCase();
+    const byNameCI = allCols.filter(c => c.name.toLowerCase() === needle);
+    if (byNameCI.length === 1) return { key: byNameCI[0].key, name: byNameCI[0].name, path: buildPath(byNameCI[0]) };
+
+    // Multiple matches — return null with disambiguation handled by caller
+    if (byName.length > 1 || byNameCI.length > 1) {
+      // Store matches for the caller to display
+      const matches = byName.length > 1 ? byName : byNameCI;
+      const result: any = null;
+      // We can't return multiple, so return null and let caller handle
+      // But we can attach matches to a global for the caller
+      (resolveCollectionPath as any)._ambiguousMatches = matches.map((c: any) => ({
+        key: c.key, name: c.name, path: buildPath(c),
+      }));
+      return null;
+    }
+
+    return null;
   }
 
   // Resolve by path: split and walk the tree
