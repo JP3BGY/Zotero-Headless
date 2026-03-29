@@ -841,16 +841,10 @@ export class SyncManager extends EventEmitter {
             delete data.publicationDate;
           }
 
-          // Remove unknown fields
-          const CRITICAL_FIELDS = new Set(['key', 'version', 'itemType']);
-          const zoteroItemFields = new Set([
-            'key', 'itemType', 'title', 'creators', 'abstractNote', 'date', 'url', 'DOI',
-            'accessDate', 'libraryCatalog', 'callNumber', 'rights', 'placeholder',
-            'note', 'parentItem', 'tags', 'collections', 'relations', 'version'
-          ]);
+          // Remove server-managed read-only fields (everything else from rawJson is valid)
+          const EXCLUDED_FIELDS = new Set(['dateAdded', 'dateModified', 'library', 'links', 'meta']);
           for (const field of Object.keys(data)) {
-            if (CRITICAL_FIELDS.has(field)) continue;
-            if (!zoteroItemFields.has(field)) delete data[field];
+            if (EXCLUDED_FIELDS.has(field)) delete data[field];
           }
 
           batchData.push(data);
@@ -975,16 +969,10 @@ export class SyncManager extends EventEmitter {
           delete data.publicationDate;
         }
 
-        // Remove fields that Zotero API doesn't accept
-        const CRITICAL_FIELDS = new Set(['key', 'version', 'itemType']);
-        const zoteroItemFields = new Set([
-          'key', 'itemType', 'title', 'creators', 'abstractNote', 'date', 'url', 'DOI',
-          'accessDate', 'libraryCatalog', 'callNumber', 'rights', 'placeholder',
-          'note', 'parentItem', 'tags', 'collections', 'relations', 'version'
-        ]);
+        // Remove server-managed read-only fields (everything else from rawJson is valid)
+        const EXCLUDED_FIELDS = new Set(['dateAdded', 'dateModified', 'library', 'links', 'meta']);
         for (const field of Object.keys(data)) {
-          if (CRITICAL_FIELDS.has(field)) continue;
-          if (!zoteroItemFields.has(field)) delete data[field];
+          if (EXCLUDED_FIELDS.has(field)) delete data[field];
         }
 
         if (item.deleted) {

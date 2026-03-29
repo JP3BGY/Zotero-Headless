@@ -24,12 +24,12 @@ export class PayloadBuilder {
   // Fields that are absolutely required for API calls
   private static readonly CRITICAL_FIELDS = ['key', 'version', 'itemType'] as const;
   
-  // Fields allowed by Zotero API
-  private static readonly ALLOWED_FIELDS = new Set([
-    'key', 'version', 'itemType', 'title', 'creators', 'abstractNote', 
-    'date', 'url', 'DOI', 'accessDate', 'libraryCatalog', 'callNumber', 
-    'rights', 'placeholder', 'note', 'parentItem', 'tags', 
-    'collections', 'relations'
+  // Fields that must NOT be sent to the API (server-managed / read-only metadata).
+  // Everything else from rawJson is passed through as-is, since rawJson
+  // originates from the API and contains valid item-type-specific fields.
+  private static readonly EXCLUDED_FIELDS = new Set([
+    'dateAdded', 'dateModified',  // server-managed timestamps
+    'library', 'links', 'meta',  // server-assigned metadata
   ]);
   
   /**
@@ -98,13 +98,7 @@ export class PayloadBuilder {
    */
   private static cleanFields(data: Record<string, unknown>): void {
     for (const field of Object.keys(data)) {
-      // NEVER delete critical fields
-      if (this.CRITICAL_FIELDS.includes(field as typeof this.CRITICAL_FIELDS[number])) {
-        continue;
-      }
-      
-      // Delete unknown fields
-      if (!this.ALLOWED_FIELDS.has(field)) {
+      if (this.EXCLUDED_FIELDS.has(field)) {
         delete data[field];
       }
     }
