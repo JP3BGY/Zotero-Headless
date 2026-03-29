@@ -38,6 +38,20 @@ export interface ZoteroConfig {
     trashRetentionDays?: number;  // Days before trashed items can be permanently deleted (default: 7)
   };
 
+  // Full text finding settings
+  fulltext?: {
+    methods?: ('doi' | 'oa' | 'url' | 'custom')[];
+    sameDomainRequestDelay?: number;  // ms between requests to same domain, default: 1000
+    resolvers?: Array<{
+      name: string;
+      method: 'GET' | 'POST';
+      url: string;            // must contain {doi} placeholder
+      mode: 'json';
+      selector: string;       // dot-path to URL array/value in JSON response
+      mappings?: { url?: string; pageURL?: string };
+    }>;
+  };
+
   // Shell keybindings
   keybindings?: {
     submit?: string;       // default: "enter"

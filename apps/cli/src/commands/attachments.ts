@@ -1,7 +1,7 @@
 // @ts-nocheck
 
 import type { Command } from '../types.js';
-import { initModules, getDb, getAttachmentManager, getLibraries } from '../modules.js';
+import { initModules, getDb, getAttachmentManager, getFullTextFinder, getLibraries, getItems, getAttachments } from '../modules.js';
 import { symbols } from '@zotero-headless/core';
 
 // Alias-to-subcommand mapping for backward compatibility
@@ -19,6 +19,8 @@ const ATTACHMENT_ALIAS_MAP: Record<string, string> = {
   'attachment-dedup': 'dedup',
   'attdedup': 'dedup',
   'dedup': 'dedup',
+  'find-fulltext': 'find',
+  'findpdf': 'find',
 };
 
 async function executeAttachmentList(args: string[]) {
@@ -106,6 +108,127 @@ async function executeAttachmentDedup(args: string[]) {
   }
 }
 
+async function executeAttachmentFind(args: string[]) {
+  await initModules();
+
+  const options = {
+    keys: [] as string[],
+    all: false,
+    methods: undefined as string[] | undefined,
+    dryRun: false,
+    limit: 50,
+  };
+
+  // Parse arguments
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--all' || arg === '-a') {
+      options.all = true;
+    } else if ((arg === '--methods' || arg === '-m') && args[i + 1]) {
+      options.methods = args[++i].split(',').map(m => m.trim());
+    } else if (arg === '--dry-run') {
+      options.dryRun = true;
+    } else if ((arg === '--limit' || arg === '-l') && args[i + 1]) {
+      options.limit = parseInt(args[++i]) || 50;
+    } else if (!arg.startsWith('-')) {
+      options.keys.push(arg);
+    }
+  }
+
+  if (options.keys.length === 0 && !options.all) {
+    console.log('Usage: zotero attachment find <key...>');
+    console.log('       zotero attachment find --all [--limit N]');
+    console.log('');
+    console.log('Options:');
+    console.log('  --all, -a              Find full text for all eligible items');
+    console.log('  --methods, -m <list>   Resolver methods: doi,oa,url,custom (default: all)');
+    console.log('  --limit, -l <N>        Max items to process (default: 50)');
+    console.log('  --dry-run              Show eligible items without downloading');
+    return;
+  }
+
+  const db = getDb()();
+  const libTable = getLibraries();
+  const itemsTable = getItems();
+  const library = await db.select().from(libTable).get();
+
+  if (!library) {
+    console.log(`${symbols.error} No library found. Run "sync" first.`);
+    return;
+  }
+
+  const finder = getFullTextFinder();
+  let itemRecords: any[];
+
+  if (options.all) {
+    // Find all eligible items
+    itemRecords = await finder.getEligibleItems(library.id, options.limit);
+    console.log(`\nFound ${itemRecords.length} items eligible for full text finding.\n`);
+  } else {
+    // Look up specific items by key
+    const { eq, and } = await import('drizzle-orm');
+    itemRecords = [];
+    for (const key of options.keys) {
+      const item = await db.select().from(itemsTable)
+        .where(and(eq(itemsTable.key, key), eq(itemsTable.libraryId, library.id)))
+        .get();
+      if (item) {
+        itemRecords.push(item);
+      } else {
+        console.log(`${symbols.warning} Item ${key} not found.`);
+      }
+    }
+    if (itemRecords.length === 0) return;
+    console.log(`\nProcessing ${itemRecords.length} item(s)...\n`);
+  }
+
+  if (options.dryRun) {
+    console.log('Dry run - showing eligible items:\n');
+    for (const item of itemRecords) {
+      const title = (item.title || '(untitled)').substring(0, 60);
+      const doi = item.doi ? `DOI: ${item.doi}` : '';
+      const url = item.url ? `URL: ${item.url.substring(0, 40)}...` : '';
+      console.log(`  [${item.key}] ${title}`);
+      if (doi) console.log(`    ${doi}`);
+      if (url) console.log(`    ${url}`);
+    }
+    console.log(`\n${itemRecords.length} item(s) would be processed.`);
+    return;
+  }
+
+  // Load custom resolvers from config if available
+  let customResolvers;
+  try {
+    const { configManager } = await import('@zotero-headless/core');
+    const fulltextConfig = configManager.get('fulltext');
+    customResolvers = fulltextConfig?.resolvers;
+  } catch { /* no config */ }
+
+  const result = await finder.findForItems(itemRecords, {
+    methods: options.methods as any,
+    customResolvers,
+    dryRun: false,
+    onProgress: (current, total, title) => {
+      const truncTitle = title.substring(0, 50);
+      process.stdout.write(`\r  [${current}/${total}] ${truncTitle}...`.padEnd(80));
+    },
+    onItemResult: (key, res) => {
+      process.stdout.write('\r' + ' '.repeat(80) + '\r');
+      if (res.success) {
+        console.log(`  ${symbols.success} [${key}] ${res.filename} (${res.accessMethod}, ${((res.fileSize || 0) / 1024).toFixed(0)} KB)`);
+      } else {
+        console.log(`  ${symbols.error} [${key}] ${res.error}`);
+      }
+    },
+  });
+
+  console.log(`\nResults: ${result.found} found, ${result.failed} failed, ${result.skipped} skipped.`);
+
+  if (result.found > 0) {
+    console.log(`\nRun "zotero sync" to upload items, then "zotero webdav sync" to upload files.`);
+  }
+}
+
 export const attachmentCommands: Command[] = [
   {
     name: 'attachment',
@@ -114,15 +237,18 @@ export const attachmentCommands: Command[] = [
       'attachment-download', 'attdl', 'down',
       'attachment-open', 'atto',
       'attachment-dedup', 'attdedup',
+      'find-fulltext', 'findpdf',
     ],
-    description: 'Attachment management. Subcommands: list (default), download, open, dedup',
+    description: 'Attachment management. Subcommands: list (default), download, open, dedup, find',
     options: [
       { name: '--item', description: 'Filter by parent item key (list subcommand)', value: '<key>' },
-      { name: '--limit', alias: '-l', description: 'Limit results (list subcommand)', value: '<N>' },
+      { name: '--limit', alias: '-l', description: 'Limit results', value: '<N>' },
       { name: '--force', alias: '-f', description: 'Overwrite existing file (download subcommand)' },
       { name: '--wait', alias: '-w', description: 'Wait for application to close (open subcommand)' },
       { name: '--delete', alias: '-d', description: 'Delete duplicates (dedup subcommand)' },
-      { name: '--dry-run', description: 'Show duplicates without deleting (dedup subcommand)' },
+      { name: '--dry-run', description: 'Preview without action (find/dedup subcommands)' },
+      { name: '--all', alias: '-a', description: 'Process all eligible items (find subcommand)' },
+      { name: '--methods', alias: '-m', description: 'Resolver methods: doi,oa,url,custom (find subcommand)', value: '<list>' },
     ],
     examples: [
       'zotero attachment list',
@@ -130,6 +256,10 @@ export const attachmentCommands: Command[] = [
       'zotero attachment download ABC123',
       'zotero attachment open ABC123',
       'zotero attachment dedup',
+      'zotero attachment find ABC123',
+      'zotero attachment find --all --limit 10',
+      'zotero attachment find --all --dry-run',
+      'zotero attachment find ABC123 --methods oa,doi',
     ],
     execute: async (args, invokedAs) => {
       // Resolve subcommand from alias or first arg
@@ -139,7 +269,7 @@ export const attachmentCommands: Command[] = [
       if (subcommand) {
         subArgs = args;
       } else {
-        const validSubs = ['list', 'download', 'open', 'dedup'];
+        const validSubs = ['list', 'download', 'open', 'dedup', 'find'];
         if (validSubs.includes(args[0])) {
           subcommand = args[0];
           subArgs = args.slice(1);
@@ -159,6 +289,8 @@ export const attachmentCommands: Command[] = [
           return executeAttachmentOpen(subArgs);
         case 'dedup':
           return executeAttachmentDedup(subArgs);
+        case 'find':
+          return executeAttachmentFind(subArgs);
       }
     }
   },

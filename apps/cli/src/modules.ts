@@ -10,6 +10,7 @@ let _itemTags: any;
 let _collections: any;
 let zoteroApi: any;
 let _attachmentManager: any;
+let _fullTextFinder: any;
 let _webdavConfig: any;
 let _logDeletion: any;
 
@@ -36,6 +37,7 @@ export async function initModules() {
   if (!_attachmentManager) {
     const attMod = await import('@zotero-headless/attachment-manager');
     _attachmentManager = attMod.attachmentManager;
+    _fullTextFinder = new attMod.FullTextFinder();
   }
 }
 
@@ -48,5 +50,6 @@ export function getItemTags() { return _itemTags; }
 export function getCollections() { return _collections; }
 export function getZoteroApi() { return zoteroApi; }
 export function getAttachmentManager() { return _attachmentManager; }
+export function getFullTextFinder() { return _fullTextFinder; }
 export function getWebdavConfig() { return _webdavConfig; }
 export function getLogDeletion() { return _logDeletion; }
