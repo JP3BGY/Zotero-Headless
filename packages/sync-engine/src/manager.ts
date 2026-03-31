@@ -975,6 +975,10 @@ export class SyncManager extends EventEmitter {
           if (EXCLUDED_FIELDS.has(field)) delete data[field];
         }
 
+        // Ensure data.version matches item.version (used as If-Unmodified-Since-Version header)
+        // rawJson may have a stale version from before local edits
+        data.version = item.version;
+
         if (item.deleted) {
           // Soft delete: move to remote trash via PATCH (not permanent delete)
           try {
