@@ -197,7 +197,7 @@ async function executeTrashEmpty(args: string[]) {
     return;
   }
 
-  if (!skipConfirm && isInteractive()) {
+  if (!skipConfirm && !isShellMode() && isInteractive()) {
     const rl = createPrompt();
     const answer = await new Promise<string>((resolve) => {
       rl.question(

@@ -1,19 +1,20 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import TextInput from 'ink-text-input';
 import Spinner from 'ink-spinner';
+import { TextInput } from './TextInput.js';
 import { useShellState } from '../hooks/useShellState.js';
 import { useElapsedTime } from '../hooks/useElapsedTime.js';
 import { POINTER } from '../constants/figures.js';
 
 export function InputPrompt({ onInputChange }: { onInputChange: (value: string) => void }) {
   const { state, dispatch } = useShellState();
-  const { mode, input, inputKey, executingCommand, executingStartTime } = state;
+  const { mode, input, executingCommand, executingStartTime, pendingConfirm } = state;
   const isExecuting = mode === 'executing';
   const elapsed = useElapsedTime(isExecuting ? executingStartTime : null);
 
   return (
     <Box>
+      {pendingConfirm && <Text color="yellow">(y/N) </Text>}
       <Text color="cyan">{POINTER} </Text>
       {isExecuting ? (
         <Box>
@@ -23,12 +24,12 @@ export function InputPrompt({ onInputChange }: { onInputChange: (value: string) 
         </Box>
       ) : (
         <TextInput
-          key={inputKey}
           value={input}
           onChange={(value) => {
             dispatch({ type: 'SET_INPUT', value });
             onInputChange(value);
           }}
+          isActive={mode === 'idle'}
         />
       )}
     </Box>

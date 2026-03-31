@@ -3,7 +3,7 @@ import type { OutputLine, CommandSuggestion, ItemKeySuggestion, LogLevel } from 
 import { t } from '../i18n.js';
 
 export interface ShellState {
-  mode: 'idle' | 'executing' | 'confirming' | 'config' | 'exiting';
+  mode: 'idle' | 'executing' | 'config' | 'exiting';
   input: string;
   inputKey: number;
   lines: OutputLine[];
@@ -14,10 +14,9 @@ export interface ShellState {
   executingStartTime: number | null;
   // ID of the input line for the currently executing command
   currentInputLineId: number | null;
-  // Confirm prompt
+  // Confirm prompt — only a flag; actual callbacks live in refs to avoid stale closures
+  pendingConfirm: boolean;
   confirmMessage: string | null;
-  confirmCallback: (() => void) | null;
-  confirmCancelCallback: (() => void) | null;
   // Collapsed command groups (set of groupIds)
   collapsedGroups: Record<number, true>;
 }
@@ -32,7 +31,7 @@ export type ShellAction =
   | { type: 'RESET_INPUT' }
   | { type: 'START_COMMAND'; command: string }
   | { type: 'END_COMMAND'; success: boolean; autoCollapse?: boolean }
-  | { type: 'SET_CONFIRM'; message: string; onConfirm: () => void; onCancel: () => void }
+  | { type: 'SET_CONFIRM'; message: string }
   | { type: 'CLEAR_CONFIRM' }
   | { type: 'ENTER_CONFIG' }
   | { type: 'EXIT_CONFIG' }
@@ -151,19 +150,15 @@ function shellReducer(state: ShellState, action: ShellAction): ShellState {
     case 'SET_CONFIRM':
       return {
         ...state,
-        mode: 'confirming',
+        pendingConfirm: true,
         confirmMessage: action.message,
-        confirmCallback: action.onConfirm,
-        confirmCancelCallback: action.onCancel,
       };
 
     case 'CLEAR_CONFIRM':
       return {
         ...state,
-        mode: 'idle',
+        pendingConfirm: false,
         confirmMessage: null,
-        confirmCallback: null,
-        confirmCancelCallback: null,
       };
 
     case 'ENTER_CONFIG':
@@ -227,9 +222,8 @@ export function createInitialState(): ShellState {
     executingCommand: null,
     executingStartTime: null,
     currentInputLineId: null,
+    pendingConfirm: false,
     confirmMessage: null,
-    confirmCallback: null,
-    confirmCancelCallback: null,
     collapsedGroups: {},
   };
 }

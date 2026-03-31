@@ -20,6 +20,10 @@ export function useKeyHandler() {
   const completions = useCompletions();
   const kb = useKeybindings();
 
+  // Confirm callbacks stored in refs — always current, no stale closures.
+  const confirmRef = useRef<(() => void) | null>(null);
+  const confirmCancelRef = useRef<(() => void) | null>(null);
+
   const doExit = useCallback(() => {
     addLine('info', t.goodbye);
     dispatch({ type: 'SET_MODE', mode: 'exiting' });
@@ -72,6 +76,26 @@ export function useKeyHandler() {
   }, [dispatch, addLine]);
 
   const handleExecute = useCallback(async (cmd: string) => {
+    // Handle pending confirmation — read callbacks from refs (always current)
+    if (state.pendingConfirm) {
+      const trimmed = cmd.trim().toLowerCase();
+      const onConfirm = confirmRef.current;
+      const onCancel = confirmCancelRef.current;
+
+      // Clear refs and state first
+      confirmRef.current = null;
+      confirmCancelRef.current = null;
+      dispatch({ type: 'CLEAR_CONFIRM' });
+      dispatch({ type: 'RESET_INPUT' });
+
+      if (trimmed === 'y' || trimmed === 'yes') {
+        onConfirm?.();
+      } else {
+        onCancel?.();
+      }
+      return;
+    }
+
     if (!cmd.trim() || state.mode !== 'idle') return;
 
     history.add(cmd);
@@ -97,28 +121,31 @@ export function useKeyHandler() {
       return;
     }
 
-    // Delete commands need confirmation
+    // Delete commands — show question in output, respond via normal input
     if (DELETE_COMMANDS.includes(parsedCmd) && args.length > 0) {
       const target = args[0];
       const msg = t.confirmDelete?.(target) ??
         `Delete item "${target}"? This cannot be undone.`;
-      dispatch({
-        type: 'SET_CONFIRM',
-        message: msg,
-        onConfirm: () => { runCliCommand(parsedCmd, args, cmd); },
-        onCancel: () => {
-          addLine('info', t.cancelled ?? 'Cancelled.');
-          dispatch({ type: 'RESET_INPUT' });
-        },
-      });
+
+      // Store callbacks in refs (immune to stale closures)
+      confirmRef.current = () => { runCliCommand(parsedCmd, args, cmd); };
+      confirmCancelRef.current = () => {
+        addLine('info', t.cancelled ?? 'Cancelled.');
+      };
+
+      addLine('info', msg);
+      dispatch({ type: 'SET_CONFIRM', message: msg });
+      dispatch({ type: 'RESET_INPUT' });
       return;
     }
 
     // Regular CLI command
     await runCliCommand(parsedCmd, args, cmd);
-  }, [state.mode, dispatch, history, addLine, doExit, runCliCommand]);
+  }, [state.mode, state.pendingConfirm, dispatch, history, addLine, doExit, runCliCommand]);
 
   const handleTab = useCallback(() => {
+    if (state.pendingConfirm) return; // Skip completions during confirmation
+
     const { input } = state;
     const parts = input.trim().split(/\s+/);
     const cmd = parts[0]?.toLowerCase() || '';
@@ -153,9 +180,11 @@ export function useKeyHandler() {
         dispatch({ type: 'SET_SUGGESTIONS', suggestions: comps });
       }
     }
-  }, [state.input, completions, dispatch]);
+  }, [state.input, state.pendingConfirm, completions, dispatch]);
 
   const updateSuggestions = useCallback((value: string) => {
+    if (state.pendingConfirm) return; // Skip suggestions during confirmation
+
     const result = completions.getSuggestionsForInput(value);
     if (!result) {
       dispatch({ type: 'SET_SUGGESTIONS', suggestions: [] });
@@ -172,7 +201,7 @@ export function useKeyHandler() {
         dispatch({ type: 'SET_SUGGESTIONS', suggestions: result.sync });
       }
     }
-  }, [completions, dispatch]);
+  }, [state.pendingConfirm, completions, dispatch]);
 
   const handleCtrlC = useCallback(() => {
     const now = Date.now();
@@ -190,8 +219,14 @@ export function useKeyHandler() {
       dispatch({ type: 'END_COMMAND', success: false });
       dispatch({ type: 'RESET_INPUT' });
       addLine('info', t.ctrlCHint);
-    } else if (state.mode === 'confirming') {
+    } else if (state.pendingConfirm) {
+      // Cancel pending confirmation
+      const onCancel = confirmCancelRef.current;
+      confirmRef.current = null;
+      confirmCancelRef.current = null;
       dispatch({ type: 'CLEAR_CONFIRM' });
+      dispatch({ type: 'RESET_INPUT' });
+      onCancel?.();
       addLine('info', t.ctrlCHint);
     } else if (state.mode === 'config') {
       dispatch({ type: 'EXIT_CONFIG' });
@@ -203,7 +238,7 @@ export function useKeyHandler() {
     } else {
       addLine('info', t.ctrlCHint);
     }
-  }, [state.mode, state.input, dispatch, addLine, doExit]);
+  }, [state.mode, state.input, state.pendingConfirm, dispatch, addLine, doExit]);
 
   useInput((input, key) => {
     // Ctrl+C: handle in all modes
@@ -212,9 +247,8 @@ export function useKeyHandler() {
       return;
     }
 
-    // Confirming mode is handled by ConfirmPrompt component
     // Config mode is handled by ConfigPanel component
-    if (state.mode === 'executing' || state.mode === 'confirming' || state.mode === 'config') return;
+    if (state.mode === 'executing' || state.mode === 'config') return;
 
     if (kb.match('submit', input, key)) {
       handleExecute(state.input);

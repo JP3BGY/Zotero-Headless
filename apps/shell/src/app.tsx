@@ -4,7 +4,6 @@ import { Divider } from './components/Header.js';
 import { OutputArea } from './components/OutputArea.js';
 import { InputPrompt } from './components/InputPrompt.js';
 import { CompletionList } from './components/CompletionList.js';
-import { ConfirmPrompt } from './components/ConfirmPrompt.js';
 import { ConfigPanel } from './components/ConfigPanel.js';
 import { StatusBar } from './components/StatusBar.js';
 import { ShellContext, useShellReducer } from './hooks/useShellState.js';
@@ -28,8 +27,6 @@ function ShellUI() {
           <Divider />
           {state.mode === 'config' ? (
             <ConfigPanel />
-          ) : state.mode === 'confirming' ? (
-            <ConfirmPrompt />
           ) : (
             <InputPrompt onInputChange={updateSuggestions} />
           )}

@@ -69,8 +69,9 @@ export const deleteCommands: Command[] = [
           process.exit(1);
         }
 
-        // Confirmation prompt
-        if (!skipConfirm) {
+        // Confirmation prompt — skip in shell mode (shell handles its own
+        // confirmation via Ink; readline would conflict with Ink's raw mode)
+        if (!skipConfirm && !isShellMode()) {
           if (!isInteractive()) {
             console.log(`${symbols.error} ${t('commands.delete.nonInteractive')}`);
             process.exit(1);

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Box, Text, useInput, useStdout } from 'ink';
-import TextInput from 'ink-text-input';
+import { TextInput } from './TextInput.js';
 import { configManager, type ZoteroConfig, appConfig, updateEnvConfig } from '@zotero-headless/core';
 import { getRawSQLite } from '@zotero-headless/database';
 import { useShellState } from '../hooks/useShellState.js';
