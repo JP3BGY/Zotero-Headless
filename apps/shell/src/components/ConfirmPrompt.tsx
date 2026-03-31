@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text, useInput } from 'ink';
 import { useShellState } from '../hooks/useShellState.js';
 import { isEnglish } from '../i18n.js';
+import { WARNING } from '../constants/figures.js';
 
 export function ConfirmPrompt() {
   const { state, dispatch } = useShellState();
@@ -23,7 +24,7 @@ export function ConfirmPrompt() {
 
   return (
     <Box>
-      <Text color="yellow">⚠ {confirmMessage}</Text>
+      <Text color="yellow">{WARNING} {confirmMessage}</Text>
       <Text color="gray"> ({isEnglish ? 'y/N' : 'y/N'})</Text>
     </Box>
   );

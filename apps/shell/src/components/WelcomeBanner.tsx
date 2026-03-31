@@ -3,6 +3,7 @@ import { Box, Text, useStdout } from 'ink';
 import { isEnglish } from '../i18n.js';
 import { formatRelativeTime } from '../utils/formatTime.js';
 import { loadDbInfo } from '../utils/dbInfo.js';
+import { LINE, LINE_VERTICAL, BULLET_OPERATOR, POINTER_SMALL } from '../constants/figures.js';
 
 const ZOTERO_COLOR = 'rgb(204,51,51)';
 const VERSION = '1.0.0';
@@ -40,15 +41,15 @@ function Row({ left, right, leftW, rightW }: {
 }) {
   return (
     <Box>
-      <Text color={ZOTERO_COLOR}>│</Text>
+      <Text color={ZOTERO_COLOR}>{LINE_VERTICAL}</Text>
       <Box width={leftW} justifyContent="center">
         {left}
       </Box>
-      <Text color={ZOTERO_COLOR}>│</Text>
+      <Text color={ZOTERO_COLOR}>{LINE_VERTICAL}</Text>
       <Box width={rightW}>
         {right}
       </Box>
-      <Text color={ZOTERO_COLOR}>│</Text>
+      <Text color={ZOTERO_COLOR}>{LINE_VERTICAL}</Text>
     </Box>
   );
 }
@@ -79,13 +80,13 @@ export function WelcomeBanner() {
   const leftW = Math.floor(innerWidth * 0.45);
   const rightW = innerWidth - leftW - 1;
   const cwdText = shortenPath(info.cwd, leftW - 4);
-  const separator = '─'.repeat(rightW - 2);
+  const separator = LINE.repeat(rightW - 2);
 
   // Borders
   const title = ` Zotero Shell v${VERSION} `;
   const topPrefix = `╭───${title}`;
-  const topBorder = `${topPrefix}${'─'.repeat(Math.max(0, width - topPrefix.length - 1))}╮`;
-  const bottomBorder = `╰${'─'.repeat(width - 2)}╯`;
+  const topBorder = `${topPrefix}${LINE.repeat(Math.max(0, width - topPrefix.length - 1))}╮`;
+  const bottomBorder = `╰${LINE.repeat(width - 2)}╯`;
 
   // Empty row helper
   const emptyLeft = <Text>{' '.repeat(leftW)}</Text>;
@@ -132,19 +133,19 @@ export function WelcomeBanner() {
       {/* Logo line 3 + Tab */}
       <Row leftW={leftW} rightW={rightW}
         left={<Text color={ZOTERO_COLOR}>{LOGO_LINES[2]}</Text>}
-        right={<Text> <Text color="gray">Tab</Text>{'        '}{isEnglish ? 'Autocomplete' : '自动补全'}</Text>}
+        right={<Text> {POINTER_SMALL} <Text color="gray">Tab</Text>{'        '}{isEnglish ? 'Autocomplete' : '自动补全'}</Text>}
       />
 
       {/* Logo line 4 + ↑↓ */}
       <Row leftW={leftW} rightW={rightW}
         left={<Text color={ZOTERO_COLOR}>{LOGO_LINES[3]}</Text>}
-        right={<Text> <Text color="gray">↑/↓</Text>{'        '}{isEnglish ? 'History' : '历史命令'}</Text>}
+        right={<Text> {POINTER_SMALL} <Text color="gray">↑/↓</Text>{'        '}{isEnglish ? 'History' : '历史命令'}</Text>}
       />
 
       {/* Empty + Ctrl+C */}
       <Row leftW={leftW} rightW={rightW}
         left={emptyLeft}
-        right={<Text> <Text color="gray">Ctrl+C×2</Text>{'    '}{isEnglish ? 'Exit' : '退出'}</Text>}
+        right={<Text> {POINTER_SMALL} <Text color="gray">Ctrl+C×2</Text>{'    '}{isEnglish ? 'Exit' : '退出'}</Text>}
       />
 
       {/* Status info */}
@@ -152,7 +153,7 @@ export function WelcomeBanner() {
         left={
           <Text>
             <Text color={dbColor}>{dbLabel}</Text>
-            <Text color="gray"> · </Text>
+            <Text color="gray"> {BULLET_OPERATOR} </Text>
             <Text>{info.itemCount} items</Text>
             <Text color="gray"> · sync:</Text>
             <Text>{syncLabel}</Text>

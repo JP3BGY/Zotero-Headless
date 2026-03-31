@@ -5,6 +5,7 @@ import { configManager, type ZoteroConfig, appConfig, updateEnvConfig } from '@z
 import { getRawSQLite } from '@zotero-headless/database';
 import { useShellState } from '../hooks/useShellState.js';
 import { t } from '../i18n.js';
+import { TRIANGLE_UP_LARGE, TRIANGLE_DOWN_LARGE, POINTER } from '../constants/figures.js';
 
 interface ConfigItem {
   key: string;
@@ -414,14 +415,14 @@ export function ConfigPanel() {
         if (row.kind === 'scrollUp') {
           return (
             <Box key="__scroll_up">
-              <Text color="gray">{`  ▲ ${row.count} more above`}</Text>
+              <Text color="gray">{`  ${TRIANGLE_UP_LARGE} ${row.count} more above`}</Text>
             </Box>
           );
         }
         if (row.kind === 'scrollDown') {
           return (
             <Box key="__scroll_down">
-              <Text color="gray">{`  ▼ ${row.count} more below`}</Text>
+              <Text color="gray">{`  ${TRIANGLE_DOWN_LARGE} ${row.count} more below`}</Text>
             </Box>
           );
         }
@@ -429,7 +430,7 @@ export function ConfigPanel() {
         const { item, realIndex } = row;
         const isSelected = realIndex === selectedIndex;
         const isEditing = view === 'editing' && isSelected;
-        const prefix = isSelected ? '> ' : '  ';
+        const prefix = isSelected ? `${POINTER} ` : '  ';
         const keyPadded = item.key.padEnd(maxKeyLen + 2);
 
         return (

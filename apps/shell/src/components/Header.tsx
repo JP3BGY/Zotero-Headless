@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text, useStdout } from 'ink';
 import { t } from '../i18n.js';
+import { LINE } from '../constants/figures.js';
 
 export function Header() {
   return (
@@ -26,7 +27,7 @@ export function Divider({ title }: { title?: string } = {}) {
   if (!title) {
     return (
       <Box>
-        <Text color="gray">{'─'.repeat(width)}</Text>
+        <Text color="gray">{LINE.repeat(width)}</Text>
       </Box>
     );
   }
@@ -39,9 +40,9 @@ export function Divider({ title }: { title?: string } = {}) {
 
   return (
     <Box>
-      <Text color="gray">{'─'.repeat(left)}</Text>
+      <Text color="gray">{LINE.repeat(left)}</Text>
       <Text color="white">{titleStr}</Text>
-      <Text color="gray">{'─'.repeat(right)}</Text>
+      <Text color="gray">{LINE.repeat(right)}</Text>
     </Box>
   );
 }

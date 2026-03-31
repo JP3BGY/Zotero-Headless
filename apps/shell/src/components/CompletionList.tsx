@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { useShellState } from '../hooks/useShellState.js';
+import { POINTER_SMALL } from '../constants/figures.js';
 
 export const CompletionList = React.memo(function CompletionList() {
   const { state } = useShellState();
@@ -20,7 +21,7 @@ export const CompletionList = React.memo(function CompletionList() {
         <>
           {suggestions.map((suggestion) => (
             <Box key={suggestion.name}>
-              <Text color="gray">  </Text>
+              <Text color="gray">  {POINTER_SMALL} </Text>
               <Text color="green" bold>{suggestion.name.padEnd(nameWidth)}</Text>
               <Text color="gray">{suggestion.description}</Text>
             </Box>
@@ -31,7 +32,7 @@ export const CompletionList = React.memo(function CompletionList() {
         <>
           {itemKeySuggestions.map((item) => (
             <Box key={item.key}>
-              <Text color="gray">  </Text>
+              <Text color="gray">  {POINTER_SMALL} </Text>
               <Text color="cyan" bold>{item.key.padEnd(keyWidth)}</Text>
               <Text color="white">{item.title}</Text>
               <Text color="gray"> ({item.itemType})</Text>

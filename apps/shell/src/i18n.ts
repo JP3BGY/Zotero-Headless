@@ -1,3 +1,5 @@
+import { TRIANGLE_RIGHT, WARNING } from './constants/figures.js';
+
 const lang = process.env.ZOTERO_LANG || 'zh';
 export const isEnglish = lang === 'en';
 
@@ -20,9 +22,9 @@ export const t = {
   configTitle: isEnglish ? 'Zotero Shell Configuration' : 'Zotero Shell 配置',
   configHint: isEnglish ? '↑↓=navigate  Enter=edit  Esc=back' : '↑↓=导航  Enter=编辑  Esc=返回',
   configRestartTag: isEnglish ? 'restart to apply' : '重启生效',
-  configRestartHint: isEnglish ? '⚠ Some changes require a restart to take effect.' : '⚠ 部分配置修改需要重启后生效。',
+  configRestartHint: isEnglish ? `${WARNING} Some changes require a restart to take effect.` : `${WARNING} 部分配置修改需要重启后生效。`,
   configSaved: isEnglish ? 'Configuration saved' : '配置已保存',
-  collapsedLines: (n: number) => isEnglish ? `▸ ${n} lines collapsed` : `▸ ${n} 行已折叠`,
+  collapsedLines: (n: number) => isEnglish ? `${TRIANGLE_RIGHT} ${n} lines collapsed` : `${TRIANGLE_RIGHT} ${n} 行已折叠`,
   help: isEnglish ? `
 Zotero Shell Help
 

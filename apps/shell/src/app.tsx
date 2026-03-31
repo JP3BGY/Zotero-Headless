@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box } from 'ink';
 import { Divider } from './components/Header.js';
 import { OutputArea } from './components/OutputArea.js';
 import { InputPrompt } from './components/InputPrompt.js';
