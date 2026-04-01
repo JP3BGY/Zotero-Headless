@@ -158,15 +158,24 @@ export interface DeleteOptions {
 
 // ============ Annotation 相关 ============
 
+export interface AnnotationPosition {
+  pageIndex: number;
+  rects?: number[][];
+  paths?: number[][];
+  width?: number;
+  height?: number;
+}
+
 export interface Annotation {
   key: string;
   parentAttachmentKey: string;
-  annotationType: string;  // 'highlight' | 'note' | 'image' | 'ink' | 'underline'
+  annotationType: string;  // 'highlight' | 'note' | 'image' | 'ink' | 'underline' | 'text'
   annotationText?: string;
   annotationComment?: string;
   annotationColor?: string;
   annotationPageLabel?: string;
   annotationSortIndex?: string;
+  annotationPosition?: AnnotationPosition;
   tags?: Tag[];
 }
 
@@ -252,6 +261,62 @@ export class SyncError extends ZoteroError {
   constructor(message: string, public phase: string) {
     super(message, 'SYNC_ERROR', { phase });
   }
+}
+
+// ============ 附件内容 ============
+
+export interface AttachmentContent {
+  key: string;
+  filename: string;
+  contentType: string;
+  format: 'markdown' | 'text';
+  content: string;
+  totalLength: number;
+  offset: number;
+  limit: number;
+  truncated: boolean;
+  extractedAt: number;
+  cached: boolean;
+}
+
+export interface GetAttachmentContentOptions {
+  format?: 'markdown' | 'text';
+  /** Character offset for pagination */
+  offset?: number;
+  /** Max characters to return (default: 100000) */
+  limit?: number;
+  /** Force re-extraction, bypassing cache */
+  noCache?: boolean;
+}
+
+export interface AttachmentInfo {
+  key: string;
+  parentItemKey: string;
+  filename: string | null;
+  contentType: string | null;
+  url: string | null;
+  localPath: string | null;
+  webdavSynced: boolean;
+}
+
+export interface RenderAttachmentPagesOptions {
+  /** Scale factor for rendering (default: 2 for ~144 DPI) */
+  scale?: number;
+  /** Specific pages to render (1-indexed). If omitted, renders all pages. */
+  pages?: number[];
+  /** Output image format (default: 'png') */
+  imageFormat?: 'png' | 'jpeg';
+  /** JPEG quality 1-100 (default: 85) */
+  quality?: number;
+}
+
+export interface RenderedAttachmentPage {
+  pageNumber: number;
+  width: number;
+  height: number;
+  imageFormat: 'png' | 'jpeg';
+  /** Base64-encoded image data */
+  dataBase64: string;
 }
 
 // ============ Agent 专用 ============

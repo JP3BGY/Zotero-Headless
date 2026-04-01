@@ -37,5 +37,13 @@ export {
   initConfig
 } from './config.js';
 
+// 附件内容
+export {
+  getAttachmentContent,
+  listAttachments,
+  renderAttachmentPages,
+  getAnnotationImage,
+} from './attachments.js';
+
 // 版本
 export const VERSION = '1.0.0';

@@ -377,6 +377,19 @@ export async function getAnnotations(
   // Parse and filter annotations
   let result: Annotation[] = allAnnotations.map((row: any) => {
     const d = parseItemData(row.rawJson);
+
+    // Parse annotationPosition (stored as JSON string by Zotero API)
+    let annotationPosition: any;
+    if (d.annotationPosition) {
+      try {
+        annotationPosition = typeof d.annotationPosition === 'string'
+          ? JSON.parse(d.annotationPosition)
+          : d.annotationPosition;
+      } catch {
+        // Ignore malformed position data
+      }
+    }
+
     return {
       key: row.key,
       parentAttachmentKey: d.parentItem || '',
@@ -386,6 +399,7 @@ export async function getAnnotations(
       annotationColor: d.annotationColor || undefined,
       annotationPageLabel: d.annotationPageLabel || undefined,
       annotationSortIndex: d.annotationSortIndex || undefined,
+      annotationPosition: annotationPosition || undefined,
       tags: d.tags as any || undefined,
     };
   });
