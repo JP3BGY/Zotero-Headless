@@ -229,6 +229,77 @@ async function executeAttachmentFind(args: string[]) {
   }
 }
 
+async function executeAttachmentRead(args: string[]) {
+  if (!args[0]) {
+    console.log('Usage: zotero attachment read <key> [--format markdown|text] [--max-length N]');
+    console.log('       zotero attachment read <key> --render [--pages 1,2,3] [--scale 2] [--output-dir ./out]');
+    return;
+  }
+
+  await initModules();
+
+  const key = args[0];
+  let format: 'markdown' | 'text' | undefined;
+  let maxLength: number | undefined;
+  let render = false;
+  let pages: number[] | undefined;
+  let scale: number | undefined;
+  let outputDir: string | undefined;
+  let imageFormat: 'png' | 'jpeg' | undefined;
+
+  for (let i = 1; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--format' && args[i + 1]) {
+      const val = args[++i];
+      if (val === 'markdown' || val === 'text') format = val;
+    } else if (arg === '--max-length' && args[i + 1]) {
+      maxLength = parseInt(args[++i]) || undefined;
+    } else if (arg === '--render') {
+      render = true;
+    } else if (arg === '--pages' && args[i + 1]) {
+      pages = args[++i].split(',').map(p => parseInt(p.trim())).filter(p => !isNaN(p));
+    } else if (arg === '--scale' && args[i + 1]) {
+      scale = parseFloat(args[++i]) || undefined;
+    } else if (arg === '--output-dir' && args[i + 1]) {
+      outputDir = args[++i];
+    } else if (arg === '--image-format' && args[i + 1]) {
+      const val = args[++i];
+      if (val === 'png' || val === 'jpeg') imageFormat = val;
+    }
+  }
+
+  try {
+    const { ContentExtractor } = await import('@zotero-headless/content-extractor');
+    const extractor = new ContentExtractor();
+
+    if (render) {
+      const fs = await import('fs');
+      const path = await import('path');
+      const renderedPages = await extractor.renderPages(key, { pages, scale, imageFormat });
+
+      // Determine output directory
+      const dir = outputDir || process.cwd();
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      for (const page of renderedPages) {
+        const filename = `${key}_page${page.pageNumber}.${page.imageFormat}`;
+        const filePath = path.join(dir, filename);
+        fs.writeFileSync(filePath, page.data);
+        console.log(`${symbols.success} ${filePath} (${page.width}x${page.height})`);
+      }
+      console.log(`\nRendered ${renderedPages.length} page(s)`);
+    } else {
+      const result = await extractor.extract(key, { format, maxLength });
+      process.stdout.write(result.text);
+      if (!result.text.endsWith('\n')) process.stdout.write('\n');
+    }
+  } catch (error: any) {
+    console.error(`${symbols.error} ${error.message}`);
+  }
+}
+
 export const attachmentCommands: Command[] = [
   {
     name: 'attachment',
@@ -239,7 +310,7 @@ export const attachmentCommands: Command[] = [
       'attachment-dedup', 'attdedup',
       'find-fulltext', 'findpdf',
     ],
-    description: 'Attachment management. Subcommands: list (default), download, open, dedup, find',
+    description: 'Attachment management. Subcommands: list (default), download, open, dedup, find, read',
     options: [
       { name: '--item', description: 'Filter by parent item key (list subcommand)', value: '<key>' },
       { name: '--limit', alias: '-l', description: 'Limit results', value: '<N>' },
@@ -260,6 +331,12 @@ export const attachmentCommands: Command[] = [
       'zotero attachment find --all --limit 10',
       'zotero attachment find --all --dry-run',
       'zotero attachment find ABC123 --methods oa,doi',
+      'zotero attachment read ABC123',
+      'zotero attachment read ABC123 --format markdown',
+      'zotero attachment read ABC123 --max-length 50000',
+      'zotero attachment read ABC123 --render',
+      'zotero attachment read ABC123 --render --pages 1,2,3',
+      'zotero attachment read ABC123 --render --scale 3 --output-dir ./images',
     ],
     execute: async (args, invokedAs) => {
       // Resolve subcommand from alias or first arg
@@ -269,7 +346,7 @@ export const attachmentCommands: Command[] = [
       if (subcommand) {
         subArgs = args;
       } else {
-        const validSubs = ['list', 'download', 'open', 'dedup', 'find'];
+        const validSubs = ['list', 'download', 'open', 'dedup', 'find', 'read'];
         if (validSubs.includes(args[0])) {
           subcommand = args[0];
           subArgs = args.slice(1);
@@ -291,6 +368,8 @@ export const attachmentCommands: Command[] = [
           return executeAttachmentDedup(subArgs);
         case 'find':
           return executeAttachmentFind(subArgs);
+        case 'read':
+          return executeAttachmentRead(subArgs);
       }
     }
   },

@@ -25,6 +25,7 @@
     "@types/jsdom": "^27.0.0",
     "@types/marked": "^6.0.0",
     "@types/tmp": "^0.2.6",
+    "@zotero-headless/content-extractor": "workspace:*",
     "@zotero-headless/translator": "workspace:*",
     "@zotero-headless/api": "workspace:*",
     "@zotero-headless/attachment-manager": "file:../../packages/attachment-manager",
