@@ -7,14 +7,16 @@ import { useKeybindings } from './useKeybindings.js';
 import { executeCommand, highlightSearchResult, parseCommand } from '../commands.js';
 import { configManager, appConfig } from '@zotero-headless/core';
 import { t } from '../i18n.js';
+import type { OutputLine } from '../types.js';
 import type { LogLevel } from '../types.js';
 
 const DELETE_COMMANDS = ['delete', 'rm', 'del', 'remove'];
 const CTRL_C_WINDOW = 2000; // ms
+const FLUSH_INTERVAL = 16; // ~1 frame, batch output lines to avoid Ink Static blank-line issue
 
 export function useKeyHandler() {
   const { exit } = useApp();
-  const { state, dispatch, addLine } = useShellState();
+  const { state, dispatch, addLine, addLines } = useShellState();
   const lastCtrlCTime = useRef(0);
   const history = useHistory();
   const completions = useCompletions();
@@ -36,13 +38,32 @@ export function useKeyHandler() {
     let hasRealtimeOutput = false;
     let success = true;
 
+    // Buffer output lines and flush in batches (~1 frame interval).
+    // Ink's Static component swallows whitespace-only items during progressive
+    // rendering (one item per state update). Batching ensures blank lines are
+    // added alongside adjacent content in a single dispatch.
+    const buffer: Array<{ type: OutputLine['type']; content: string; logLevel?: LogLevel }> = [];
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const flushBuffer = () => {
+      flushTimer = null;
+      if (buffer.length > 0) {
+        hasRealtimeOutput = true;
+        addLines(buffer.splice(0));
+      }
+    };
+
     try {
       const result = await executeCommand(parsedCmd, args, (chunk: string, logLevel: LogLevel) => {
-        if (chunk && chunk.trim()) {
-          hasRealtimeOutput = true;
-          addLine('output', chunk, logLevel);
+        buffer.push({ type: 'output', content: chunk, logLevel });
+        if (!flushTimer) {
+          flushTimer = setTimeout(flushBuffer, FLUSH_INTERVAL);
         }
       });
+
+      // Flush any remaining buffered lines
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+      flushBuffer();
 
       success = result.exitCode === 0;
 
@@ -73,7 +94,7 @@ export function useKeyHandler() {
       dispatch({ type: 'END_COMMAND', success, autoCollapse: shouldCollapse });
       dispatch({ type: 'RESET_INPUT' });
     }
-  }, [dispatch, addLine]);
+  }, [dispatch, addLine, addLines]);
 
   const handleExecute = useCallback(async (cmd: string) => {
     // Handle pending confirmation — read callbacks from refs (always current)

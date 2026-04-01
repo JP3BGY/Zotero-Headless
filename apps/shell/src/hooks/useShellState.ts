@@ -24,6 +24,7 @@ export interface ShellState {
 export type ShellAction =
   | { type: 'SET_INPUT'; value: string }
   | { type: 'ADD_LINE'; lineType: OutputLine['type']; content: string; logLevel?: LogLevel }
+  | { type: 'ADD_LINES'; items: Array<{ lineType: OutputLine['type']; content: string; logLevel?: LogLevel }> }
   | { type: 'CLEAR_LINES' }
   | { type: 'SET_MODE'; mode: ShellState['mode'] }
   | { type: 'SET_SUGGESTIONS'; suggestions: CommandSuggestion[] }
@@ -65,6 +66,17 @@ function shellReducer(state: ShellState, action: ShellAction): ShellState {
         groupId: state.currentInputLineId ?? undefined,
       };
       return { ...state, lines: [...state.lines, line] };
+    }
+
+    case 'ADD_LINES': {
+      const newLines = action.items.map(item => ({
+        id: lineIdCounter++,
+        type: item.lineType,
+        content: item.content,
+        logLevel: item.logLevel ?? defaultLogLevel(item.lineType),
+        groupId: state.currentInputLineId ?? undefined,
+      } as OutputLine));
+      return { ...state, lines: [...state.lines, ...newLines] };
     }
 
     case 'CLEAR_LINES':
@@ -232,6 +244,7 @@ type ShellContextValue = {
   state: ShellState;
   dispatch: React.Dispatch<ShellAction>;
   addLine: (type: OutputLine['type'], content: string, logLevel?: LogLevel) => void;
+  addLines: (items: Array<{ type: OutputLine['type']; content: string; logLevel?: LogLevel }>) => void;
 };
 
 const ShellContext = createContext<ShellContextValue | null>(null);
@@ -247,7 +260,14 @@ export function useShellReducer() {
   const addLine = useCallback((type: OutputLine['type'], content: string, logLevel?: LogLevel) => {
     dispatch({ type: 'ADD_LINE', lineType: type, content, logLevel });
   }, []);
-  return { state, dispatch, addLine };
+  const addLines = useCallback((items: Array<{ type: OutputLine['type']; content: string; logLevel?: LogLevel }>) => {
+    if (items.length === 1) {
+      dispatch({ type: 'ADD_LINE', lineType: items[0].type, content: items[0].content, logLevel: items[0].logLevel });
+    } else if (items.length > 1) {
+      dispatch({ type: 'ADD_LINES', items: items.map(i => ({ lineType: i.type, content: i.content, logLevel: i.logLevel })) });
+    }
+  }, []);
+  return { state, dispatch, addLine, addLines };
 }
 
 export { ShellContext };

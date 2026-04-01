@@ -105,28 +105,38 @@ function captureConsoleOutput(
   let stdout = '';
   let stderr = '';
 
+  // Emit individual lines to onOutput, matching terminal line-by-line behavior.
+  // console.log("a\nb") in a terminal prints two visible lines; the TUI should too.
+  // console.log() prints a blank line; the TUI should preserve it as well.
+  const emit = (text: string, level: LogLevel) => {
+    if (!onOutput) return;
+    for (const line of text.split('\n')) {
+      onOutput(line, level);
+    }
+  };
+
   console.log = (...args: any[]) => {
-    const line = args.map(a => String(a)).join(' ') + '\n';
-    stdout += line;
-    if (onOutput) onOutput(line, 'info');
+    const text = args.map(a => String(a)).join(' ');
+    stdout += text + '\n';
+    emit(text, 'info');
   };
 
   console.error = (...args: any[]) => {
-    const line = args.map(a => String(a)).join(' ') + '\n';
-    stderr += line;
-    if (onOutput) onOutput(line, 'error');
+    const text = args.map(a => String(a)).join(' ');
+    stderr += text + '\n';
+    emit(text, 'error');
   };
 
   console.warn = (...args: any[]) => {
-    const line = args.map(a => String(a)).join(' ') + '\n';
-    stdout += line;
-    if (onOutput) onOutput(line, 'warn');
+    const text = args.map(a => String(a)).join(' ');
+    stdout += text + '\n';
+    emit(text, 'warn');
   };
 
   console.debug = (...args: any[]) => {
-    const line = args.map(a => String(a)).join(' ') + '\n';
-    stdout += line;
-    if (onOutput) onOutput(line, 'debug');
+    const text = args.map(a => String(a)).join(' ');
+    stdout += text + '\n';
+    emit(text, 'debug');
   };
 
   return fn()

@@ -40,10 +40,10 @@ function ShellUI() {
 }
 
 export function ZoteroShell() {
-  const { state, dispatch, addLine } = useShellReducer();
+  const { state, dispatch, addLine, addLines } = useShellReducer();
 
   return (
-    <ShellContext.Provider value={{ state, dispatch, addLine }}>
+    <ShellContext.Provider value={{ state, dispatch, addLine, addLines }}>
       <ShellUI />
     </ShellContext.Provider>
   );
