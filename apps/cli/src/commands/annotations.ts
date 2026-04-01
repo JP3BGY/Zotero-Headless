@@ -17,12 +17,16 @@ export const annotationCommands: Command[] = [
       { name: '--color', alias: '-c', description: 'Filter by annotation color', value: '<color>' },
       { name: '--type', alias: '-t', description: 'Filter by type (highlight, note, image, underline)', value: '<type>' },
       { name: '--format', alias: '-f', description: 'Output format (text|json|markdown)', value: '<fmt>' },
+      { name: '--render-images', alias: '-r', description: 'Render image annotations to PNG files' },
+      { name: '--output-dir', alias: '-o', description: 'Output directory for rendered images', value: '<dir>' },
     ],
     examples: [
       'zotero annotations ABC123',
       'zotero hl ABC123 --format markdown',
       'zotero annot ABC123 -t highlight',
       'zotero annot ABC123 -c yellow',
+      'zotero annot ABC123 -t image --render-images',
+      'zotero annot ABC123 --render-images --output-dir ./images',
     ],
     execute: async (args) => {
       await initModules();
@@ -41,6 +45,9 @@ export const annotationCommands: Command[] = [
       const colorFilter = colorIdx !== -1 ? args[colorIdx + 1] : undefined;
       const typeFilter = typeIdx !== -1 ? args[typeIdx + 1] : undefined;
       const format = fmtIdx !== -1 ? args[fmtIdx + 1] : 'text';
+      const renderImages = args.includes('--render-images') || args.includes('-r');
+      const outDirIdx = args.indexOf('--output-dir') !== -1 ? args.indexOf('--output-dir') : args.indexOf('-o');
+      const outputDir = outDirIdx !== -1 ? args[outDirIdx + 1] : process.cwd();
 
       try {
         const db = getDb()();
@@ -104,6 +111,17 @@ export const annotationCommands: Command[] = [
         // Parse annotation data
         let annotations = allAnnotations.map((row: any) => {
           const d = parseItemData(row.rawJson);
+
+          // Parse annotationPosition
+          let annotationPosition: any;
+          if (d.annotationPosition) {
+            try {
+              annotationPosition = typeof d.annotationPosition === 'string'
+                ? JSON.parse(d.annotationPosition)
+                : d.annotationPosition;
+            } catch { /* ignore */ }
+          }
+
           return {
             key: row.key,
             parentAttachmentKey: d.parentItem || '',
@@ -113,6 +131,7 @@ export const annotationCommands: Command[] = [
             annotationColor: d.annotationColor || '',
             annotationPageLabel: d.annotationPageLabel || '',
             annotationSortIndex: d.annotationSortIndex || '',
+            annotationPosition: annotationPosition || undefined,
             tags: d.tags || [],
           };
         });
@@ -140,6 +159,36 @@ export const annotationCommands: Command[] = [
 
         const itemTitle = item.title || '(no title)';
 
+        // Helper: render image annotation and save to disk
+        const renderImageAnnotation = async (annotKey: string, label: string): Promise<string | null> => {
+          if (!renderImages) return null;
+          try {
+            const { ContentExtractor } = await import('@zotero-headless/content-extractor');
+            const fsmod = await import('fs');
+            const pathmod = await import('path');
+
+            // Find annotation data from our list
+            const annot = annotations.find(a => a.key === annotKey);
+            if (!annot?.annotationPosition?.rects?.length) return null;
+
+            const extractor = new ContentExtractor();
+            const result = await extractor.renderAnnotationRegion(
+              annot.parentAttachmentKey,
+              annot.annotationPosition,
+            );
+
+            if (!fsmod.existsSync(outputDir)) {
+              fsmod.mkdirSync(outputDir, { recursive: true });
+            }
+            const filename = `annot_${annotKey}_p${label || '0'}.png`;
+            const filePath = pathmod.join(outputDir, filename);
+            fsmod.writeFileSync(filePath, result.data);
+            return filePath;
+          } catch {
+            return null;
+          }
+        };
+
         // Output based on format
         if (format === 'json') {
           console.log(JSON.stringify(annotations, null, 2));
@@ -154,6 +203,16 @@ export const annotationCommands: Command[] = [
             }
             if (a.annotationType === 'note') {
               console.log(`- **${t('commands.annotations.note')}**: ${a.annotationComment}\n`);
+            } else if (a.annotationType === 'image') {
+              const imgPath = await renderImageAnnotation(a.key, a.annotationPageLabel || '');
+              if (imgPath) {
+                console.log(`![Image annotation ${a.key}](${imgPath})\n`);
+              } else {
+                console.log(`- *[Image annotation: page ${a.annotationPageLabel || '?'}${renderImages ? '' : ', use --render-images to export'}]*\n`);
+              }
+              if (a.annotationComment) {
+                console.log(`${t('commands.annotations.comment')}: ${a.annotationComment}\n`);
+              }
             } else {
               if (a.annotationText) {
                 console.log(`> ${a.annotationText}\n`);
@@ -180,6 +239,16 @@ export const annotationCommands: Command[] = [
 
             if (a.annotationType === 'note') {
               console.log(`  ${page} ${dot} ${t('commands.annotations.note')}: ${a.annotationComment}`);
+            } else if (a.annotationType === 'image') {
+              const imgPath = await renderImageAnnotation(a.key, a.annotationPageLabel || '');
+              if (imgPath) {
+                console.log(`  ${page} ${dot} [Image] -> ${imgPath}`);
+              } else {
+                console.log(`  ${page} ${dot} [Image annotation${renderImages ? '' : ' - use --render-images to export'}]`);
+              }
+              if (a.annotationComment) {
+                console.log(`        ${t('commands.annotations.comment')}: ${a.annotationComment}`);
+              }
             } else {
               const text = a.annotationText ? `"${a.annotationText}"` : '';
               console.log(`  ${page} ${dot} ${text}`);
