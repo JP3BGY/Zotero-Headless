@@ -185,6 +185,18 @@ export const deletionLog = sqliteTable('deletion_log', {
   deletedAt: integer('deleted_at').notNull(),          // Timestamp of this delete operation
 });
 
+// ============ Content Cache 表 ============
+export const contentCache = sqliteTable('content_cache', {
+  attachmentKey: textCol('attachment_key').notNull(),
+  libraryId: integer('library_id').notNull(),
+  fileMd5: textCol('file_md5').notNull(),
+  content: textCol('content').notNull(),
+  format: textCol('format').notNull().default('text'),
+  extractedAt: integer('extracted_at').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.attachmentKey, table.libraryId] }),
+})) as any;
+
 // ============ Relations ============
 export const librariesRelations = relations(libraries, ({ many }) => ({
   items: many(items),
@@ -219,3 +231,5 @@ export type WebDAVConfig = typeof webdavConfig.$inferSelect;
 export type NewWebDAVConfig = typeof webdavConfig.$inferInsert;
 export type DeletionLog = typeof deletionLog.$inferSelect;
 export type NewDeletionLog = typeof deletionLog.$inferInsert;
+export type ContentCache = typeof contentCache.$inferSelect;
+export type NewContentCache = typeof contentCache.$inferInsert;

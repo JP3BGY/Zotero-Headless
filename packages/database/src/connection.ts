@@ -257,6 +257,23 @@ export function initializeDatabase(options?: { quiet?: boolean }): Database {
     console.warn(`${symbols.warning} Database migration warning:`, e);
   }
 
+  // Migration: Create content_cache table
+  try {
+    sqliteInstance.exec(`
+      CREATE TABLE IF NOT EXISTS content_cache (
+        attachment_key TEXT NOT NULL,
+        library_id INTEGER NOT NULL,
+        file_md5 TEXT NOT NULL,
+        content TEXT NOT NULL,
+        format TEXT NOT NULL DEFAULT 'text',
+        extracted_at INTEGER NOT NULL,
+        PRIMARY KEY (attachment_key, library_id)
+      );
+    `);
+  } catch (e) {
+    console.warn(`${symbols.warning} Database migration warning:`, e);
+  }
+
   if (!quiet) {
     console.log(`${symbols.success} Database initialized: ${dbPath}`);
   }
