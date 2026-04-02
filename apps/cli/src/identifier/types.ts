@@ -2,17 +2,9 @@
 /**
  * 标识符类型定义
  */
-export type IdentifierType = 'doi' | 'isbn' | 'pmid' | 'arxiv' | 'ads' | 'url';
 
-/**
- * 标识符接口
- */
-export interface Identifier {
-  type: IdentifierType;
-  value: string;
-  normalized: string;
-  confidence: number;  // 识别置信度（0-1）
-}
+// Re-export core types from shared package
+export type { IdentifierType, Identifier } from '@zotero-headless/types';
 
 /**
  * 元数据获取结果

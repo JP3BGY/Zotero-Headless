@@ -5,6 +5,10 @@
 export { parseItemData, parseRawJson, updateItemData, extractDenormalizedColumns } from './raw-json.js';
 export type { ZoteroItemData, ZoteroApiResponse, RawJsonContent } from './raw-json.js';
 
+// ============ Identifier ============
+export type { IdentifierType, Identifier } from './identifier.js';
+export { IdentifierParser } from './identifier-parser.js';
+
 // ============ Item Types ============
 
 export type ItemType = 
