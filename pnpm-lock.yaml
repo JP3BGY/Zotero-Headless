@@ -53,6 +53,9 @@ importers:
       '@zotero-headless/sync-engine':
         specifier: workspace:*
         version: link:../../packages/sync-engine
+      '@zotero-headless/translator':
+        specifier: workspace:*
+        version: link:../../packages/translator
       '@zotero-headless/types':
         specifier: workspace:*
         version: link:../../packages/types

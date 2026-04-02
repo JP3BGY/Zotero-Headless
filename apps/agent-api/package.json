@@ -21,6 +21,7 @@
     "@zotero-headless/core": "workspace:*",
     "@zotero-headless/database": "workspace:*",
     "@zotero-headless/sync-engine": "workspace:*",
+    "@zotero-headless/translator": "workspace:*",
     "@zotero-headless/types": "workspace:*",
     "zod": "^4.3.6"
   },
