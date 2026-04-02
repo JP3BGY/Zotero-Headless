@@ -36,6 +36,17 @@ export {
   getAnnotations,
 } from './items.js';
 
+// 通过标识符添加
+export {
+  addById,
+  batchAddById,
+} from './add-by-id.js';
+export type {
+  AddByIdOptions,
+  AddByIdResult,
+  BatchAddByIdOptions,
+} from './add-by-id.js';
+
 // 批量操作
 export {
   batchCreate,
@@ -49,6 +60,10 @@ export {
   BATCH_TAG_LIMIT,
   BATCH_COLLECTION_LIMIT,
 } from './batch.js';
+
+// 导出
+export { exportItems } from './export.js';
+export type { ExportItemsOptions, ExportResult } from './export.js';
 
 // 同步
 export {
@@ -78,6 +93,16 @@ export {
 // 变更监听
 export { watchChanges } from './watch.js';
 export type { WatchOptions, WatchHandle, ChangeCallback } from './watch.js';
+
+// 工作流引擎
+export { createWorkflow } from './workflow.js';
+export type {
+  WorkflowStep,
+  WorkflowOptions,
+  WorkflowResult,
+  StepResult,
+  Workflow,
+} from './workflow.js';
 
 // 版本
 export const VERSION = '1.0.0';
