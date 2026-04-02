@@ -183,6 +183,8 @@ export interface Annotation {
 
 export interface BatchOptions {
   continueOnError?: boolean;
+  /** Max concurrent operations. Default 1 (sequential). Max 5. */
+  concurrency?: number;
   onProgress?: (progress: BatchProgress) => void;
 }
 
@@ -192,12 +194,40 @@ export interface BatchProgress {
   currentItem: string;
   succeeded: number;
   failed: number;
+  /** Percentage 0-100 */
+  percentage: number;
 }
 
 export interface BatchResult {
   succeeded: string[];
-  failed: Array<{ key: string; error: string }>;
+  failed: Array<{
+    key: string;
+    error: string;
+    code?: string;
+    recoverable?: boolean;
+    suggestion?: string;
+  }>;
   total: number;
+}
+
+// ============ 创建/更新相关 ============
+
+export interface CreateItemInput {
+  itemType: string;
+  title?: string;
+  creators?: Creator[];
+  tags?: Tag[];
+  collections?: string[];
+  [key: string]: unknown;
+}
+
+export interface CreateItemResult {
+  key: string;
+  item: Item;
+}
+
+export interface UpdateItemInput {
+  [key: string]: unknown;
 }
 
 // ============ 导出相关 ============
@@ -230,38 +260,19 @@ export interface WebDAVConfig {
 
 // ============ 错误类型 ============
 
-export class ZoteroError extends Error {
-  constructor(
-    message: string,
-    public code: string,
-    public details?: Record<string, any>
-  ) {
-    super(message);
-    this.name = 'ZoteroError';
-  }
-}
+export {
+  ErrorCode,
+  ZoteroError,
+  ItemNotFoundError,
+  ValidationError,
+  BatchLimitError,
+  SyncError,
+  ConfigError,
+  IdentifierNotFoundError,
+  RateLimitError,
+} from './errors.js';
 
-export class ItemNotFoundError extends ZoteroError {
-  constructor(public itemKey: string, suggestions?: string[]) {
-    super(
-      `Item not found: ${itemKey}`,
-      'ITEM_NOT_FOUND',
-      { itemKey, suggestions }
-    );
-  }
-}
-
-export class ValidationError extends ZoteroError {
-  constructor(message: string, public field?: string) {
-    super(message, 'VALIDATION_ERROR', { field });
-  }
-}
-
-export class SyncError extends ZoteroError {
-  constructor(message: string, public phase: string) {
-    super(message, 'SYNC_ERROR', { phase });
-  }
-}
+export type { ErrorCodeType } from './errors.js';
 
 // ============ 附件内容 ============
 

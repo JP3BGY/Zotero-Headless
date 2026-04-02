@@ -1,6 +1,6 @@
 /**
  * Zotero-Headless API
- * 
+ *
  * 程序化 API 入口
  * 为 AI Agent 和人类 CLI 提供统一的接口
  */
@@ -8,17 +8,47 @@
 // 类型定义
 export * from './types.js';
 
+// 错误类型
+export {
+  ErrorCode,
+  ZoteroError,
+  ItemNotFoundError,
+  ValidationError,
+  BatchLimitError,
+  SyncError,
+  ConfigError,
+  IdentifierNotFoundError,
+  RateLimitError,
+} from './errors.js';
+export type { ErrorCodeType } from './errors.js';
+
 // 文献管理
 export {
   listItems,
   searchItems,
   getItem,
   getItemOrThrow,
+  createItem,
+  updateItem,
   deleteItem,
   batchDelete,
   restoreItem,
-  getAnnotations
+  getAnnotations,
 } from './items.js';
+
+// 批量操作
+export {
+  batchCreate,
+  batchUpdate,
+  batchTag,
+  batchUntag,
+  batchAddToCollection,
+  batchRemoveFromCollection,
+  BATCH_CREATE_LIMIT,
+  BATCH_UPDATE_LIMIT,
+  BATCH_TAG_LIMIT,
+  BATCH_COLLECTION_LIMIT,
+} from './batch.js';
 
 // 同步
 export {
@@ -26,7 +56,7 @@ export {
   getSyncStatus,
   getConflicts,
   resolveConflict,
-  resolveAllConflicts
+  resolveAllConflicts,
 } from './sync.js';
 
 // 配置
@@ -34,7 +64,7 @@ export {
   getConfig,
   setConfig,
   validateApiKey,
-  initConfig
+  initConfig,
 } from './config.js';
 
 // 附件内容
@@ -44,6 +74,10 @@ export {
   renderAttachmentPages,
   getAnnotationImage,
 } from './attachments.js';
+
+// 变更监听
+export { watchChanges } from './watch.js';
+export type { WatchOptions, WatchHandle, ChangeCallback } from './watch.js';
 
 // 版本
 export const VERSION = '1.0.0';

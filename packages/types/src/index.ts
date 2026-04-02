@@ -139,6 +139,21 @@ export interface SyncResult {
   conflicts?: string[];
 }
 
+// ============ Key Generation ============
+
+/**
+ * Generate a random 8-character Zotero-compatible item key.
+ * Uses the same character set as Zotero (excluding 0, 1, O to avoid ambiguity).
+ */
+export function generateKey(): string {
+  const allowedKeyChars = '23456789ABCDEFGHIJKLMNPQRSTUVWXYZ';
+  return Array.from({ length: 8 }, () =>
+    allowedKeyChars.charAt(
+      Math.floor(Math.random() * allowedKeyChars.length)
+    )
+  ).join('');
+}
+
 // ============ Filter Types ============
 
 export interface ItemFilter {

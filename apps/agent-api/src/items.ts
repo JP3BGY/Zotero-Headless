@@ -5,7 +5,7 @@
  * 所有函数都是纯函数，不依赖全局状态
  */
 
-import { eq, like, desc, asc, and, isNull, sql, inArray } from 'drizzle-orm';
+import { eq, like, desc, asc, and, or, isNull, sql, inArray } from 'drizzle-orm';
 import type {
   Item,
   Annotation,
@@ -15,10 +15,14 @@ import type {
   SearchResult,
   DeleteOptions,
   BatchOptions,
-  BatchResult
+  BatchResult,
+  CreateItemInput,
+  CreateItemResult,
+  UpdateItemInput,
 } from './types.js';
-import { ItemNotFoundError, ValidationError, BATCH_DELETE_LIMIT } from './types.js';
-import { parseItemData } from '@zotero-headless/types';
+import { ItemNotFoundError, ValidationError, BatchLimitError, ZoteroError, BATCH_DELETE_LIMIT } from './types.js';
+import { ConfigError } from './errors.js';
+import { parseItemData, updateItemData, extractDenormalizedColumns, generateKey } from '@zotero-headless/types';
 
 // 延迟加载数据库模块
 let dbModule: any;
@@ -249,43 +253,47 @@ export async function batchDelete(
 ): Promise<BatchResult> {
   // Agent API 安全限制：批量删除数量上限
   if (keys.length > BATCH_DELETE_LIMIT) {
-    throw new ValidationError(
-      `Batch delete limit exceeded: ${keys.length} items requested, maximum is ${BATCH_DELETE_LIMIT}. Delete in smaller batches.`,
-      'keys'
-    );
+    throw new BatchLimitError(keys.length, BATCH_DELETE_LIMIT);
   }
 
   const succeeded: string[] = [];
-  const failed: Array<{ key: string; error: string }> = [];
-  
+  const failed: BatchResult['failed'] = [];
+
   for (let i = 0; i < keys.length; i++) {
     const key = keys[i];
-    
+
     try {
       await deleteItem(key, options);
       succeeded.push(key);
-      
-      if (options.onProgress) {
-        options.onProgress({
-          current: i + 1,
-          total: keys.length,
-          currentItem: key,
-          succeeded: succeeded.length,
-          failed: failed.length
-        });
-      }
     } catch (error) {
-      failed.push({ 
-        key, 
-        error: error instanceof Error ? error.message : String(error) 
-      });
-      
+      const entry: BatchResult['failed'][number] = {
+        key,
+        error: error instanceof Error ? error.message : String(error),
+      };
+      if (error instanceof ZoteroError) {
+        entry.code = error.code;
+        entry.recoverable = error.recoverable;
+        entry.suggestion = error.suggestion;
+      }
+      failed.push(entry);
+
       if (!options.continueOnError) {
         break;
       }
     }
+
+    if (options.onProgress) {
+      options.onProgress({
+        current: i + 1,
+        total: keys.length,
+        currentItem: key,
+        succeeded: succeeded.length,
+        failed: failed.length,
+        percentage: Math.round(((i + 1) / keys.length) * 100),
+      });
+    }
   }
-  
+
   return { succeeded, failed, total: keys.length };
 }
 
@@ -420,6 +428,101 @@ export async function getAnnotations(
   return result;
 }
 
+// ============ 创建/更新 ============
+
+/**
+ * 创建文献
+ *
+ * 接受 Zotero API 字段格式的输入，生成唯一 key 并写入数据库。
+ * 新创建的项目标记为 synced: false，需要执行 sync 同步到远程。
+ */
+export async function createItem(input: CreateItemInput): Promise<CreateItemResult> {
+  if (!input.itemType) {
+    throw new ValidationError('itemType is required', 'itemType');
+  }
+
+  const { getDatabase, items, libraries } = await getDb();
+  const db = getDatabase();
+
+  const library = await db.select().from(libraries).get();
+  if (!library) {
+    throw new ConfigError('No library found. Run sync first to initialize.');
+  }
+
+  const key = generateKey();
+  const now = Math.floor(Date.now() / 1000);
+
+  // Build the item data object (strip undefined values)
+  const itemData: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(input)) {
+    if (value !== undefined) {
+      itemData[field] = value;
+    }
+  }
+
+  const denormalized = extractDenormalizedColumns(itemData);
+  const rawJson = JSON.stringify({ data: itemData });
+
+  await db.insert(items).values({
+    key,
+    libraryId: library.id,
+    version: 0,
+    synced: false,
+    deleted: false,
+    createdAt: now,
+    updatedAt: now,
+    ...denormalized,
+    rawJson,
+  }).run();
+
+  const created = await getItem(key);
+  return { key, item: created! };
+}
+
+/**
+ * 更新文献
+ *
+ * 使用 updateItemData() 安全地修改 rawJson，
+ * 并刷新反范式化的数据库列。
+ */
+export async function updateItem(
+  key: string,
+  updates: UpdateItemInput,
+): Promise<Item> {
+  const { getDatabase, items } = await getDb();
+  const db = getDatabase();
+
+  const existing = await db.select()
+    .from(items)
+    .where(eq(items.key, key))
+    .get();
+
+  if (!existing) {
+    throw new ItemNotFoundError(key);
+  }
+
+  // Safely mutate rawJson via updateItemData
+  const updatedRawJson = updateItemData(existing.rawJson, (data: Record<string, unknown>) => {
+    for (const [field, value] of Object.entries(updates)) {
+      data[field] = value;
+    }
+  });
+
+  // Re-extract denormalized columns from the updated data
+  const updatedData = parseItemData(updatedRawJson);
+  const denormalized = extractDenormalizedColumns(updatedData);
+
+  const now = Math.floor(Date.now() / 1000);
+  await db.update(items).set({
+    ...denormalized,
+    rawJson: updatedRawJson,
+    synced: false,
+    updatedAt: now,
+  }).where(eq(items.key, key)).run();
+
+  return (await getItem(key))!;
+}
+
 // ============ 辅助函数 ============
 
 function normalizeItem(raw: any): Item {
@@ -457,7 +560,3 @@ function parseJson(value: any): any {
   }
 }
 
-// 简化版的 or 函数（drizzle 的 or 可能不可用）
-function or(...conditions: any[]) {
-  return sql`(${conditions.join(' OR ')})`;
-}
