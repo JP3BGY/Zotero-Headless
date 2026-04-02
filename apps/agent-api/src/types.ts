@@ -4,6 +4,9 @@
  * 为 Agent 和人类 CLI 提供统一的类型定义
  */
 
+// ============ 标识符类型（从共享包重导出）============
+export type { IdentifierType, Identifier } from '@zotero-headless/types';
+
 // ============ 基础类型 ============
 
 export interface Creator {
@@ -185,6 +188,8 @@ export interface BatchOptions {
   continueOnError?: boolean;
   /** Max concurrent operations. Default 1 (sequential). Max 5. */
   concurrency?: number;
+  /** If true, preview changes without writing to DB */
+  dryRun?: boolean;
   onProgress?: (progress: BatchProgress) => void;
 }
 
@@ -221,6 +226,11 @@ export interface CreateItemInput {
   [key: string]: unknown;
 }
 
+export interface CreateItemOptions {
+  /** If true, validate and build but skip DB insert */
+  dryRun?: boolean;
+}
+
 export interface CreateItemResult {
   key: string;
   item: Item;
@@ -228,6 +238,11 @@ export interface CreateItemResult {
 
 export interface UpdateItemInput {
   [key: string]: unknown;
+}
+
+export interface UpdateItemOptions {
+  /** If true, compute changes but skip DB write */
+  dryRun?: boolean;
 }
 
 // ============ 导出相关 ============

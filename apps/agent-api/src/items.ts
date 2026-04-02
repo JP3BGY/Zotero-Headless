@@ -17,8 +17,10 @@ import type {
   BatchOptions,
   BatchResult,
   CreateItemInput,
+  CreateItemOptions,
   CreateItemResult,
   UpdateItemInput,
+  UpdateItemOptions,
 } from './types.js';
 import { ItemNotFoundError, ValidationError, BatchLimitError, ZoteroError, BATCH_DELETE_LIMIT } from './types.js';
 import { ConfigError } from './errors.js';
@@ -436,7 +438,10 @@ export async function getAnnotations(
  * 接受 Zotero API 字段格式的输入，生成唯一 key 并写入数据库。
  * 新创建的项目标记为 synced: false，需要执行 sync 同步到远程。
  */
-export async function createItem(input: CreateItemInput): Promise<CreateItemResult> {
+export async function createItem(
+  input: CreateItemInput,
+  options?: CreateItemOptions,
+): Promise<CreateItemResult> {
   if (!input.itemType) {
     throw new ValidationError('itemType is required', 'itemType');
   }
@@ -463,6 +468,19 @@ export async function createItem(input: CreateItemInput): Promise<CreateItemResu
   const denormalized = extractDenormalizedColumns(itemData);
   const rawJson = JSON.stringify({ data: itemData });
 
+  // Dry-run: return preview without writing to DB
+  if (options?.dryRun) {
+    const previewItem = normalizeItem({
+      key,
+      version: 0,
+      itemType: input.itemType,
+      ...denormalized,
+      rawJson,
+      deleted: false,
+    });
+    return { key: `<preview:${key}>`, item: previewItem };
+  }
+
   await db.insert(items).values({
     key,
     libraryId: library.id,
@@ -488,6 +506,7 @@ export async function createItem(input: CreateItemInput): Promise<CreateItemResu
 export async function updateItem(
   key: string,
   updates: UpdateItemInput,
+  options?: UpdateItemOptions,
 ): Promise<Item> {
   const { getDatabase, items } = await getDb();
   const db = getDatabase();
@@ -511,6 +530,15 @@ export async function updateItem(
   // Re-extract denormalized columns from the updated data
   const updatedData = parseItemData(updatedRawJson);
   const denormalized = extractDenormalizedColumns(updatedData);
+
+  // Dry-run: return preview without writing to DB
+  if (options?.dryRun) {
+    return normalizeItem({
+      ...existing,
+      ...denormalized,
+      rawJson: updatedRawJson,
+    });
+  }
 
   const now = Math.floor(Date.now() / 1000);
   await db.update(items).set({
