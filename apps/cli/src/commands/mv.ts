@@ -216,6 +216,38 @@ export const mvCommands: Command[] = [
       } else {
         console.log(`${symbols.success} Moved item "${title}" → ${destCollection!.path}`);
       }
+
+      // 检测是否为分类修正
+      if (destCollection && !isRoot) {
+        try {
+          const { classificationLog } = await import('@zotero-headless/database');
+          const { desc: descOrder } = await import('drizzle-orm');
+          const recent = await db.select()
+            .from(classificationLog)
+            .where(eq(classificationLog.itemKey, sourcePath))
+            .orderBy(descOrder(classificationLog.createdAt))
+            .limit(1)
+            .get();
+
+          if (recent && recent.recommendedCollectionKey !== destCollection.key) {
+            await db.insert(classificationLog).values({
+              itemKey: sourcePath,
+              libraryId: library.id,
+              itemTitle: title,
+              recommendedCollectionKey: recent.recommendedCollectionKey,
+              recommendedCollectionName: recent.recommendedCollectionName,
+              chosenCollectionKey: destCollection.key,
+              chosenCollectionName: destCollection.name,
+              score: recent.score,
+              strategyScoresJson: recent.strategyScoresJson,
+              weightsJson: recent.weightsJson,
+              source: 'mv',
+              isCorrection: true,
+              createdAt: Math.floor(Date.now() / 1000),
+            }).run();
+          }
+        } catch { /* never block mv */ }
+      }
     },
   },
 ];
