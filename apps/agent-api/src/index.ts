@@ -94,6 +94,26 @@ export {
 export { watchChanges } from './watch.js';
 export type { WatchOptions, WatchHandle, ChangeCallback } from './watch.js';
 
+// 智能分类
+export {
+  classifyItem,
+  classifyBatch,
+  buildCollectionProfiles,
+  exportTrainingData,
+  trainWeights,
+  invalidateProfileCache,
+} from './classify.js';
+export type {
+  ClassifyOptions,
+  ClassifyBatchOptions,
+  ClassifyResult,
+  ClassifyBatchResult,
+  ClassifyRecommendation,
+  CollectionProfile,
+  ClassificationLogEntry,
+  TrainResult,
+} from './classify.js';
+
 // 工作流引擎
 export { createWorkflow } from './workflow.js';
 export type {
