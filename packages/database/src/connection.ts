@@ -274,6 +274,32 @@ export function initializeDatabase(options?: { quiet?: boolean }): Database {
     console.warn(`${symbols.warning} Database migration warning:`, e);
   }
 
+  // Migration: Create classification_log table
+  try {
+    sqliteInstance.exec(`
+      CREATE TABLE IF NOT EXISTS classification_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_key TEXT NOT NULL,
+        library_id INTEGER NOT NULL,
+        item_title TEXT,
+        recommended_collection_key TEXT NOT NULL,
+        recommended_collection_name TEXT,
+        chosen_collection_key TEXT,
+        chosen_collection_name TEXT,
+        score INTEGER,
+        strategy_scores_json TEXT,
+        weights_json TEXT,
+        source TEXT NOT NULL,
+        is_correction INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_classification_log_item ON classification_log(item_key);
+      CREATE INDEX IF NOT EXISTS idx_classification_log_time ON classification_log(created_at);
+    `);
+  } catch (e) {
+    console.warn(`${symbols.warning} Database migration warning:`, e);
+  }
+
   if (!quiet) {
     console.log(`${symbols.success} Database initialized: ${dbPath}`);
   }

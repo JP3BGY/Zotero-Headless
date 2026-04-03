@@ -197,6 +197,24 @@ export const contentCache = sqliteTable('content_cache', {
   pk: primaryKey({ columns: [table.attachmentKey, table.libraryId] }),
 })) as any;
 
+// ============ Classification Log 表 ============
+export const classificationLog = sqliteTable('classification_log', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  itemKey: textCol('item_key').notNull(),
+  libraryId: integer('library_id').notNull(),
+  itemTitle: textCol('item_title'),
+  recommendedCollectionKey: textCol('recommended_collection_key').notNull(),
+  recommendedCollectionName: textCol('recommended_collection_name'),
+  chosenCollectionKey: textCol('chosen_collection_key'),
+  chosenCollectionName: textCol('chosen_collection_name'),
+  score: integer('score'),
+  strategyScoresJson: textCol('strategy_scores_json'),
+  weightsJson: textCol('weights_json'),
+  source: textCol('source').notNull(),
+  isCorrection: integer('is_correction', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at').notNull(),
+}) as any;
+
 // ============ Relations ============
 export const librariesRelations = relations(libraries, ({ many }) => ({
   items: many(items),
@@ -233,3 +251,5 @@ export type DeletionLog = typeof deletionLog.$inferSelect;
 export type NewDeletionLog = typeof deletionLog.$inferInsert;
 export type ContentCache = typeof contentCache.$inferSelect;
 export type NewContentCache = typeof contentCache.$inferInsert;
+export type ClassificationLog = typeof classificationLog.$inferSelect;
+export type NewClassificationLog = typeof classificationLog.$inferInsert;

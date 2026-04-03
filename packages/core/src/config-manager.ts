@@ -52,6 +52,26 @@ export interface ZoteroConfig {
     }>;
   };
 
+  // Classify settings
+  classify?: {
+    threshold?: number;
+    maxRecommendations?: number;
+    weights?: {
+      tag?: number;
+      author?: number;
+      journal?: number;
+      content?: number;
+    };
+    excludeCollections?: string[];
+    autoApply?: boolean;
+    rules?: Array<{
+      authors?: string[];
+      journals?: string[];
+      tags?: string[];
+      collection: string;
+    }>;
+  };
+
   // Shell keybindings
   keybindings?: {
     submit?: string;       // default: "enter"
@@ -83,6 +103,19 @@ const DEFAULT_CONFIG: ZoteroConfig = {
   shortcuts: {},
   delete: {
     trashRetentionDays: 7,
+  },
+  classify: {
+    threshold: 0.3,
+    maxRecommendations: 3,
+    weights: {
+      tag: 0.5,
+      author: 0.15,
+      journal: 0.15,
+      content: 0.2,
+    },
+    excludeCollections: [],
+    autoApply: false,
+    rules: [],
   },
   keybindings: {
     submit: 'enter',
