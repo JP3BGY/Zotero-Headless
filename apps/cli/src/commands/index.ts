@@ -32,6 +32,7 @@ import { helpCommands } from './help.js';
 import { shellCommands } from './shell.js';
 import { importCommands } from './import-cmd.js';
 import { mvCommands } from './mv.js';
+import { classifyCommands } from './classify.js';
 
 export const commands: Command[] = [
   ...syncCommands,
@@ -65,4 +66,5 @@ export const commands: Command[] = [
   ...webdavCommands,
   ...importCommands,
   ...mvCommands,
+  ...classifyCommands,
 ];
