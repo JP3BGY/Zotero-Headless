@@ -72,6 +72,13 @@ export interface ZoteroConfig {
     }>;
   };
 
+  // Plugin settings
+  plugins?: Record<string, {
+    enabled?: boolean;
+    source?: string;           // npm package name or local path
+    [key: string]: unknown;    // plugin-specific config
+  }>;
+
   // Shell keybindings
   keybindings?: {
     submit?: string;       // default: "enter"
@@ -117,6 +124,7 @@ const DEFAULT_CONFIG: ZoteroConfig = {
     autoApply: false,
     rules: [],
   },
+  plugins: {},
   keybindings: {
     submit: 'enter',
     historyUp: 'up',
