@@ -84,9 +84,26 @@ export async function main() {
     }
   }
 
-  const command = commands.find(c =>
+  let command = commands.find(c =>
     c.name === commandName || c.aliases?.includes(commandName)
   );
+
+  // 静态命令未匹配时，尝试从插件注册表查找
+  if (!command) {
+    try {
+      const { initModules, getPluginRegistry } = await import('./modules.js');
+      await initModules();
+      const registry = getPluginRegistry();
+      if (registry) {
+        const pluginCommands = registry.getCommands();
+        command = pluginCommands.find((c: any) =>
+          c.name === commandName || c.aliases?.includes(commandName)
+        );
+      }
+    } catch {
+      // 插件系统加载失败，忽略
+    }
+  }
 
   if (!command) {
     console.log(`${symbols.error} Unknown command: ${commandName}`);

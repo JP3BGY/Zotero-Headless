@@ -33,6 +33,7 @@ import { shellCommands } from './shell.js';
 import { importCommands } from './import-cmd.js';
 import { mvCommands } from './mv.js';
 import { classifyCommands } from './classify.js';
+import { pluginCommands } from './plugin.js';
 
 export const commands: Command[] = [
   ...syncCommands,
@@ -67,4 +68,5 @@ export const commands: Command[] = [
   ...importCommands,
   ...mvCommands,
   ...classifyCommands,
+  ...pluginCommands,
 ];

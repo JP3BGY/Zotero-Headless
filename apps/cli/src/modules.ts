@@ -13,6 +13,7 @@ let _attachmentManager: any;
 let _fullTextFinder: any;
 let _webdavConfig: any;
 let _logDeletion: any;
+let _pluginRegistry: any;
 
 export async function initModules() {
   if (!syncManager) {
@@ -39,6 +40,21 @@ export async function initModules() {
     _attachmentManager = attMod.attachmentManager;
     _fullTextFinder = new attMod.FullTextFinder();
   }
+  if (!_pluginRegistry) {
+    const pluginMod = await import('@zotero-headless/plugin');
+    _pluginRegistry = pluginMod.pluginRegistry;
+    // 注册内置插件
+    pluginMod.registerBuiltinPlugin('wechat-fetcher', () => import('@zotero-headless/plugin-wechat'));
+    // 提供配置访问
+    try {
+      const { configManager } = await import('@zotero-headless/core');
+      _pluginRegistry.setConfigProvider((name: string) => {
+        const plugins = configManager.get('plugins') ?? {};
+        return (plugins as any)[name] ?? {};
+      });
+    } catch {}
+    await _pluginRegistry.initialize();
+  }
 }
 
 export function getSyncManager() { return syncManager; }
@@ -53,3 +69,4 @@ export function getAttachmentManager() { return _attachmentManager; }
 export function getFullTextFinder() { return _fullTextFinder; }
 export function getWebdavConfig() { return _webdavConfig; }
 export function getLogDeletion() { return _logDeletion; }
+export function getPluginRegistry() { return _pluginRegistry; }

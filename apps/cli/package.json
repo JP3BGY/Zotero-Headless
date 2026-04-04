@@ -30,6 +30,8 @@
     "@zotero-headless/api": "workspace:*",
     "@zotero-headless/attachment-manager": "file:../../packages/attachment-manager",
     "@zotero-headless/core": "workspace:*",
+    "@zotero-headless/plugin": "workspace:*",
+    "@zotero-headless/plugin-wechat": "workspace:*",
     "@zotero-headless/database": "workspace:*",
     "@zotero-headless/sync-engine": "workspace:*",
     "@zotero-headless/types": "workspace:*",

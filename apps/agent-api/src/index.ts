@@ -114,6 +114,9 @@ export type {
   TrainResult,
 } from './classify.js';
 
+// 插件管理
+export { listPlugins, getPluginStatus } from './plugins.js';
+
 // 工作流引擎
 export { createWorkflow } from './workflow.js';
 export type {

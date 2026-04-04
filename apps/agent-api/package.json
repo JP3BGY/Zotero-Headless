@@ -19,6 +19,8 @@
   "dependencies": {
     "@zotero-headless/content-extractor": "workspace:*",
     "@zotero-headless/core": "workspace:*",
+    "@zotero-headless/plugin": "workspace:*",
+    "@zotero-headless/plugin-wechat": "workspace:*",
     "@zotero-headless/database": "workspace:*",
     "@zotero-headless/sync-engine": "workspace:*",
     "@zotero-headless/translator": "workspace:*",

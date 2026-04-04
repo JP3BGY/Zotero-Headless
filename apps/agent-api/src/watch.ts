@@ -114,6 +114,19 @@ export function watchChanges(
         });
 
         callback(events);
+
+        // 分发事件到插件事件处理器
+        try {
+          const { pluginRegistry } = await import('@zotero-headless/plugin');
+          for (const event of events) {
+            const handlers = pluginRegistry.getEventHandlers(event.type);
+            for (const handler of handlers) {
+              try {
+                await handler.handle(event as any, pluginRegistry.createProcessorContext(handler.name) as any);
+              } catch { /* 事件处理器失败不影响 watcher */ }
+            }
+          }
+        } catch { /* 插件系统不可用时静默跳过 */ }
       }
 
       lastPollTime = Math.floor(Date.now() / 1000);

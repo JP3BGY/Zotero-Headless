@@ -1,11 +1,12 @@
 // @ts-nocheck
 
 import type { Command } from '../types.js';
-import { initModules, getDb, getItems, getLibraries, getAttachments, getWebdavConfig, getAttachmentManager } from '../modules.js';
+import { initModules, getDb, getItems, getLibraries, getAttachments, getWebdavConfig, getAttachmentManager, getPluginRegistry } from '../modules.js';
 import { generateKey, getContentType } from '../utils.js';
 import { symbols } from '@zotero-headless/core';
 import { extractDenormalizedColumns } from '@zotero-headless/types';
 import { searchByIdentifier, translateFromUrl } from '@zotero-headless/translator';
+import type { ProcessorResult, ProcessorAttachment } from '@zotero-headless/plugin';
 
 // Result type for unified processing
 interface FetchResult {
@@ -105,14 +106,23 @@ WebDAV 同步:
           try {
             let item: any = null;
             let extra: any = undefined;
+            let pluginResult: ProcessorResult | null = null;
 
-            if (identifier.type === 'url' && (await import('../identifier/fetchers/wechat-fetcher.js')).WeChatFetcher.isWeChatURL(identifier.value)) {
-              // WeChat: use dedicated fetcher (needs special HTML processing)
-              const { WeChatFetcher } = await import('../identifier/fetchers/wechat-fetcher.js');
-              const fetcher = new WeChatFetcher({ maxConcurrent: 1, timeout: 30000, retries: 2, cacheTTL: 0 });
-              const result = await fetcher.fetchMetadata(identifier);
-              item = result.item;
-              extra = result.extra;
+            // 优先查找插件处理器
+            const registry = getPluginRegistry();
+            const processor = registry?.findContentProcessor(identifier);
+
+            if (processor) {
+              // 使用插件处理
+              const processorContext = registry.createProcessorContext(processor.name);
+              pluginResult = await processor.process(identifier, processorContext);
+              if (pluginResult.format === 'db-columns') {
+                item = pluginResult.item;
+                extra = { pluginAttachments: pluginResult.attachments, isPluginResult: true };
+              } else {
+                // zotero-api format
+                item = pluginResult.item;
+              }
             } else if (identifier.type === 'url') {
               // Generic URL: try web translator, fall back to DOI extraction
               try {
@@ -193,12 +203,12 @@ WebDAV 同步:
             const itemKey = generateKey();
             const now = Math.floor(Date.now() / 1000);
 
-            // Determine if item is from WeChat (old format) or translator (Zotero API format)
-            const isWeChatItem = result.extra?.isWeChatArticle;
+            // Determine if item is from plugin (db-columns) or translator (Zotero API format)
+            const isPluginDbColumns = result.extra?.isPluginResult;
 
             let dbValues: any;
-            if (isWeChatItem) {
-              // WeChat fetcher returns data in DB column format already
+            if (isPluginDbColumns) {
+              // Plugin returned data in DB column format
               dbValues = {
                 key: itemKey,
                 libraryId: library.id,
@@ -236,85 +246,78 @@ WebDAV 同步:
             const displayTitle = dbValues.title?.substring(0, 50) || result.item.title?.substring(0, 50) || '(无标题)';
             console.log(`   已添加: ${displayTitle}...`);
 
-            // 处理微信文章的 snapshot 附件
-            if (isWeChatItem && result.extra?.processedHtml) {
-              console.log(`   创建微信文章 snapshot...`);
+            // 处理插件附件
+            if (isPluginDbColumns && result.extra?.pluginAttachments?.length) {
+              const pluginAttachments = result.extra.pluginAttachments as ProcessorAttachment[];
+              for (const att of pluginAttachments) {
+                const attContent = typeof att.content === 'string' ? att.content : att.content.toString('utf-8');
+                console.log(`   创建插件附件: ${att.title}...`);
 
-              const crypto = await import('crypto');
-              const contentHash = result.extra.contentHash ||
-                crypto.createHash('md5').update(result.extra.processedHtml).digest('hex').substring(0, 16);
-              const uniqueFilename = `${contentHash}.html`;
-              const attKey = generateKey();
+                const crypto = await import('crypto');
+                const contentHash = crypto.createHash('md5').update(attContent).digest('hex').substring(0, 16);
+                const ext = att.contentType === 'text/html' ? '.html' : '';
+                const uniqueFilename = `${contentHash}${ext}`;
+                const attKey = generateKey();
 
-              const { appConfig } = await import('@zotero-headless/core');
-              const saveDir = path.join(appConfig.dataDir, 'downloads');
-              if (!fs.existsSync(saveDir)) {
-                fs.mkdirSync(saveDir, { recursive: true });
-              }
+                const { appConfig } = await import('@zotero-headless/core');
+                const saveDir = path.join(appConfig.dataDir, 'downloads');
+                if (!fs.existsSync(saveDir)) {
+                  fs.mkdirSync(saveDir, { recursive: true });
+                }
 
-              const htmlPath = path.join(saveDir, uniqueFilename);
-              fs.writeFileSync(htmlPath, result.extra.processedHtml);
+                const filePath = path.join(saveDir, uniqueFilename);
+                fs.writeFileSync(filePath, attContent);
 
-              const accessDate = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-              const sourceUrl = result.item.url || '';
+                const accessDate = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+                const sourceUrl = att.sourceUrl || '';
 
-              const attRawJson = {
-                data: {
+                const attRawJson = {
+                  data: {
+                    key: attKey,
+                    itemType: 'attachment',
+                    title: att.title,
+                    filename: uniqueFilename,
+                    contentType: att.contentType,
+                    charset: 'utf-8',
+                    parentItem: itemKey,
+                    linkMode: att.linkMode || 'imported_url',
+                    url: sourceUrl,
+                    accessDate: accessDate,
+                  },
+                };
+
+                await db.insert(items).values({
                   key: attKey,
+                  libraryId: library.id,
+                  version: 0,
+                  synced: false,
+                  deleted: false,
+                  createdAt: now,
+                  updatedAt: now,
                   itemType: 'attachment',
-                  title: 'Snapshot',
-                  filename: uniqueFilename,
-                  contentType: 'text/html',
-                  charset: 'utf-8',
-                  parentItem: itemKey,
-                  linkMode: 'imported_url',
+                  title: att.title,
                   url: sourceUrl,
-                  accessDate: accessDate
-                }
-              };
+                  rawJson: JSON.stringify(attRawJson),
+                }).run();
 
-              await db.insert(items).values({
-                key: attKey,
-                libraryId: library.id,
-                version: 0,
-                synced: false,
-                deleted: false,
-                createdAt: now,
-                updatedAt: now,
-                itemType: 'attachment',
-                title: 'Snapshot',
-                url: sourceUrl,
-                rawJson: JSON.stringify(attRawJson),
-              }).run();
+                await db.insert(attachments).values({
+                  key: attKey,
+                  parentItemKey: itemKey,
+                  libraryId: library.id,
+                  filename: uniqueFilename,
+                  contentType: att.contentType,
+                  fileType: ext || path.extname(uniqueFilename).toLowerCase(),
+                  path: filePath,
+                  version: 0,
+                  createdAt: now,
+                  updatedAt: now,
+                  deleted: false,
+                  size: attContent.length,
+                  webdavSynced: false,
+                  rawJson: JSON.stringify(attRawJson),
+                }).run();
 
-              await db.insert(attachments).values({
-                key: attKey,
-                parentItemKey: itemKey,
-                libraryId: library.id,
-                filename: uniqueFilename,
-                contentType: 'text/html',
-                fileType: '.html',
-                path: htmlPath,
-                version: 0,
-                createdAt: now,
-                updatedAt: now,
-                deleted: false,
-                size: result.extra.processedHtml.length,
-                webdavSynced: false,
-                rawJson: JSON.stringify(attRawJson),
-              }).run();
-
-              console.log(`      ${symbols.success} Snapshot: ${uniqueFilename} (${(result.extra.processedHtml.length / 1024).toFixed(1)} KB)`);
-
-              const wdc = await db.select().from(webdavConfig).get();
-              if (wdc?.autoSync) {
-                console.log(`      自动同步到 WebDAV (autoSync enabled)...`);
-                console.log(`      父条目将在下次 sync 时上传到 Zotero，然后附件自动关联`);
-              } else {
-                console.log(`      运行 "zotero sync" 上传条目，然后 "zotero webdav sync" 上传附件`);
-                if (!wdc) {
-                  console.log(`         或先配置: zotero webdav config <url> <user> <pass>`);
-                }
+                console.log(`      ${symbols.success} ${att.title}: ${uniqueFilename} (${(attContent.length / 1024).toFixed(1)} KB)`);
               }
             }
 
@@ -387,6 +390,50 @@ WebDAV 同步:
                 }
               } else if (!wdc?.autoSync && addedAttKeys.length > 0) {
                 console.log(`      运行 "zotero webdav sync" 上传这些附件`);
+              }
+            }
+
+            // 执行后置处理器
+            const postProcessors = registry?.getPostProcessors('after-create') ?? [];
+            if (postProcessors.length > 0) {
+              const { eq } = await import('drizzle-orm');
+              const postItem = {
+                key: itemKey,
+                itemType: dbValues.itemType || '',
+                title: dbValues.title || null,
+                tags: (() => { try { return JSON.parse(dbValues.tags || '[]'); } catch { return []; } })(),
+                creators: dbValues.creators || '[]',
+                collectionKeys: (() => { try { return JSON.parse(dbValues.collectionKeys || '[]'); } catch { return []; } })(),
+                url: dbValues.url || null,
+                doi: dbValues.doi || null,
+                source: pluginResult?.source,
+              };
+              for (const pp of postProcessors) {
+                try {
+                  const actions = await pp.process(postItem, registry.createProcessorContext(pp.name));
+                  for (const action of actions) {
+                    if (action.type === 'add-tags') {
+                      const merged = [...postItem.tags, ...action.tags];
+                      await db.update(items).set({
+                        tags: JSON.stringify(merged),
+                        updatedAt: Math.floor(Date.now() / 1000),
+                      }).where(eq(items.key, itemKey)).run();
+                      postItem.tags = merged;
+                      console.log(`      ${symbols.success} [${pp.name}] 添加标签: ${action.tags.map(t => t.tag).join(', ')}`);
+                    } else if (action.type === 'add-to-collection') {
+                      if (!postItem.collectionKeys.includes(action.collectionKey)) {
+                        postItem.collectionKeys.push(action.collectionKey);
+                        await db.update(items).set({
+                          collectionKeys: JSON.stringify(postItem.collectionKeys),
+                          updatedAt: Math.floor(Date.now() / 1000),
+                        }).where(eq(items.key, itemKey)).run();
+                        console.log(`      ${symbols.success} [${pp.name}] 添加到集合: ${action.collectionKey}`);
+                      }
+                    }
+                  }
+                } catch (ppErr: any) {
+                  console.log(`      !  [${pp.name}] 后置处理失败: ${ppErr.message}`);
+                }
               }
             }
           }

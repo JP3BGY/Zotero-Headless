@@ -12,7 +12,7 @@ import type {
   CreateItemInput,
 } from './types.js';
 import { ZoteroError, IdentifierNotFoundError, ValidationError } from './errors.js';
-import { createItem } from './items.js';
+import { createItem, updateItem } from './items.js';
 import { IdentifierParser, extractDenormalizedColumns } from '@zotero-headless/types';
 import type { Identifier } from '@zotero-headless/types';
 import { BATCH_CREATE_LIMIT } from './batch.js';
@@ -33,7 +33,7 @@ export interface AddByIdResult {
   key: string;
   item: Item;
   identifier: Identifier;
-  source: 'search' | 'web';
+  source: 'search' | 'web' | 'plugin';
 }
 
 export type BatchAddByIdOptions = BatchOptions & {
@@ -84,73 +84,106 @@ export async function addById(
     identifier = input;
   }
 
-  // 2. Fetch metadata
-  const { searchByIdentifier, translateFromUrl } = await getTranslator();
+  // 2. Fetch metadata — 优先查找插件处理器
   let translatedItem: any = null;
-  let source: 'search' | 'web' = 'search';
+  let source: 'search' | 'web' | 'plugin' = 'search';
+  let pluginDbColumns: Record<string, any> | null = null;
 
   try {
-    if (identifier.type === 'url') {
-      // URL path: try web translator, fallback to DOI extraction
-      source = 'web';
-      try {
-        const items = await translateFromUrl(identifier.normalized);
-        if (items.length > 0) translatedItem = items[0];
-      } catch (webErr: any) {
-        // Fallback: extract DOI from URL path
-        const doiMatch = identifier.normalized.match(/\/(10\.\d{4,9}\/[^\s?#]+)/);
-        if (doiMatch) {
-          const fullCandidate = doiMatch[1].replace(/\/+$/, '');
-          const segments = fullCandidate.split('/');
-          for (let len = segments.length; len >= 2; len--) {
-            const candidate = segments.slice(0, len).join('/');
-            try {
-              const items = await searchByIdentifier({ DOI: candidate });
-              if (items.length > 0) {
-                translatedItem = items[0];
-                source = 'search';
-                break;
-              }
-            } catch { /* try shorter candidate */ }
-          }
-        }
-        if (!translatedItem) throw webErr;
+    const { pluginRegistry } = await import('@zotero-headless/plugin');
+    const processor = pluginRegistry.findContentProcessor(identifier);
+
+    if (processor) {
+      const processorContext = pluginRegistry.createProcessorContext(processor.name);
+      const pluginResult = await processor.process(identifier, processorContext);
+      source = 'plugin';
+
+      if (pluginResult.format === 'db-columns') {
+        pluginDbColumns = pluginResult.item;
+      } else {
+        translatedItem = pluginResult.item;
       }
-    } else {
-      // DOI, ISBN, PMID, arXiv: use search translator
-      const searchParam: Record<string, string> = {};
-      switch (identifier.type) {
-        case 'doi': searchParam.DOI = identifier.normalized; break;
-        case 'isbn': searchParam.ISBN = identifier.normalized; break;
-        case 'pmid': searchParam.PMID = identifier.normalized; break;
-        case 'arxiv': searchParam.arXiv = identifier.normalized; break;
-        default: searchParam.DOI = identifier.normalized; break;
-      }
-      const items = await searchByIdentifier(searchParam);
-      if (items.length > 0) translatedItem = items[0];
     }
-  } catch (error) {
-    if (error instanceof ZoteroError) throw error;
+  } catch {
+    // 插件系统不可用时静默降级
+  }
+
+  // 2b. Fallback to built-in translators if no plugin matched
+  if (!translatedItem && !pluginDbColumns) {
+    const { searchByIdentifier, translateFromUrl } = await getTranslator();
+
+    try {
+      if (identifier.type === 'url') {
+        // URL path: try web translator, fallback to DOI extraction
+        source = 'web';
+        try {
+          const items = await translateFromUrl(identifier.normalized);
+          if (items.length > 0) translatedItem = items[0];
+        } catch (webErr: any) {
+          // Fallback: extract DOI from URL path
+          const doiMatch = identifier.normalized.match(/\/(10\.\d{4,9}\/[^\s?#]+)/);
+          if (doiMatch) {
+            const fullCandidate = doiMatch[1].replace(/\/+$/, '');
+            const segments = fullCandidate.split('/');
+            for (let len = segments.length; len >= 2; len--) {
+              const candidate = segments.slice(0, len).join('/');
+              try {
+                const items = await searchByIdentifier({ DOI: candidate });
+                if (items.length > 0) {
+                  translatedItem = items[0];
+                  source = 'search';
+                  break;
+                }
+              } catch { /* try shorter candidate */ }
+            }
+          }
+          if (!translatedItem) throw webErr;
+        }
+      } else {
+        // DOI, ISBN, PMID, arXiv: use search translator
+        const searchParam: Record<string, string> = {};
+        switch (identifier.type) {
+          case 'doi': searchParam.DOI = identifier.normalized; break;
+          case 'isbn': searchParam.ISBN = identifier.normalized; break;
+          case 'pmid': searchParam.PMID = identifier.normalized; break;
+          case 'arxiv': searchParam.arXiv = identifier.normalized; break;
+          default: searchParam.DOI = identifier.normalized; break;
+        }
+        const items = await searchByIdentifier(searchParam);
+        if (items.length > 0) translatedItem = items[0];
+      }
+    } catch (error) {
+      if (error instanceof ZoteroError) throw error;
+      throw new IdentifierNotFoundError(
+        identifier.type.toUpperCase(),
+        identifier.normalized,
+      );
+    }
+  }
+
+  if (!translatedItem && !pluginDbColumns) {
     throw new IdentifierNotFoundError(
       identifier.type.toUpperCase(),
       identifier.normalized,
     );
   }
 
-  if (!translatedItem) {
-    throw new IdentifierNotFoundError(
-      identifier.type.toUpperCase(),
-      identifier.normalized,
-    );
+  // 3. Handle plugin db-columns format (bypass translator pipeline)
+  if (pluginDbColumns) {
+    const result = await createItem(pluginDbColumns as any, { dryRun: options?.dryRun });
+    if (!options?.dryRun) {
+      await runPostProcessors(result.key, result.item, source);
+    }
+    return { key: result.key, item: result.item, identifier, source };
   }
 
-  // 3. Clean translator result
+  // 4. Clean translator result
   const zoteroData = { ...translatedItem };
   delete zoteroData.itemID;
   delete zoteroData.seeAlso;
   delete zoteroData.attachments;
 
-  // 4. Merge user-specified tags and collections
+  // 5. Merge user-specified tags and collections
   if (options?.tags?.length) {
     const existingTags = zoteroData.tags || [];
     zoteroData.tags = [...existingTags, ...options.tags];
@@ -160,16 +193,67 @@ export async function addById(
     zoteroData.collections = [...existingCols, ...options.collections];
   }
 
-  // 5. Create item (or preview)
+  // 6. Create item (or preview)
   const createInput: CreateItemInput = zoteroData;
   const result = await createItem(createInput, { dryRun: options?.dryRun });
 
-  return {
-    key: result.key,
-    item: result.item,
-    identifier,
-    source,
-  };
+  if (!options?.dryRun) {
+    await runPostProcessors(result.key, result.item, source);
+  }
+
+  return { key: result.key, item: result.item, identifier, source };
+}
+
+/**
+ * 执行已注册的 after-create 后置处理器
+ */
+async function runPostProcessors(
+  key: string,
+  item: Item,
+  source: string,
+): Promise<void> {
+  try {
+    const { pluginRegistry } = await import('@zotero-headless/plugin');
+    const postProcessors = pluginRegistry.getPostProcessors('after-create');
+    if (postProcessors.length === 0) return;
+
+    const postItem = {
+      key,
+      itemType: item.itemType || '',
+      title: item.title || null,
+      tags: item.tags || [],
+      creators: typeof item.creators === 'string' ? item.creators : JSON.stringify(item.creators || []),
+      collectionKeys: item.collections || [],
+      url: item.url || null,
+      doi: item.DOI || null,
+      source,
+    };
+
+    for (const pp of postProcessors) {
+      try {
+        const context = pluginRegistry.createProcessorContext(pp.name);
+        const actions = await pp.process(postItem, context as any);
+
+        for (const action of actions) {
+          if (action.type === 'add-tags' && action.tags.length > 0) {
+            const mergedTags = [...(postItem.tags as any[]), ...action.tags];
+            await updateItem(key, { tags: mergedTags });
+            postItem.tags = mergedTags;
+          } else if (action.type === 'add-to-collection') {
+            const cols = postItem.collectionKeys as string[];
+            if (!cols.includes(action.collectionKey)) {
+              cols.push(action.collectionKey);
+              await updateItem(key, { collections: cols });
+            }
+          }
+        }
+      } catch {
+        // 后置处理器失败不应阻塞主流程
+      }
+    }
+  } catch {
+    // 插件系统不可用时静默跳过
+  }
 }
 
 /**
