@@ -19,7 +19,7 @@
 
 **Zotero-Headless** 是一个 CLI 工具，可在服务器、Docker 容器、WSL 等无头环境中通过 Zotero Web API 管理文献库，无需运行桌面客户端。
 
-**主要功能**：双向增量同步、WebDAV 附件管理、DOI/ISBN/arXiv 等标识符导入、BibTeX/RIS/CSL 等 700+ 格式互转、PDF 全文查找、CSL 引用生成、重复检测与合并、Markdown 笔记编辑、交互式 Shell、中英文界面。
+**主要功能**：双向增量同步、WebDAV 附件管理、DOI/ISBN/arXiv 等标识符导入、BibTeX/RIS/CSL 等 700+ 格式互转、PDF 全文查找、附件内容提取（PDF/DOCX/EPUB）、CSL 引用生成、重复检测与合并、智能分类（基于标签/作者/期刊/内容分析）、Markdown 笔记编辑、插件系统、交互式 Shell、中英文界面。
 
 ---
 
@@ -129,6 +129,11 @@ zotero export -f bibtex -o library.bib     # 导出为 BibTeX
 zotero webdav config https://dav.example.com/dav user pass
 zotero webdav sync                     # 同步附件
 zotero attachment find --all           # 自动查找全文 PDF
+zotero attachment read ABCD1234        # 提取 PDF 文本
+
+# 分类
+zotero classify ABCD1234               # 智能推荐集合（dry-run）
+zotero classify --batch --apply        # 批量自动分类
 
 # 笔记
 zotero note add ABCD1234 "笔记内容，支持 **Markdown**"
@@ -282,6 +287,8 @@ zotero stats
 | `annotations --color <color>` | `-c` | 按颜色过滤 |
 | `annotations --type <type>` | `-t` | 按类型过滤（highlight/note/image/underline） |
 | `annotations --format <fmt>` | `-f` | 输出格式（text/json/markdown） |
+| `annotations --render-images` | `-r` | 将图片批注渲染为 PNG 文件 |
+| `annotations --output-dir <dir>` | `-o` | 渲染图片输出目录 |
 
 ### 附件
 
@@ -297,6 +304,15 @@ zotero stats
 | `attachment find --all` | `-a` | 为所有缺少 PDF 的条目查找 |
 | `attachment find --methods <list>` | `-m` | 查找方式（doi,oa,url,custom） |
 | `attachment find --dry-run` | `-n` | 预览模式 |
+| `attachment read <key>` | | 提取附件文本内容 |
+| `attachment read --format <fmt>` | | 输出格式（text/markdown） |
+| `attachment read --max-length <N>` | | 限制输出字符数 |
+| `attachment read --render` | | 将 PDF 渲染为图片 |
+| `attachment read --render --pages <list>` | | 渲染指定页（如 `1,2,3`） |
+| `attachment read --render --scale <N>` | | 渲染缩放倍数 |
+| `attachment read --render --output-dir <dir>` | | 图片输出目录 |
+
+`attachment read` 支持 PDF、DOCX、DOC、EPUB、HTML 格式，自动提取文本或转换为 Markdown。配合 `--render` 可将 PDF 页面渲染为 PNG/JPEG 图片。
 
 ### WebDAV
 
@@ -373,6 +389,83 @@ zotero webdav config https://cloud.example.com/remote.php/dav/files/user/zotero 
 | `related --add <key> <related-key>` | | 添加关联 |
 | `related --remove <key> <related-key>` | | 移除关联 |
 
+### 智能分类
+
+基于文献的标签、作者、期刊、内容等多维度分析，自动推荐条目应归入的集合。
+
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `classify <key>` | `cl` | 对单个条目进行分类推荐（默认 dry-run） |
+| `classify <key> --apply` | `-a` | 应用推荐的最佳分类 |
+| `classify <key> --learn` | | 应用并记录，用于后续学习 |
+| `classify --batch` | `-b` | 批量分类未归类的条目 |
+| `classify --batch --all` | | 包含已归类的条目 |
+| `classify --batch --apply -t 0.5` | | 批量应用，设置更高阈值 |
+| `classify --threshold <N>` | `-t` | 最低推荐分数（0-1，默认 0.3） |
+| `classify --limit <N>` | `-l` | 批量模式最大处理数量 |
+| `classify --max <N>` | `-m` | 每个条目最多推荐数（默认 3） |
+| `classify --profile` | | 显示集合画像（标签/作者/期刊分布） |
+| `classify --export-training` | | 导出分类决策日志为 JSON |
+| `classify --train` | | 根据纠正历史自动调整策略权重 |
+| `classify --json` | | JSON 格式输出 |
+
+**5 种分析策略**：
+
+| 策略 | 默认权重 | 说明 |
+|------|----------|------|
+| 标签 (tag) | 50% | TF-IDF 算法匹配标签分布 |
+| 内容 (content) | 20% | 标题+摘要文本的余弦相似度 |
+| 作者 (author) | 15% | 作者与集合作者分布匹配 |
+| 期刊 (journal) | 15% | 期刊名称匹配 |
+| 规则 (rule) | 额外加分 | 用户自定义规则（见配置） |
+
+**自学习机制**：当使用 `mv` 命令将条目移入与推荐不同的集合时，系统自动记录为纠正。运行 `classify --train` 可根据纠正历史调整策略权重。
+
+分类相关配置在 `~/.zoterrc`：
+
+```yaml
+classify:
+  threshold: 0.3
+  maxRecommendations: 3
+  weights:
+    tag: 0.5
+    author: 0.15
+    journal: 0.15
+    content: 0.2
+  excludeCollections: []      # 排除的集合 key
+  rules:                       # 自定义规则
+    - authors: ["Smith"]
+      journals: ["Nature"]
+      collection: "/Research/Biology"
+```
+
+### 插件系统
+
+支持通过插件扩展功能。插件可以提供内容处理器（标识符解析）、后处理器、事件处理和自定义命令。
+
+| 命令 | 别名 | 说明 |
+|------|------|------|
+| `plugin list` | `plugins` | 列出已加载的插件 |
+| `plugin info <name>` | | 查看插件详情 |
+| `plugin enable <name>` | | 启用插件 |
+| `plugin disable <name>` | | 禁用插件（下次启动生效） |
+
+**内置插件**：`wechat-fetcher` — 微信公众号文章导入（自动生成快照）
+
+**插件配置**（`~/.zoterrc`）：
+
+```yaml
+plugins:
+  wechat-fetcher:
+    enabled: true
+    timeout: 30000
+```
+
+**插件安装路径**：
+- 内置插件：随系统注册
+- 本地插件：`~/.config/zotero-headless/plugins/<name>/`
+- npm 插件：在配置中指定 `source` 字段
+
 ### 保存的搜索
 
 | 命令 | 别名 | 说明 |
@@ -429,6 +522,8 @@ zotero bib            # cite
 zotero imp <file>     # import
 zotero dupes          # duplicates
 zotero findpdf <key>  # attachment find
+zotero cl <key>       # classify
+zotero plugins        # plugin list
 ```
 
 ---
@@ -527,8 +622,11 @@ Zotero-Headless/
 │   ├── core/               # 核心配置与工具
 │   ├── database/           # SQLite 数据库层 (Drizzle ORM)
 │   ├── sync-engine/        # 双向同步引擎
-│   ├── attachment-manager/  # 附件管理
+│   ├── attachment-manager/ # 附件管理
+│   ├── content-extractor/  # 附件内容提取（PDF/DOCX/EPUB/HTML）
 │   ├── translator/         # Zotero Translator 框架（格式转换与导入）
+│   ├── plugin/             # 插件系统核心
+│   ├── plugin-wechat/      # 微信公众号插件
 │   ├── webdav-client/      # WebDAV 客户端
 │   └── types/              # TypeScript 类型定义
 ├── scripts/                # 构建与打包脚本
@@ -567,4 +665,4 @@ pnpm test --filter @zotero-headless/sync-engine
 
 ---
 
-*最后更新：2026-03-29*
+*最后更新：2026-04-04*

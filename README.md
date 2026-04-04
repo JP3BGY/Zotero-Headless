@@ -10,12 +10,15 @@ Zotero Web API 同步客户端（CLI + 交互式 Shell），可在无桌面客�
 - **标识符导入** — 通过 DOI / ISBN / PMID / arXiv / ADS / URL / 微信文章自动创建条目
 - **格式互转** — 基于 Zotero Translator 框架，支持 BibTeX、RIS、CSL JSON 等 700+ 格式导入导出
 - **附件管理** — WebDAV 附件同步、PDF 全文查找、重复附件检测
+- **内容提取** — 附件文本提取（PDF/DOCX/EPUB/HTML）、PDF 页面渲染、批注图片导出
 - **引用生成** — 基于 CSL 的引用格式化（APA、Vancouver、Harvard 等）
+- **智能分类** — 基于标签/作者/期刊/内容的多策略分析，自动推荐集合，支持自学习
 - **重复检测** — 多阶段匹配算法（ISBN → DOI → 标题+作者归一化）
 - **笔记管理** — Markdown 输入，ProseMirror HTML 存储，兼容 Zotero 桌面
 - **交互式 Shell** — 命令补全、历史记录、状态栏、Item Key 模糊匹配
 - **群组库** — 列出并同步 Group Library
 - **中英文界面** — `--lang=zh|en`
+- **插件系统** — 可扩展架构，支持内容处理器、后处理器、事件处理等插件类型
 - **Agent API** — 程序化接口，供 AI Agent 调用（`apps/agent-api`）
 
 ---
@@ -86,6 +89,17 @@ zotero note edit NOTE5678                  # 外部编辑器
 zotero webdav config https://dav.example.com/dav user pass
 zotero webdav sync                         # 同步附件
 zotero attachment find --all               # 全文 PDF 查找
+zotero attachment read ABCD1234            # 提取附件文本
+zotero attachment read ABCD1234 --render   # 渲染 PDF 为图片
+
+# 分类
+zotero classify ABCD1234                   # 智能推荐集合（dry-run）
+zotero classify --batch --apply            # 批量自动分类
+zotero classify --train                    # 根据纠正历史调整权重
+
+# 插件
+zotero plugin list                         # 列出已加载插件
+zotero plugin enable wechat-fetcher        # 启用插件
 
 # 导出与引用
 zotero export -f bibtex -o library.bib
@@ -116,7 +130,10 @@ zotero-headless/
 │   ├── database/           # SQLite 数据库层 (Drizzle ORM)
 │   ├── sync-engine/        # 双向同步引擎
 │   ├── attachment-manager/ # 附件管理
-│   ├── translator/         # Zotero Translator 框架（格式转换与导入）
+│   ├── content-extractor/  # 附件内容提取（PDF/DOCX/EPUB/HTML）
+│   ├── translator/         # Zotero Translator 框架
+│   ├── plugin/             # 插件系统核心
+│   ├── plugin-wechat/      # 微信公众号插件
 │   ├── webdav-client/      # WebDAV 客户端
 │   └── types/              # TypeScript 类型定义
 ├── scripts/                # 构建与打包脚本
