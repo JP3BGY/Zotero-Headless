@@ -2,4 +2,3 @@
 // 标识符包导出
 export * from './types.js';
 export { IdentifierParser } from './parser.js';
-export { WeChatFetcher } from './fetchers/wechat-fetcher.js';
