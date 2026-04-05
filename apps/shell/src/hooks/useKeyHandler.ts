@@ -36,43 +36,30 @@ export function useKeyHandler() {
   const runCommand = useCallback(async (command: string) => {
     dispatch({ type: 'START_COMMAND', command });
 
-    let success = true;
+    const result = await executeShellCommand(command);
 
-    try {
-      const result = await executeShellCommand(command);
-
-      // Display stdout
-      if (result.stdout) {
-        const lines = result.stdout.split('\n');
-        addLines(lines.map(line => ({ type: 'output' as const, content: line })));
-      }
-
-      // Display stderr (always — may contain warnings on success, errors on failure)
-      if (result.stderr) {
-        const errType = result.exitCode !== 0 ? 'error' as const : 'info' as const;
-        const errLevel = result.exitCode !== 0 ? 'error' as const : 'warn' as const;
-        addLine(errType, result.stderr, errLevel);
-      }
-
-      // If command failed with no output at all, show a generic message
-      if (result.exitCode !== 0 && !result.stdout && !result.stderr) {
-        addLine('error', `Command failed with exit code ${result.exitCode}`, 'error');
-      }
-
-      success = result.exitCode === 0;
-
-      // Update cwd (may have changed via cd)
-      dispatch({ type: 'SET_CWD', cwd: result.cwd });
-    } catch (error) {
-      success = false;
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      addLine('error', errorMsg, 'error');
-    } finally {
-      const shouldCollapse = configManager.get('display')?.collapseOutput === true
-        && appConfig.log.level !== 'debug';
-      dispatch({ type: 'END_COMMAND', success, autoCollapse: shouldCollapse });
-      dispatch({ type: 'RESET_INPUT' });
+    if (result.stdout) {
+      const lines = result.stdout.split('\n');
+      addLines(lines.map(line => ({ type: 'output' as const, content: line })));
     }
+
+    if (result.stderr) {
+      const errType = result.exitCode !== 0 ? 'error' as const : 'info' as const;
+      const errLevel = result.exitCode !== 0 ? 'error' as const : 'warn' as const;
+      addLine(errType, result.stderr, errLevel);
+    }
+
+    if (result.exitCode !== 0 && !result.stdout && !result.stderr) {
+      addLine('error', `Command failed with exit code ${result.exitCode}`, 'error');
+    }
+
+    const success = result.exitCode === 0;
+    dispatch({ type: 'SET_CWD', cwd: result.cwd });
+
+    const shouldCollapse = configManager.get('display')?.collapseOutput === true
+      && appConfig.log.level !== 'debug';
+    dispatch({ type: 'END_COMMAND', success, autoCollapse: shouldCollapse });
+    dispatch({ type: 'RESET_INPUT' });
   }, [dispatch, addLine, addLines]);
 
   const handleExecute = useCallback(async (cmd: string) => {

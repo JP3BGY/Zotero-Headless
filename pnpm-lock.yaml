@@ -296,6 +296,9 @@ importers:
       '@zotero-headless/database':
         specifier: workspace:*
         version: link:../database
+      '@zotero-headless/types':
+        specifier: workspace:^
+        version: link:../types
       adm-zip:
         specifier: ^0.5.10
         version: 0.5.16

@@ -403,37 +403,28 @@ export async function getPathCompletions(
   }
 
   try {
-    const entries = await fs.readdir(dirPart);
+    // Use readdirWithFileTypes to avoid N individual stat() calls
+    const entries = await fs.readdirWithFileTypes(dirPart);
     const lowerPrefix = prefix.toLowerCase();
 
     const results: PathSuggestion[] = [];
-    for (const name of entries) {
-      if (lowerPrefix && !name.toLowerCase().startsWith(lowerPrefix)) continue;
+    for (const entry of entries) {
+      if (lowerPrefix && !entry.name.toLowerCase().startsWith(lowerPrefix)) continue;
 
-      const fullEntryPath = fs.resolvePath(dirPart, name);
-      let isDir = false;
-      try {
-        const st = await fs.stat(fullEntryPath);
-        isDir = st.isDirectory;
-      } catch {
-        // Can't stat — treat as file
-      }
-
+      const isDir = entry.isDirectory;
       const suffix = isDir ? '/' : '';
-      const escapedName = shellEscape(name);
-      // If we used shellEscape (quotes), the trailing / goes outside the quotes
-      const escapedWithSuffix = SHELL_SPECIAL.test(name)
+      const escapedName = shellEscape(entry.name);
+      const escapedWithSuffix = SHELL_SPECIAL.test(entry.name)
         ? escapedName + suffix
-        : name + suffix;
+        : entry.name + suffix;
 
-      // Reconstruct the full escaped path
       const needsEscapeDir = SHELL_SPECIAL.test(dirPrefix.replace(/\//g, ''));
       const fullPath = dirPrefix
         ? (needsEscapeDir ? shellEscape(dirPrefix) : dirPrefix) + escapedWithSuffix
         : escapedWithSuffix;
 
       results.push({
-        name: name + suffix,
+        name: entry.name + suffix,
         isDirectory: isDir,
         fullPath,
       });

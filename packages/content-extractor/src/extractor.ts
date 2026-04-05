@@ -5,6 +5,7 @@ import * as crypto from 'crypto';
 import AdmZip from 'adm-zip';
 import { getDatabase, attachments, items } from '@zotero-headless/database';
 import { eq, and } from 'drizzle-orm';
+import { parseItemData } from '@zotero-headless/types';
 import { attachmentManager } from '@zotero-headless/attachment-manager';
 import type { ExtractedContent, ExtractionOptions, RenderedPage, RenderOptions, AnnotationRegion, RenderedAnnotation } from './types.js';
 import { EXTENSION_TO_MIME, SUPPORTED_MIME_TYPES } from './types.js';
@@ -95,7 +96,7 @@ export class ContentExtractor {
         .where(and(eq(items.key, attachmentKey), eq(items.itemType, 'attachment')))
         .get();
       if (item) {
-        const data = JSON.parse(item.rawJson)?.data ?? {};
+        const data = parseItemData(item.rawJson);
         const linkMode = data.linkMode ?? '';
         attachment = {
           key: item.key,

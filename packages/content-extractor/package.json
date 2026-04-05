@@ -16,6 +16,7 @@
     "@zotero-headless/attachment-manager": "workspace:*",
     "@zotero-headless/core": "workspace:*",
     "@zotero-headless/database": "workspace:*",
+    "@zotero-headless/types": "workspace:^",
     "adm-zip": "^0.5.10",
     "epub2md": "^1.6.2",
     "mammoth": "^1.12.0",

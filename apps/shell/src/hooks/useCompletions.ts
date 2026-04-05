@@ -12,6 +12,11 @@ import {
 } from '../commands.js';
 import type { CommandSuggestion, ItemKeySuggestion, PathSuggestion } from '../types.js';
 
+const PATH_COMMANDS = new Set([
+  'ls', 'cd', 'cat', 'tree', 'find', 'head', 'tail', 'stat',
+  'wc', 'du', 'grep', 'mkdir', 'mv', 'cp', 'rm',
+]);
+
 export function useCompletions() {
   const descriptionsRef = useRef(getCommandDescriptions());
 
@@ -56,14 +61,8 @@ export function useCompletions() {
    * (contains '/' or the command typically takes path arguments).
    */
   const isPathToken = useCallback((cmd: string, token: string, partIndex: number): boolean => {
-    // Explicit path: starts with / or ./ or ../
     if (token.startsWith('/') || token.startsWith('./') || token.startsWith('../')) return true;
-    // Second+ argument to filesystem commands
-    const pathCommands = new Set([
-      'ls', 'cd', 'cat', 'tree', 'find', 'head', 'tail', 'stat',
-      'wc', 'du', 'grep', 'mkdir', 'mv', 'cp', 'rm',
-    ]);
-    if (pathCommands.has(cmd) && partIndex >= 1) return true;
+    if (PATH_COMMANDS.has(cmd) && partIndex >= 1) return true;
     return false;
   }, []);
 
