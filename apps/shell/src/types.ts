@@ -30,3 +30,13 @@ export interface ItemKeySuggestion {
   title: string;
   itemType: string;
 }
+
+// Path 补全项
+export interface PathSuggestion {
+  /** The entry name (file or directory name) */
+  name: string;
+  /** Whether this entry is a directory */
+  isDirectory: boolean;
+  /** Full completed path (for inserting into input) */
+  fullPath: string;
+}

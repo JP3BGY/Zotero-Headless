@@ -4,28 +4,22 @@ import Spinner from 'ink-spinner';
 import { TextInput } from './TextInput.js';
 import { useShellState } from '../hooks/useShellState.js';
 import { useElapsedTime } from '../hooks/useElapsedTime.js';
-import { POINTER } from '../constants/figures.js';
 
 export function InputPrompt({ onInputChange }: { onInputChange: (value: string) => void }) {
   const { state, dispatch } = useShellState();
-  const { mode, input, executingCommand, executingStartTime, pendingConfirm, vfsCwd } = state;
-  const isExecuting = mode === 'executing' || mode === 'vfs-executing';
-  const isVfs = mode === 'vfs' || mode === 'vfs-executing';
+  const { mode, input, executingCommand, executingStartTime, pendingConfirm, cwd } = state;
+  const isExecuting = mode === 'executing';
   const elapsed = useElapsedTime(isExecuting ? executingStartTime : null);
 
   // Shorten cwd for display: show last 2 segments max
-  const shortCwd = isVfs
-    ? (vfsCwd === '/' ? '/' : vfsCwd.split('/').filter(Boolean).slice(-2).join('/'))
-    : null;
+  const shortCwd = cwd === '/'
+    ? '/'
+    : cwd.split('/').filter(Boolean).slice(-2).join('/');
 
   return (
     <Box>
       {pendingConfirm && <Text color="yellow">(y/N) </Text>}
-      {isVfs ? (
-        <Text color="green">zotero-vfs:{shortCwd}$ </Text>
-      ) : (
-        <Text color="cyan">{POINTER} </Text>
-      )}
+      <Text color="green">zotero:{shortCwd}$ </Text>
       {isExecuting ? (
         <Box>
           <Text color="cyan"><Spinner type="dots" /></Text>
@@ -39,7 +33,7 @@ export function InputPrompt({ onInputChange }: { onInputChange: (value: string) 
             dispatch({ type: 'SET_INPUT', value });
             onInputChange(value);
           }}
-          isActive={mode === 'idle' || mode === 'vfs'}
+          isActive={mode === 'idle'}
         />
       )}
     </Box>

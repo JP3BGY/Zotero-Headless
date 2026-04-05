@@ -4,15 +4,13 @@ import { useShellState } from './useShellState.js';
 import { useHistory } from './useHistory.js';
 import { useCompletions } from './useCompletions.js';
 import { useKeybindings } from './useKeybindings.js';
-import { executeCommand, executeVfsCommand, destroyVfsSession, highlightSearchResult, parseCommand } from '../commands.js';
+import { executeShellCommand, parseCommand, tokenizeInput, shellUnescape } from '../commands.js';
 import { configManager, appConfig } from '@zotero-headless/core';
 import { t } from '../i18n.js';
 import type { OutputLine } from '../types.js';
-import type { LogLevel } from '../types.js';
 
-const DELETE_COMMANDS = ['delete', 'rm', 'del', 'remove'];
+const DELETE_COMMANDS = ['delete'];
 const CTRL_C_WINDOW = 2000; // ms
-const FLUSH_INTERVAL = 16; // ~1 frame, batch output lines to avoid Ink Static blank-line issue
 
 export function useKeyHandler() {
   const { exit } = useApp();
@@ -32,93 +30,47 @@ export function useKeyHandler() {
     setTimeout(() => exit(), 100);
   }, [addLine, dispatch, exit]);
 
-  const runCliCommand = useCallback(async (parsedCmd: string, args: string[], originalInput: string) => {
-    dispatch({ type: 'START_COMMAND', command: originalInput });
+  /**
+   * Single unified command runner — all input goes through just-bash.
+   */
+  const runCommand = useCallback(async (command: string) => {
+    dispatch({ type: 'START_COMMAND', command });
 
-    let hasRealtimeOutput = false;
     let success = true;
 
-    // Buffer output lines and flush in batches (~1 frame interval).
-    // Ink's Static component swallows whitespace-only items during progressive
-    // rendering (one item per state update). Batching ensures blank lines are
-    // added alongside adjacent content in a single dispatch.
-    const buffer: Array<{ type: OutputLine['type']; content: string; logLevel?: LogLevel }> = [];
-    let flushTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const flushBuffer = () => {
-      flushTimer = null;
-      if (buffer.length > 0) {
-        hasRealtimeOutput = true;
-        addLines(buffer.splice(0));
-      }
-    };
-
     try {
-      const result = await executeCommand(parsedCmd, args, (chunk: string, logLevel: LogLevel) => {
-        buffer.push({ type: 'output', content: chunk, logLevel });
-        if (!flushTimer) {
-          flushTimer = setTimeout(flushBuffer, FLUSH_INTERVAL);
-        }
-      });
+      const result = await executeShellCommand(command);
 
-      // Flush any remaining buffered lines
-      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-      flushBuffer();
-
-      success = result.exitCode === 0;
-
-      if (result.exitCode !== 0 && result.stderr) {
-        addLine('error', result.stderr, 'error');
-      } else if (!hasRealtimeOutput) {
-        if ((parsedCmd === 'search' || parsedCmd === 'f' || parsedCmd === 'find') && args.length > 0) {
-          const highlighted = highlightSearchResult(result.stdout, args);
-          addLine(
-            result.exitCode === 0 ? 'output' : 'error',
-            highlighted || result.stderr || t.noResult,
-          );
-        } else if (result.stdout || result.stderr) {
-          addLine(
-            result.exitCode === 0 ? 'output' : 'error',
-            result.stdout || result.stderr || t.commandDone,
-          );
-        }
-      }
-    } catch (error) {
-      success = false;
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      addLine('error', t.networkError(errorMsg), 'error');
-    } finally {
-      // Auto-collapse if collapseOutput is enabled and log level is not debug
-      const shouldCollapse = configManager.get('display')?.collapseOutput === true
-        && appConfig.log.level !== 'debug';
-      dispatch({ type: 'END_COMMAND', success, autoCollapse: shouldCollapse });
-      dispatch({ type: 'RESET_INPUT' });
-    }
-  }, [dispatch, addLine, addLines]);
-
-  const runVfsCommand = useCallback(async (command: string) => {
-    dispatch({ type: 'START_VFS_COMMAND', command });
-
-    try {
-      const result = await executeVfsCommand(command);
-
-      // Display output
+      // Display stdout
       if (result.stdout) {
         const lines = result.stdout.split('\n');
         addLines(lines.map(line => ({ type: 'output' as const, content: line })));
       }
-      if (result.exitCode !== 0 && result.stderr) {
-        addLine('error', result.stderr, 'error');
+
+      // Display stderr (always — may contain warnings on success, errors on failure)
+      if (result.stderr) {
+        const errType = result.exitCode !== 0 ? 'error' as const : 'info' as const;
+        const errLevel = result.exitCode !== 0 ? 'error' as const : 'warn' as const;
+        addLine(errType, result.stderr, errLevel);
       }
 
+      // If command failed with no output at all, show a generic message
+      if (result.exitCode !== 0 && !result.stdout && !result.stderr) {
+        addLine('error', `Command failed with exit code ${result.exitCode}`, 'error');
+      }
+
+      success = result.exitCode === 0;
+
       // Update cwd (may have changed via cd)
-      dispatch({ type: 'SET_VFS_CWD', cwd: result.cwd });
-      dispatch({ type: 'END_VFS_COMMAND', success: result.exitCode === 0 });
+      dispatch({ type: 'SET_CWD', cwd: result.cwd });
     } catch (error) {
+      success = false;
       const errorMsg = error instanceof Error ? error.message : String(error);
       addLine('error', errorMsg, 'error');
-      dispatch({ type: 'END_VFS_COMMAND', success: false });
     } finally {
+      const shouldCollapse = configManager.get('display')?.collapseOutput === true
+        && appConfig.log.level !== 'debug';
+      dispatch({ type: 'END_COMMAND', success, autoCollapse: shouldCollapse });
       dispatch({ type: 'RESET_INPUT' });
     }
   }, [dispatch, addLine, addLines]);
@@ -144,35 +96,13 @@ export function useKeyHandler() {
       return;
     }
 
-    // VFS mode — route all input through ZoteroShell
-    if (state.mode === 'vfs') {
-      if (!cmd.trim()) return;
-      history.add(cmd);
-
-      const trimmed = cmd.trim();
-      // 'exit' or 'quit' leaves VFS mode, returns to CLI mode
-      if (trimmed === 'exit' || trimmed === 'quit') {
-        destroyVfsSession();
-        dispatch({ type: 'EXIT_VFS' });
-        addLine('info', 'Exited VFS mode.');
-        dispatch({ type: 'RESET_INPUT' });
-        return;
-      }
-      if (trimmed === 'clear' || trimmed === 'cls') {
-        dispatch({ type: 'CLEAR_LINES' });
-        return;
-      }
-
-      await runVfsCommand(trimmed);
-      return;
-    }
-
     if (!cmd.trim() || state.mode !== 'idle') return;
 
     history.add(cmd);
-    const { cmd: parsedCmd, args } = parseCommand(cmd);
+    const trimmed = cmd.trim();
+    const { cmd: parsedCmd, args } = parseCommand(trimmed);
 
-    // Builtin commands (no group tracking needed)
+    // TUI-only commands (handled locally, never reach just-bash)
     if (parsedCmd === 'clear' || parsedCmd === 'cls') {
       dispatch({ type: 'CLEAR_LINES' });
       return;
@@ -182,8 +112,8 @@ export function useKeyHandler() {
       return;
     }
     if (parsedCmd === 'help') {
-      addLine('info', t.help);
-      dispatch({ type: 'RESET_INPUT' });
+      // Route to just-bash help command (registered as custom command)
+      await runCommand(trimmed);
       return;
     }
     if (parsedCmd === '/config' || parsedCmd === 'config' || parsedCmd === 'cfg') {
@@ -192,22 +122,19 @@ export function useKeyHandler() {
       return;
     }
 
-    // Enter VFS mode
-    if (parsedCmd === 'bash' || parsedCmd === 'vfs') {
-      dispatch({ type: 'ENTER_VFS' });
-      addLine('info', 'Entering VFS mode. Use ls, cat, grep, etc. Type "exit" to return.');
-      dispatch({ type: 'RESET_INPUT' });
-      return;
-    }
-
-    // Delete commands — show question in output, respond via normal input
+    // Delete confirmation — intercept at TUI level, then route through bash
     if (DELETE_COMMANDS.includes(parsedCmd) && args.length > 0) {
       const target = args[0];
       const msg = t.confirmDelete?.(target) ??
         `Delete item "${target}"? This cannot be undone.`;
 
-      // Store callbacks in refs (immune to stale closures)
-      confirmRef.current = () => { runCliCommand(parsedCmd, args, cmd); };
+      // On confirm: send "delete <args> --yes" through bash to skip CLI's own prompt
+      confirmRef.current = () => {
+        const confirmCmd = args.includes('--yes') || args.includes('-y')
+          ? trimmed
+          : `${trimmed} --yes`;
+        runCommand(confirmCmd);
+      };
       confirmCancelRef.current = () => {
         addLine('info', t.cancelled ?? 'Cancelled.');
       };
@@ -218,51 +145,79 @@ export function useKeyHandler() {
       return;
     }
 
-    // Regular CLI command
-    await runCliCommand(parsedCmd, args, cmd);
-  }, [state.mode, state.pendingConfirm, dispatch, history, addLine, addLines, doExit, runCliCommand, runVfsCommand]);
+    // Everything else — route through just-bash
+    await runCommand(trimmed);
+  }, [state.mode, state.pendingConfirm, dispatch, history, addLine, doExit, runCommand]);
 
   const handleTab = useCallback(() => {
-    if (state.pendingConfirm) return; // Skip completions during confirmation
+    if (state.pendingConfirm) return;
 
     const { input } = state;
-    const parts = input.trim().split(/\s+/);
-    const cmd = parts[0]?.toLowerCase() || '';
-    const lastToken = parts[parts.length - 1] || '';
+    const { tokens, lastToken, lastTokenStart } = tokenizeInput(input);
+    const cmd = tokens[0]?.toLowerCase() || '';
+    const effectivePartCount = lastToken === '' ? tokens.length + 1 : tokens.length;
+    // Unescaped version of the token for matching against filesystem / commands
+    const rawLastToken = shellUnescape(lastToken);
 
-    if (lastToken.startsWith('-') && cmd) {
+    // 1. Option completion: --flag / -f
+    if (rawLastToken.startsWith('-') && cmd) {
       const comps = completions.getOptionCompletions(input);
       if (comps.length === 1) {
-        const completed = input.replace(/\S+$/, comps[0].name);
-        dispatch({ type: 'SET_INPUT', value: completed + ' ' });
+        const completed = input.slice(0, lastTokenStart) + comps[0].name + ' ';
+        dispatch({ type: 'SET_INPUT', value: completed });
         dispatch({ type: 'RESET_INPUT' });
-        dispatch({ type: 'SET_INPUT', value: completed + ' ' });
+        dispatch({ type: 'SET_INPUT', value: completed });
       } else if (comps.length > 0) {
         dispatch({ type: 'SET_SUGGESTIONS', suggestions: comps });
       }
-    } else if (completions.needsItemKey(cmd) && parts.length >= 2) {
-      const arg = parts[1] || '';
-      completions.getItemCompletions(arg).then(items => {
+      return;
+    }
+
+    // 2. Path completion: second+ argument that looks like a path
+    if (effectivePartCount >= 2 && completions.isPathToken(cmd, rawLastToken, effectivePartCount - 1)) {
+      completions.getPathSuggestions(lastToken).then(paths => {
+        if (paths.length === 1) {
+          const suffix = paths[0].isDirectory ? '' : ' ';
+          dispatch({ type: 'SET_INPUT', value: input.slice(0, lastTokenStart) + paths[0].fullPath + suffix });
+          dispatch({ type: 'SET_SUGGESTIONS', suggestions: [] });
+        } else if (paths.length > 0) {
+          dispatch({
+            type: 'SET_SUGGESTIONS',
+            suggestions: paths.map(p => ({
+              name: p.name,
+              description: p.isDirectory ? 'directory' : 'file',
+            })),
+          });
+        }
+      });
+      return;
+    }
+
+    // 3. Item key completion: commands that need item keys
+    if (completions.needsItemKey(cmd) && effectivePartCount >= 2) {
+      completions.getItemCompletions(rawLastToken).then(items => {
         if (items.length === 1) {
-          dispatch({ type: 'SET_INPUT', value: `${cmd} ${items[0].key}` });
+          dispatch({ type: 'SET_INPUT', value: input.slice(0, lastTokenStart) + items[0].key + ' ' });
           dispatch({ type: 'SET_ITEM_SUGGESTIONS', suggestions: [] });
         } else if (items.length > 0) {
           dispatch({ type: 'SET_ITEM_SUGGESTIONS', suggestions: items });
         }
       });
-    } else {
-      const comps = completions.getCommandCompletions(input);
-      if (comps.length === 1) {
-        dispatch({ type: 'SET_INPUT', value: comps[0].name + ' ' });
-        dispatch({ type: 'SET_SUGGESTIONS', suggestions: [] });
-      } else if (comps.length > 0) {
-        dispatch({ type: 'SET_SUGGESTIONS', suggestions: comps });
-      }
+      return;
+    }
+
+    // 4. Command name completion
+    const comps = completions.getCommandCompletions(input);
+    if (comps.length === 1) {
+      dispatch({ type: 'SET_INPUT', value: comps[0].name + ' ' });
+      dispatch({ type: 'SET_SUGGESTIONS', suggestions: [] });
+    } else if (comps.length > 0) {
+      dispatch({ type: 'SET_SUGGESTIONS', suggestions: comps });
     }
   }, [state.input, state.pendingConfirm, completions, dispatch]);
 
   const updateSuggestions = useCallback((value: string) => {
-    if (state.pendingConfirm) return; // Skip suggestions during confirmation
+    if (state.pendingConfirm) return;
 
     const result = completions.getSuggestionsForInput(value);
     if (!result) {
@@ -271,9 +226,20 @@ export function useKeyHandler() {
       return;
     }
 
-    if (result.type === 'itemKey' && result.asyncFn) {
+    if (result.type === 'path' && result.asyncFn) {
+      result.asyncFn().then(paths => {
+        const pathSuggestions = (paths as import('../types.js').PathSuggestion[]);
+        dispatch({
+          type: 'SET_SUGGESTIONS',
+          suggestions: pathSuggestions.map(p => ({
+            name: p.name,
+            description: p.isDirectory ? 'directory' : 'file',
+          })),
+        });
+      });
+    } else if (result.type === 'itemKey' && result.asyncFn) {
       result.asyncFn().then(items => {
-        dispatch({ type: 'SET_ITEM_SUGGESTIONS', suggestions: items });
+        dispatch({ type: 'SET_ITEM_SUGGESTIONS', suggestions: items as import('../types.js').ItemKeySuggestion[] });
       });
     } else if (result.sync) {
       if (result.type === 'option' || result.type === 'command') {
@@ -293,24 +259,7 @@ export function useKeyHandler() {
 
     lastCtrlCTime.current = now;
 
-    if (state.mode === 'vfs-executing') {
-      // Cancel running VFS command
-      dispatch({ type: 'END_VFS_COMMAND', success: false });
-      dispatch({ type: 'RESET_INPUT' });
-      addLine('info', t.ctrlCHint);
-    } else if (state.mode === 'vfs') {
-      if (state.input.trim()) {
-        // Clear current input
-        dispatch({ type: 'RESET_INPUT' });
-        addLine('info', t.ctrlCHint);
-      } else {
-        // Exit VFS mode
-        destroyVfsSession();
-        dispatch({ type: 'EXIT_VFS' });
-        addLine('info', 'Exited VFS mode.');
-        dispatch({ type: 'RESET_INPUT' });
-      }
-    } else if (state.mode === 'executing') {
+    if (state.mode === 'executing') {
       // Cancel running command
       dispatch({ type: 'END_COMMAND', success: false });
       dispatch({ type: 'RESET_INPUT' });
@@ -343,8 +292,8 @@ export function useKeyHandler() {
       return;
     }
 
-    // Config mode is handled by ConfigPanel component; executing modes block input
-    if (state.mode === 'executing' || state.mode === 'vfs-executing' || state.mode === 'config') return;
+    // Config mode is handled by ConfigPanel component; executing blocks input
+    if (state.mode === 'executing' || state.mode === 'config') return;
 
     if (kb.match('submit', input, key)) {
       handleExecute(state.input);

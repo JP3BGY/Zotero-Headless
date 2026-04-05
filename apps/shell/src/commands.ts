@@ -1,8 +1,9 @@
 import { commands, type Command, setShellMode } from '@zotero-headless/cli';
 import { getRawSQLite } from '@zotero-headless/database';
-import { ZoteroShell as VfsShell } from '@zotero-headless/virtual-fs';
+import { ZoteroShell } from '@zotero-headless/virtual-fs';
 
-import type { ItemKeySuggestion, LogLevel } from './types.js';
+import { getCliCustomCommands } from './cli-commands-registry.js';
+import type { ItemKeySuggestion, PathSuggestion } from './types.js';
 
 // Enable shell mode so permanent delete is available
 setShellMode(true);
@@ -10,392 +11,32 @@ setShellMode(true);
 // Re-export for backward compatibility
 export type ItemInfo = ItemKeySuggestion;
 
-// 需要 Item Key 的命令列表
-const ITEM_KEY_COMMANDS = [
-  'rm', 'del', 'delete', 'remove',
-  'get', 'cat', 'view', 'show',
-  'update', 'u', 'edit', 'set',
-  'note', 'n', 'notes',
-  'attachments', 'att', 'files',
-  'export', 'e', 'out', 'save'
-];
+// ============ Shell Session (unified just-bash engine) ============
 
-// 缓存的 item 列表
-let cachedItems: ItemInfo[] = [];
-let lastCacheTime = 0;
-const CACHE_TTL = 60000; // 60秒缓存
-
-// 命令映射表
-const COMMAND_ALIASES: Record<string, string> = {
-  'ls': 'list',
-  'll': 'list',
-  'la': 'list',
-  'lsu': 'list',
-  'find': 'search',
-  'f': 'search',
-  'rm': 'delete',
-  'del': 'delete',
-  'remove': 'delete',
-  'cat': 'get',
-  'view': 'get',
-  'info': 'stats',
-  'stat': 'stats',
-  'df': 'stats',
-  's': 'sync',
-  'pull': 'sync',
-  'fetch': 'sync',
-  'su': 'sync',
-  'a': 'add',
-  'new': 'add',
-  'touch': 'add',
-  'addby': 'add',
-  'verify': 'verify',
-  'v': 'verify',
-  'check': 'verify',
-  'ping': 'verify',
-  'note': 'note',
-  'n': 'note',
-  'notes': 'note',
-  'att': 'attachment',
-  'attachments': 'attachment',
-  'files': 'attachment',
-  'docs': 'attachment',
-  'attdl': 'attachment',
-  'atto': 'attachment',
-  'attdedup': 'attachment',
-  'export': 'export',
-  'e': 'export',
-  'out': 'export',
-  'save': 'export',
-  'update': 'update',
-  'u': 'update',
-  'edit': 'update',
-  'set': 'update',
-  'trash': 'trash',
-  'restore': 'trash',
-  'undelete': 'trash',
-  'untrash': 'trash',
-  'webdav': 'webdav',
-  'wd': 'webdav',
-  'wdc': 'webdav',
-  'wds': 'webdav',
-  'wdst': 'webdav',
-  'wdscan': 'webdav',
-  'config': 'config',
-  'cfg': 'config',
-};
+let shellSession: ZoteroShell | null = null;
 
 /**
- * 执行结果类型
+ * Get or create the shell session (lazy, singleton).
+ * Registers both VFS commands (ls, cat, grep) and adapted CLI commands (sync, search, etc.).
  */
-export interface ExecuteResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-}
-
-// 捕获 console 输出
-function captureConsoleOutput(
-  fn: () => Promise<void>,
-  onOutput?: (data: string, logLevel: LogLevel) => void,
-): Promise<ExecuteResult> {
-  const originalLog = console.log;
-  const originalError = console.error;
-  const originalWarn = console.warn;
-  const originalDebug = console.debug;
-  let stdout = '';
-  let stderr = '';
-
-  // Emit individual lines to onOutput, matching terminal line-by-line behavior.
-  // console.log("a\nb") in a terminal prints two visible lines; the TUI should too.
-  // console.log() prints a blank line; the TUI should preserve it as well.
-  const emit = (text: string, level: LogLevel) => {
-    if (!onOutput) return;
-    for (const line of text.split('\n')) {
-      onOutput(line, level);
-    }
-  };
-
-  console.log = (...args: any[]) => {
-    const text = args.map(a => String(a)).join(' ');
-    stdout += text + '\n';
-    emit(text, 'info');
-  };
-
-  console.error = (...args: any[]) => {
-    const text = args.map(a => String(a)).join(' ');
-    stderr += text + '\n';
-    emit(text, 'error');
-  };
-
-  console.warn = (...args: any[]) => {
-    const text = args.map(a => String(a)).join(' ');
-    stdout += text + '\n';
-    emit(text, 'warn');
-  };
-
-  console.debug = (...args: any[]) => {
-    const text = args.map(a => String(a)).join(' ');
-    stdout += text + '\n';
-    emit(text, 'debug');
-  };
-
-  return fn()
-    .then(() => ({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: 0 }))
-    .catch((error) => {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      stderr += errorMsg + '\n';
-      return { stdout: stdout.trim(), stderr: stderr.trim(), exitCode: 1 };
-    })
-    .finally(() => {
-      console.log = originalLog;
-      console.error = originalError;
-      console.warn = originalWarn;
-      console.debug = originalDebug;
+function getShellSession(): ZoteroShell {
+  if (!shellSession) {
+    shellSession = new ZoteroShell({
+      customCommands: getCliCustomCommands(),
     });
-}
-
-/**
- * 异步执行 zotero 命令
- */
-export async function executeCommand(
-  cmd: string,
-  args: string[],
-  onOutput?: (data: string, logLevel: LogLevel) => void
-): Promise<ExecuteResult> {
-  // 转换命令别名
-  const actualCmd = COMMAND_ALIASES[cmd] || cmd;
-  
-  // 找到对应的 CLI 命令
-  const command = commands.find((c: Command) =>
-    c.name === actualCmd || c.aliases?.includes(actualCmd)
-  );
-  
-  if (!command) {
-    return {
-      stdout: '',
-      stderr: `Unknown command: ${cmd}`,
-      exitCode: 1
-    };
   }
-
-  try {
-    // 执行命令并捕获输出（实时输出通过 onOutput）
-    // 传递原始命令名 cmd（如 'll', 'la'）以便命令区分输出格式
-    const result = await captureConsoleOutput(() => command.execute(args, cmd), onOutput);
-    return result;
-  } catch (error) {
-    // 捕获所有未处理的错误（包括网络错误）
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    return {
-      stdout: '',
-      stderr: `命令执行失败: ${errorMsg}`,
-      exitCode: 1
-    };
-  }
+  return shellSession;
 }
 
 /**
- * 获取命令描述信息（用于自动补全显示）
+ * Execute a command through the unified shell engine.
+ * All input — filesystem commands (ls, cd, cat) and Zotero commands (sync, search) —
+ * is routed through just-bash.
  */
-export function getCommandDescriptions(): Map<string, string> {
-  const descriptions = new Map<string, string>();
-  
-  // 内置命令
-  descriptions.set('help', '显示帮助信息');
-  descriptions.set('exit', '退出 shell');
-  descriptions.set('quit', '退出 shell');
-  descriptions.set('q', '退出 shell');
-  descriptions.set('clear', '清除屏幕');
-  descriptions.set('cls', '清除屏幕');
-  descriptions.set('config', '配置管理');
-  descriptions.set('/config', '配置管理');
-  descriptions.set('cfg', '配置管理');
-  descriptions.set('bash', 'Enter VFS mode (ls, cat, grep on Zotero data)');
-  descriptions.set('vfs', 'Enter VFS mode (ls, cat, grep on Zotero data)');
-  
-  // 从 CLI 命令中提取描述
-  commands.forEach((cmd: Command) => {
-    // 提取简短描述（第一句）
-    const shortDesc = cmd.description.split('.')[0];
-    descriptions.set(cmd.name, shortDesc);
-    
-    // 为别名添加相同的描述
-    cmd.aliases?.forEach((alias: string) => {
-      if (!descriptions.has(alias)) {
-        descriptions.set(alias, shortDesc);
-      }
-    });
-  });
-  
-  return descriptions;
-}
-
-/**
- * 获取可用命令列表（用于自动补全）
- * 动态从 CLI commands 数组获取，确保包含所有命令
- */
-export function getAvailableCommands(): string[] {
-  const commandNames = new Set<string>();
-  
-  // 从 CLI 命令中提取所有命令名和别名
-  commands.forEach((cmd: Command) => {
-    commandNames.add(cmd.name);
-    cmd.aliases?.forEach((alias: string) => {
-      commandNames.add(alias);
-    });
-  });
-  
-  // 添加 shell 内置命令
-  const builtinCommands = [
-    'help', 'exit', 'quit', 'q', 'clear', 'cls', 'config', '/config', 'cfg',
-    'bash', 'vfs',
-  ];
-  builtinCommands.forEach(cmd => commandNames.add(cmd));
-  
-  return Array.from(commandNames);
-}
-
-/**
- * 解析命令字符串
- */
-export function parseCommand(input: string): { cmd: string; args: string[] } {
-  const parts = input.trim().split(/\s+/);
-  return {
-    cmd: parts[0]?.toLowerCase() || '',
-    args: parts.slice(1)
-  };
-}
-
-/**
- * 高亮搜索结果中的关键词
- */
-export function highlightSearchResult(text: string, keywords: string[]): string {
-  if (!keywords.length) return text;
-  
-  let result = text;
-  for (const keyword of keywords) {
-    if (!keyword) continue;
-    // 使用 ANSI 转义序列高亮（在 Ink 中会显示为颜色）
-    const regex = new RegExp(`(${escapeRegex(keyword)})`, 'gi');
-    result = result.replace(regex, '\x1b[33m$1\x1b[0m'); // 黄色高亮
-  }
-  return result;
-}
-
-function escapeRegex(string: string): string {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * 检查命令是否需要 Item Key 参数
- */
-export function needsItemKey(cmd: string): boolean {
-  const actualCmd = COMMAND_ALIASES[cmd] || cmd;
-  return ITEM_KEY_COMMANDS.includes(actualCmd) || ITEM_KEY_COMMANDS.includes(cmd);
-}
-
-/**
- * 从数据库获取 Item 列表（带缓存）
- */
-export async function getItemsForCompletion(): Promise<ItemInfo[]> {
-  const now = Date.now();
-
-  // 检查缓存是否有效
-  if (cachedItems.length > 0 && (now - lastCacheTime) < CACHE_TTL) {
-    return cachedItems;
-  }
-
-  try {
-    const db = getRawSQLite({ quiet: true });
-    if (!db) {
-      return cachedItems; // 返回旧缓存
-    }
-
-    // 使用原始 SQL 查询最近的 100 个 items
-    const stmt = db.prepare(`
-      SELECT key, title, item_type as itemType
-      FROM items
-      WHERE deleted = 0
-      ORDER BY updated_at DESC
-      LIMIT 100
-    `);
-    const result = stmt.all() as Array<{ key: string; title: string | null; itemType: string }>;
-
-    cachedItems = result.map((item) => ({
-      key: item.key,
-      title: item.title || '(无标题)',
-      itemType: item.itemType
-    }));
-
-    lastCacheTime = now;
-    return cachedItems;
-  } catch (error) {
-    // 数据库查询失败，返回缓存或空数组
-    console.error('Failed to load items:', error);
-    return cachedItems;
-  }
-}
-
-/**
- * 根据前缀匹配 Item Key
- */
-export async function getItemKeyCompletions(
-  prefix: string,
-  limit: number = 8
-): Promise<ItemInfo[]> {
-  const items = await getItemsForCompletion();
-  const lowerPrefix = prefix.toLowerCase();
-  
-  // 匹配 key 或 title 包含前缀的 items
-  const matches = items.filter(item => 
-    item.key.toLowerCase().includes(lowerPrefix) ||
-    item.title.toLowerCase().includes(lowerPrefix)
-  );
-  
-  return matches.slice(0, limit);
-}
-
-/**
- * 清除 Item 缓存（用于同步后刷新）
- */
-export function clearItemCache(): void {
-  cachedItems = [];
-  lastCacheTime = 0;
-}
-
-// ============ VFS Session ============
-
-let vfsSession: VfsShell | null = null;
-
-/**
- * Get or create the VFS shell session (lazy, singleton).
- */
-export function getVfsSession(): VfsShell {
-  if (!vfsSession) {
-    vfsSession = new VfsShell();
-  }
-  return vfsSession;
-}
-
-/**
- * Destroy the VFS session (called when exiting VFS mode).
- */
-export function destroyVfsSession(): void {
-  if (vfsSession) {
-    vfsSession.destroy();
-    vfsSession = null;
-  }
-}
-
-/**
- * Execute a command in the VFS shell.
- * Returns { stdout, stderr, exitCode, cwd }.
- */
-export async function executeVfsCommand(
+export async function executeShellCommand(
   command: string,
-): Promise<ExecuteResult & { cwd: string }> {
-  const shell = getVfsSession();
+): Promise<{ stdout: string; stderr: string; exitCode: number; cwd: string }> {
+  const shell = getShellSession();
   try {
     const result = await shell.execute(command);
     return {
@@ -416,22 +57,215 @@ export async function executeVfsCommand(
 }
 
 /**
- * 获取命令的选项补全列表（带描述）
+ * Destroy the shell session (called on exit).
+ */
+export function destroyShellSession(): void {
+  if (shellSession) {
+    shellSession.destroy();
+    shellSession = null;
+  }
+}
+
+// ============ Command Parsing ============
+
+/**
+ * Parse a command string into first token + remaining args.
+ * Used by the TUI to detect built-in commands (clear, exit, config, delete).
+ */
+export function parseCommand(input: string): { cmd: string; args: string[] } {
+  const parts = input.trim().split(/\s+/);
+  return {
+    cmd: parts[0]?.toLowerCase() || '',
+    args: parts.slice(1)
+  };
+}
+
+/**
+ * Shell-aware tokenization: split input into tokens respecting quotes and backslash escapes.
+ * Returns { tokens, lastToken, lastTokenStart } where lastToken is the raw (still-escaped)
+ * final token and lastTokenStart is its character offset in the input.
+ *
+ * Used for tab completion to correctly identify the token being completed,
+ * even when it contains quoted spaces.
+ */
+export function tokenizeInput(input: string): {
+  tokens: string[];
+  lastToken: string;
+  lastTokenStart: number;
+} {
+  const tokens: string[] = [];
+  let current = '';
+  let inSingle = false;
+  let inDouble = false;
+  let escaped = false;
+  let tokenStart = 0;
+  let i = 0;
+
+  for (; i < input.length; i++) {
+    const ch = input[i];
+
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      continue;
+    }
+
+    if (ch === '\\' && !inSingle) {
+      escaped = true;
+      current += ch; // Keep the backslash in the raw token
+      continue;
+    }
+
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle;
+      current += ch;
+      continue;
+    }
+
+    if (ch === '"' && !inSingle) {
+      inDouble = !inDouble;
+      current += ch;
+      continue;
+    }
+
+    if (/\s/.test(ch) && !inSingle && !inDouble) {
+      if (current) {
+        tokens.push(current);
+        current = '';
+      }
+      tokenStart = i + 1;
+      continue;
+    }
+
+    if (!current) {
+      tokenStart = i;
+    }
+    current += ch;
+  }
+
+  if (current) {
+    tokens.push(current);
+  }
+
+  // Detect trailing space → empty last token
+  const hasTrailingSpace = input.length > 0 && /\s/.test(input[input.length - 1]) && !inSingle && !inDouble;
+
+  return {
+    tokens,
+    lastToken: hasTrailingSpace ? '' : (current || ''),
+    lastTokenStart: hasTrailingSpace ? input.length : tokenStart,
+  };
+}
+
+// ============ Completions ============
+
+// Canonical commands that need an Item Key argument (for tab completion)
+const ITEM_KEY_CANONICAL = new Set([
+  'delete', 'get', 'update', 'note', 'attachment', 'export',
+]);
+
+/**
+ * Check if a command needs an Item Key argument (for tab completion).
+ * Resolves aliases to canonical names so `show`, `edit`, `e`, `n`, etc. all trigger item completions.
+ */
+export function needsItemKey(cmd: string): boolean {
+  if (ITEM_KEY_CANONICAL.has(cmd)) return true;
+  // Resolve alias to canonical name
+  const command = commands.find((c: Command) =>
+    c.aliases?.includes(cmd)
+  );
+  return command ? ITEM_KEY_CANONICAL.has(command.name) : false;
+}
+
+/**
+ * Get descriptions for all available commands (used for tab completion display).
+ */
+export function getCommandDescriptions(): Map<string, string> {
+  const descriptions = new Map<string, string>();
+
+  // TUI-only commands
+  descriptions.set('exit', 'Exit shell');
+  descriptions.set('quit', 'Exit shell');
+  descriptions.set('q', 'Exit shell');
+  descriptions.set('clear', 'Clear screen');
+  descriptions.set('cls', 'Clear screen');
+  descriptions.set('config', 'Configuration panel');
+  descriptions.set('/config', 'Configuration panel');
+
+  // Bash built-in / VFS commands
+  descriptions.set('ls', 'List directory contents');
+  descriptions.set('cd', 'Change directory');
+  descriptions.set('pwd', 'Print working directory');
+  descriptions.set('cat', 'Read file or show item summary');
+  descriptions.set('grep', 'Search file contents');
+  descriptions.set('find', 'Find files by name');
+  descriptions.set('tree', 'Display directory tree (depth-limited)');
+  descriptions.set('head', 'Show first lines of file');
+  descriptions.set('tail', 'Show last lines of file');
+  descriptions.set('wc', 'Count lines/words/bytes');
+  descriptions.set('stat', 'Display file status');
+  descriptions.set('echo', 'Print text');
+  descriptions.set('du', 'Estimate file space usage');
+
+  // CLI commands (canonical names + non-conflicting aliases)
+  commands.forEach((cmd: Command) => {
+    const shortDesc = cmd.description.split('.')[0];
+    if (!descriptions.has(cmd.name)) {
+      descriptions.set(cmd.name, shortDesc);
+    }
+    cmd.aliases?.forEach((alias: string) => {
+      if (!descriptions.has(alias)) {
+        descriptions.set(alias, shortDesc);
+      }
+    });
+  });
+
+  return descriptions;
+}
+
+/**
+ * Get all available command names (used for tab completion).
+ */
+export function getAvailableCommands(): string[] {
+  const commandNames = new Set<string>();
+
+  // CLI commands + aliases
+  commands.forEach((cmd: Command) => {
+    commandNames.add(cmd.name);
+    cmd.aliases?.forEach((alias: string) => {
+      commandNames.add(alias);
+    });
+  });
+
+  // Bash built-ins / VFS commands
+  const bashBuiltins = [
+    'ls', 'cd', 'pwd', 'cat', 'grep', 'find', 'tree', 'head', 'tail',
+    'wc', 'stat', 'echo', 'du', 'sort', 'uniq', 'sed', 'awk', 'jq',
+  ];
+  bashBuiltins.forEach(cmd => commandNames.add(cmd));
+
+  // TUI-only commands
+  const tuiCommands = [
+    'help', 'exit', 'quit', 'q', 'clear', 'cls', 'config', '/config',
+  ];
+  tuiCommands.forEach(cmd => commandNames.add(cmd));
+
+  return Array.from(commandNames);
+}
+
+/**
+ * Get option completions for a command (for -flag tab completion).
  */
 export function getCommandOptions(cmd: string): { name: string; description: string }[] {
-  // 转换命令别名
-  const actualCmd = COMMAND_ALIASES[cmd] || cmd;
-  
-  // 找到对应的 CLI 命令
+  // Find matching CLI command
   const command = commands.find((c: Command) =>
-    c.name === actualCmd || c.aliases?.includes(actualCmd)
+    c.name === cmd || c.aliases?.includes(cmd)
   );
-  
+
   if (!command || !command.options) {
     return [];
   }
-  
-  // 返回所有选项（包括长格式和短格式）及其描述
+
   const options: { name: string; description: string }[] = [];
   for (const opt of command.options) {
     const desc = opt.description + (opt.value ? ` (${opt.value})` : '');
@@ -440,6 +274,182 @@ export function getCommandOptions(cmd: string): { name: string; description: str
       options.push({ name: opt.alias, description: desc });
     }
   }
-  
+
   return options;
+}
+
+// ============ Item Key Completions (DB-backed) ============
+
+let cachedItems: ItemInfo[] = [];
+let lastCacheTime = 0;
+const CACHE_TTL = 60000;
+
+/**
+ * Load items from database for tab completion (cached 60s).
+ */
+export async function getItemsForCompletion(): Promise<ItemInfo[]> {
+  const now = Date.now();
+  if (cachedItems.length > 0 && (now - lastCacheTime) < CACHE_TTL) {
+    return cachedItems;
+  }
+
+  try {
+    const db = getRawSQLite({ quiet: true });
+    if (!db) return cachedItems;
+
+    const stmt = db.prepare(`
+      SELECT key, title, item_type as itemType
+      FROM items
+      WHERE deleted = 0
+      ORDER BY updated_at DESC
+      LIMIT 100
+    `);
+    const result = stmt.all() as Array<{ key: string; title: string | null; itemType: string }>;
+
+    cachedItems = result.map((item) => ({
+      key: item.key,
+      title: item.title || '(untitled)',
+      itemType: item.itemType
+    }));
+
+    lastCacheTime = now;
+    return cachedItems;
+  } catch {
+    return cachedItems;
+  }
+}
+
+/**
+ * Get item key completions matching a prefix.
+ */
+export async function getItemKeyCompletions(
+  prefix: string,
+  limit: number = 8
+): Promise<ItemInfo[]> {
+  const items = await getItemsForCompletion();
+  const lowerPrefix = prefix.toLowerCase();
+
+  const matches = items.filter(item =>
+    item.key.toLowerCase().includes(lowerPrefix) ||
+    item.title.toLowerCase().includes(lowerPrefix)
+  );
+
+  return matches.slice(0, limit);
+}
+
+// ============ Path Completions (VFS-backed) ============
+
+/** Shell characters that need escaping in unquoted arguments */
+const SHELL_SPECIAL = /[ \t'"\\()&|;><$!`#{}[\]*?~]/;
+
+/** Escape a filename for safe use in shell arguments */
+function shellEscape(name: string): string {
+  if (!SHELL_SPECIAL.test(name)) return name;
+  // Wrap in single quotes; escape existing single quotes as '\''
+  return "'" + name.replace(/'/g, "'\\''") + "'";
+}
+
+/** Unescape a shell-escaped token back to a raw path */
+export function shellUnescape(token: string): string {
+  // Strip surrounding quotes
+  if ((token.startsWith("'") && token.endsWith("'")) ||
+      (token.startsWith('"') && token.endsWith('"'))) {
+    return token.slice(1, -1);
+  }
+  // Handle partial quotes (user is mid-typing inside quotes)
+  if (token.startsWith("'")) return token.slice(1);
+  if (token.startsWith('"')) return token.slice(1);
+  // Handle backslash escapes
+  return token.replace(/\\(.)/g, '$1');
+}
+
+/**
+ * Get path completions for a partial path string.
+ *
+ * The partial may contain shell escapes (quotes, backslashes).
+ * Returns fullPath values that are properly shell-escaped.
+ *
+ * Examples:
+ *   partial="/coll"                → "collections/"
+ *   partial="/collections/Ma"      → "Machine-Learning/"
+ *   partial="'/collections/My "    → "'My Collection/'"
+ */
+export async function getPathCompletions(
+  partial: string,
+  cwd: string,
+  limit: number = 12,
+): Promise<PathSuggestion[]> {
+  const shell = getShellSession();
+  const fs = shell.getFs();
+
+  // Unescape the partial so we can query the filesystem with raw names
+  const raw = shellUnescape(partial);
+
+  // Split into directory part and prefix part
+  const lastSlash = raw.lastIndexOf('/');
+  let dirPart: string;
+  let prefix: string;
+  let dirPrefix: string; // The raw directory prefix to reconstruct fullPath
+
+  if (lastSlash === -1) {
+    dirPart = cwd;
+    prefix = raw;
+    dirPrefix = '';
+  } else {
+    const rawDir = raw.slice(0, lastSlash + 1);
+    dirPart = rawDir.startsWith('/') ? rawDir : fs.resolvePath(cwd, rawDir);
+    prefix = raw.slice(lastSlash + 1);
+    dirPrefix = rawDir;
+  }
+
+  try {
+    const entries = await fs.readdir(dirPart);
+    const lowerPrefix = prefix.toLowerCase();
+
+    const results: PathSuggestion[] = [];
+    for (const name of entries) {
+      if (lowerPrefix && !name.toLowerCase().startsWith(lowerPrefix)) continue;
+
+      const fullEntryPath = fs.resolvePath(dirPart, name);
+      let isDir = false;
+      try {
+        const st = await fs.stat(fullEntryPath);
+        isDir = st.isDirectory;
+      } catch {
+        // Can't stat — treat as file
+      }
+
+      const suffix = isDir ? '/' : '';
+      const escapedName = shellEscape(name);
+      // If we used shellEscape (quotes), the trailing / goes outside the quotes
+      const escapedWithSuffix = SHELL_SPECIAL.test(name)
+        ? escapedName + suffix
+        : name + suffix;
+
+      // Reconstruct the full escaped path
+      const needsEscapeDir = SHELL_SPECIAL.test(dirPrefix.replace(/\//g, ''));
+      const fullPath = dirPrefix
+        ? (needsEscapeDir ? shellEscape(dirPrefix) : dirPrefix) + escapedWithSuffix
+        : escapedWithSuffix;
+
+      results.push({
+        name: name + suffix,
+        isDirectory: isDir,
+        fullPath,
+      });
+
+      if (results.length >= limit) break;
+    }
+
+    return results;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get the current shell cwd (for path completion context).
+ */
+export function getShellCwd(): string {
+  return getShellSession().getCwd();
 }

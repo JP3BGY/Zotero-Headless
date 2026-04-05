@@ -47,17 +47,22 @@ server.tool(
   },
   async ({ command }) => {
     const result = await session.execute(command);
+    const isError = result.exitCode !== 0;
 
-    const text = result.exitCode === 0
-      ? result.stdout
-      : [result.stdout, result.stderr].filter(Boolean).join('\n');
+    // Build output: stdout + stderr (if any). On error, always include exit code.
+    const parts: string[] = [];
+    if (result.stdout) parts.push(result.stdout);
+    if (result.stderr) parts.push(isError ? `Error: ${result.stderr}` : result.stderr);
+    if (isError && !result.stdout && !result.stderr) {
+      parts.push(`Command failed with exit code ${result.exitCode}`);
+    }
 
     return {
       content: [{
         type: 'text' as const,
-        text: text || '(no output)',
+        text: parts.join('\n') || '(no output)',
       }],
-      isError: result.exitCode !== 0,
+      isError,
     };
   },
 );
