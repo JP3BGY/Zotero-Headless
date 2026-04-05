@@ -300,6 +300,21 @@ export function initializeDatabase(options?: { quiet?: boolean }): Database {
     console.warn(`${symbols.warning} Database migration warning:`, e);
   }
 
+  // Migration: Create content_fts FTS5 table for full-text search
+  try {
+    sqliteInstance.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS content_fts USING fts5(
+        content,
+        attachment_key UNINDEXED,
+        library_id UNINDEXED,
+        parent_item_key UNINDEXED,
+        tokenize='porter unicode61'
+      );
+    `);
+  } catch (e) {
+    console.warn(`${symbols.warning} Database migration warning (FTS5):`, e);
+  }
+
   if (!quiet) {
     console.log(`${symbols.success} Database initialized: ${dbPath}`);
   }

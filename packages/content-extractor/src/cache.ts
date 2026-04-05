@@ -1,4 +1,4 @@
-import { getDatabase, contentCache } from '@zotero-headless/database';
+import { getDatabase, getRawSQLite, contentCache, attachments } from '@zotero-headless/database';
 import { eq, and } from 'drizzle-orm';
 
 export interface CacheEntry {
@@ -44,6 +44,7 @@ export function getCachedContent(
 
 /**
  * Upsert extracted content into the cache.
+ * Also updates the FTS5 index if available.
  */
 export function setCachedContent(entry: CacheEntry): void {
   const db = getDatabase();
@@ -68,6 +69,33 @@ export function setCachedContent(entry: CacheEntry): void {
       extractedAt: entry.extractedAt,
     })
     .run();
+
+  // Update FTS5 index (best-effort)
+  try {
+    const sqlite = getRawSQLite({ quiet: true });
+
+    // Look up parent item key
+    const att = (db as any)
+      .select({ parentItemKey: attachments.parentItemKey })
+      .from(attachments)
+      .where(and(
+        eq(attachments.key, entry.attachmentKey),
+        eq(attachments.libraryId, entry.libraryId),
+      ))
+      .get();
+
+    const parentItemKey = att?.parentItemKey ?? '';
+
+    // Delete old FTS entry and insert new one
+    sqlite.prepare(
+      `DELETE FROM content_fts WHERE attachment_key = ? AND library_id = ?`
+    ).run(entry.attachmentKey, entry.libraryId);
+    sqlite.prepare(
+      `INSERT INTO content_fts (content, attachment_key, library_id, parent_item_key) VALUES (?, ?, ?, ?)`
+    ).run(entry.content, entry.attachmentKey, entry.libraryId, parentItemKey);
+  } catch {
+    // FTS5 table may not exist yet — silently ignore
+  }
 }
 
 /**
