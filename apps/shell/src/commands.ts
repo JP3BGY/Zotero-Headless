@@ -1,5 +1,6 @@
 import { commands, type Command, setShellMode } from '@zotero-headless/cli';
 import { getRawSQLite } from '@zotero-headless/database';
+import { ZoteroShell as VfsShell } from '@zotero-headless/virtual-fs';
 
 import type { ItemKeySuggestion, LogLevel } from './types.js';
 
@@ -210,6 +211,8 @@ export function getCommandDescriptions(): Map<string, string> {
   descriptions.set('config', '配置管理');
   descriptions.set('/config', '配置管理');
   descriptions.set('cfg', '配置管理');
+  descriptions.set('bash', 'Enter VFS mode (ls, cat, grep on Zotero data)');
+  descriptions.set('vfs', 'Enter VFS mode (ls, cat, grep on Zotero data)');
   
   // 从 CLI 命令中提取描述
   commands.forEach((cmd: Command) => {
@@ -245,7 +248,8 @@ export function getAvailableCommands(): string[] {
   
   // 添加 shell 内置命令
   const builtinCommands = [
-    'help', 'exit', 'quit', 'q', 'clear', 'cls', 'config', '/config', 'cfg'
+    'help', 'exit', 'quit', 'q', 'clear', 'cls', 'config', '/config', 'cfg',
+    'bash', 'vfs',
   ];
   builtinCommands.forEach(cmd => commandNames.add(cmd));
   
@@ -358,6 +362,57 @@ export async function getItemKeyCompletions(
 export function clearItemCache(): void {
   cachedItems = [];
   lastCacheTime = 0;
+}
+
+// ============ VFS Session ============
+
+let vfsSession: VfsShell | null = null;
+
+/**
+ * Get or create the VFS shell session (lazy, singleton).
+ */
+export function getVfsSession(): VfsShell {
+  if (!vfsSession) {
+    vfsSession = new VfsShell();
+  }
+  return vfsSession;
+}
+
+/**
+ * Destroy the VFS session (called when exiting VFS mode).
+ */
+export function destroyVfsSession(): void {
+  if (vfsSession) {
+    vfsSession.destroy();
+    vfsSession = null;
+  }
+}
+
+/**
+ * Execute a command in the VFS shell.
+ * Returns { stdout, stderr, exitCode, cwd }.
+ */
+export async function executeVfsCommand(
+  command: string,
+): Promise<ExecuteResult & { cwd: string }> {
+  const shell = getVfsSession();
+  try {
+    const result = await shell.execute(command);
+    return {
+      stdout: result.stdout,
+      stderr: result.stderr,
+      exitCode: result.exitCode,
+      cwd: shell.getCwd(),
+    };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    return {
+      stdout: '',
+      stderr: errorMsg,
+      exitCode: 1,
+      cwd: shell.getCwd(),
+    };
+  }
 }
 
 /**

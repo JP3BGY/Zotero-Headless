@@ -20,6 +20,7 @@
     "@zotero-headless/database": "workspace:*",
     "@zotero-headless/sync-engine": "workspace:*",
     "@zotero-headless/types": "workspace:*",
+    "@zotero-headless/virtual-fs": "workspace:*",
     "figures": "^6.1.0",
     "ink": "^5.0.0",
     "ink-select-input": "^6.0.0",

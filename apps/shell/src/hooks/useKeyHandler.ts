@@ -4,7 +4,7 @@ import { useShellState } from './useShellState.js';
 import { useHistory } from './useHistory.js';
 import { useCompletions } from './useCompletions.js';
 import { useKeybindings } from './useKeybindings.js';
-import { executeCommand, highlightSearchResult, parseCommand } from '../commands.js';
+import { executeCommand, executeVfsCommand, destroyVfsSession, highlightSearchResult, parseCommand } from '../commands.js';
 import { configManager, appConfig } from '@zotero-headless/core';
 import { t } from '../i18n.js';
 import type { OutputLine } from '../types.js';
@@ -96,6 +96,33 @@ export function useKeyHandler() {
     }
   }, [dispatch, addLine, addLines]);
 
+  const runVfsCommand = useCallback(async (command: string) => {
+    dispatch({ type: 'START_VFS_COMMAND', command });
+
+    try {
+      const result = await executeVfsCommand(command);
+
+      // Display output
+      if (result.stdout) {
+        const lines = result.stdout.split('\n');
+        addLines(lines.map(line => ({ type: 'output' as const, content: line })));
+      }
+      if (result.exitCode !== 0 && result.stderr) {
+        addLine('error', result.stderr, 'error');
+      }
+
+      // Update cwd (may have changed via cd)
+      dispatch({ type: 'SET_VFS_CWD', cwd: result.cwd });
+      dispatch({ type: 'END_VFS_COMMAND', success: result.exitCode === 0 });
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      addLine('error', errorMsg, 'error');
+      dispatch({ type: 'END_VFS_COMMAND', success: false });
+    } finally {
+      dispatch({ type: 'RESET_INPUT' });
+    }
+  }, [dispatch, addLine, addLines]);
+
   const handleExecute = useCallback(async (cmd: string) => {
     // Handle pending confirmation — read callbacks from refs (always current)
     if (state.pendingConfirm) {
@@ -114,6 +141,29 @@ export function useKeyHandler() {
       } else {
         onCancel?.();
       }
+      return;
+    }
+
+    // VFS mode — route all input through ZoteroShell
+    if (state.mode === 'vfs') {
+      if (!cmd.trim()) return;
+      history.add(cmd);
+
+      const trimmed = cmd.trim();
+      // 'exit' or 'quit' leaves VFS mode, returns to CLI mode
+      if (trimmed === 'exit' || trimmed === 'quit') {
+        destroyVfsSession();
+        dispatch({ type: 'EXIT_VFS' });
+        addLine('info', 'Exited VFS mode.');
+        dispatch({ type: 'RESET_INPUT' });
+        return;
+      }
+      if (trimmed === 'clear' || trimmed === 'cls') {
+        dispatch({ type: 'CLEAR_LINES' });
+        return;
+      }
+
+      await runVfsCommand(trimmed);
       return;
     }
 
@@ -142,6 +192,14 @@ export function useKeyHandler() {
       return;
     }
 
+    // Enter VFS mode
+    if (parsedCmd === 'bash' || parsedCmd === 'vfs') {
+      dispatch({ type: 'ENTER_VFS' });
+      addLine('info', 'Entering VFS mode. Use ls, cat, grep, etc. Type "exit" to return.');
+      dispatch({ type: 'RESET_INPUT' });
+      return;
+    }
+
     // Delete commands — show question in output, respond via normal input
     if (DELETE_COMMANDS.includes(parsedCmd) && args.length > 0) {
       const target = args[0];
@@ -162,7 +220,7 @@ export function useKeyHandler() {
 
     // Regular CLI command
     await runCliCommand(parsedCmd, args, cmd);
-  }, [state.mode, state.pendingConfirm, dispatch, history, addLine, doExit, runCliCommand]);
+  }, [state.mode, state.pendingConfirm, dispatch, history, addLine, addLines, doExit, runCliCommand, runVfsCommand]);
 
   const handleTab = useCallback(() => {
     if (state.pendingConfirm) return; // Skip completions during confirmation
@@ -235,7 +293,24 @@ export function useKeyHandler() {
 
     lastCtrlCTime.current = now;
 
-    if (state.mode === 'executing') {
+    if (state.mode === 'vfs-executing') {
+      // Cancel running VFS command
+      dispatch({ type: 'END_VFS_COMMAND', success: false });
+      dispatch({ type: 'RESET_INPUT' });
+      addLine('info', t.ctrlCHint);
+    } else if (state.mode === 'vfs') {
+      if (state.input.trim()) {
+        // Clear current input
+        dispatch({ type: 'RESET_INPUT' });
+        addLine('info', t.ctrlCHint);
+      } else {
+        // Exit VFS mode
+        destroyVfsSession();
+        dispatch({ type: 'EXIT_VFS' });
+        addLine('info', 'Exited VFS mode.');
+        dispatch({ type: 'RESET_INPUT' });
+      }
+    } else if (state.mode === 'executing') {
       // Cancel running command
       dispatch({ type: 'END_COMMAND', success: false });
       dispatch({ type: 'RESET_INPUT' });
@@ -268,8 +343,8 @@ export function useKeyHandler() {
       return;
     }
 
-    // Config mode is handled by ConfigPanel component
-    if (state.mode === 'executing' || state.mode === 'config') return;
+    // Config mode is handled by ConfigPanel component; executing modes block input
+    if (state.mode === 'executing' || state.mode === 'vfs-executing' || state.mode === 'config') return;
 
     if (kb.match('submit', input, key)) {
       handleExecute(state.input);

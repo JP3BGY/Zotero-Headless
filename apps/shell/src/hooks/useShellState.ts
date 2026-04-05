@@ -3,7 +3,7 @@ import type { OutputLine, CommandSuggestion, ItemKeySuggestion, LogLevel } from 
 import { t } from '../i18n.js';
 
 export interface ShellState {
-  mode: 'idle' | 'executing' | 'config' | 'exiting';
+  mode: 'idle' | 'executing' | 'config' | 'exiting' | 'vfs' | 'vfs-executing';
   input: string;
   inputKey: number;
   lines: OutputLine[];
@@ -19,6 +19,8 @@ export interface ShellState {
   confirmMessage: string | null;
   // Collapsed command groups (set of groupIds)
   collapsedGroups: Record<number, true>;
+  // VFS mode state
+  vfsCwd: string;
 }
 
 export type ShellAction =
@@ -38,7 +40,12 @@ export type ShellAction =
   | { type: 'EXIT_CONFIG' }
   | { type: 'TOGGLE_GROUP'; groupId: number }
   | { type: 'EXPAND_ALL' }
-  | { type: 'COLLAPSE_ALL' };
+  | { type: 'COLLAPSE_ALL' }
+  | { type: 'ENTER_VFS' }
+  | { type: 'EXIT_VFS' }
+  | { type: 'SET_VFS_CWD'; cwd: string }
+  | { type: 'START_VFS_COMMAND'; command: string }
+  | { type: 'END_VFS_COMMAND'; success: boolean };
 
 let lineIdCounter = 0;
 
@@ -214,6 +221,52 @@ function shellReducer(state: ShellState, action: ShellAction): ShellState {
       return { ...state, collapsedGroups: allGroups };
     }
 
+    case 'ENTER_VFS':
+      return { ...state, mode: 'vfs', vfsCwd: '/' };
+
+    case 'EXIT_VFS':
+      return { ...state, mode: 'idle', vfsCwd: '/' };
+
+    case 'SET_VFS_CWD':
+      return { ...state, vfsCwd: action.cwd };
+
+    case 'START_VFS_COMMAND': {
+      const vfsInputLineId = lineIdCounter++;
+      const vfsInputLine: OutputLine = {
+        id: vfsInputLineId,
+        type: 'input',
+        content: action.command,
+        status: 'pending',
+        groupId: vfsInputLineId,
+        logLevel: 'info',
+      };
+      return {
+        ...state,
+        mode: 'vfs-executing',
+        executingCommand: action.command,
+        executingStartTime: Date.now(),
+        currentInputLineId: vfsInputLineId,
+        lines: [...state.lines, vfsInputLine],
+      };
+    }
+
+    case 'END_VFS_COMMAND': {
+      const vfsFinalStatus = action.success ? 'success' as const : 'error' as const;
+      const vfsLines = state.currentInputLineId !== null
+        ? state.lines.map(l =>
+            l.id === state.currentInputLineId ? { ...l, status: vfsFinalStatus } : l
+          )
+        : state.lines;
+      return {
+        ...state,
+        mode: 'vfs',
+        executingCommand: null,
+        executingStartTime: null,
+        currentInputLineId: null,
+        lines: vfsLines,
+      };
+    }
+
     default:
       return state;
   }
@@ -237,6 +290,7 @@ export function createInitialState(): ShellState {
     pendingConfirm: false,
     confirmMessage: null,
     collapsedGroups: {},
+    vfsCwd: '/',
   };
 }
 
