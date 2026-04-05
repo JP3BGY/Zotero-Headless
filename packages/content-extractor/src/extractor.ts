@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
 import AdmZip from 'adm-zip';
-import { getDatabase, attachments } from '@zotero-headless/database';
+import { getDatabase, attachments, items } from '@zotero-headless/database';
 import { eq, and } from 'drizzle-orm';
 import { attachmentManager } from '@zotero-headless/attachment-manager';
 import type { ExtractedContent, ExtractionOptions, RenderedPage, RenderOptions, AnnotationRegion, RenderedAnnotation } from './types.js';
@@ -81,11 +81,36 @@ export class ContentExtractor {
   }> {
     const db = getDatabase();
 
-    const attachment = (db as any)
+    let attachment = (db as any)
       .select()
       .from(attachments)
       .where(eq(attachments.key, attachmentKey))
       .get();
+
+    // Fallback: attachment may only exist in items table (sync doesn't always populate attachments table)
+    if (!attachment) {
+      const item = (db as any)
+        .select()
+        .from(items)
+        .where(and(eq(items.key, attachmentKey), eq(items.itemType, 'attachment')))
+        .get();
+      if (item) {
+        const data = JSON.parse(item.rawJson)?.data ?? {};
+        const linkMode = data.linkMode ?? '';
+        attachment = {
+          key: item.key,
+          libraryId: item.libraryId,
+          parentItemKey: data.parentItem ?? null,
+          filename: data.filename ?? data.title ?? null,
+          contentType: data.contentType ?? null,
+          path: null,
+          // imported_file/imported_url attachments are stored on WebDAV as {key}.zip
+          webdavPath: (linkMode === 'imported_file' || linkMode === 'imported_url')
+            ? `${item.key}.zip` : null,
+          md5: data.md5 ?? null,
+        };
+      }
+    }
 
     if (!attachment) {
       throw new Error(`Attachment not found: ${attachmentKey}`);

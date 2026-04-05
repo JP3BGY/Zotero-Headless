@@ -1281,6 +1281,38 @@ export class SyncManager extends EventEmitter {
       JSON.stringify(apiItem)
     );
 
+    // Sync attachment metadata to attachments table
+    if (data.itemType === 'attachment' && data.parentItem) {
+      const linkMode = data.linkMode ?? '';
+      const webdavPath = (linkMode === 'imported_file' || linkMode === 'imported_url')
+        ? `${apiItem.key}.zip` : null;
+      const attStmt = sqlite.prepare(`
+        INSERT OR REPLACE INTO attachments (
+          key, parent_item_key, library_id, filename, content_type,
+          file_type, path, url, version, created_at, updated_at,
+          deleted, size, md5, webdav_path, raw_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      attStmt.run(
+        apiItem.key,
+        data.parentItem,
+        libraryId,
+        data.filename ?? data.title ?? null,
+        data.contentType ?? null,
+        linkMode || null,
+        null, // path — resolved later by attachment-manager
+        data.url ?? null,
+        apiItem.version,
+        createdAt,
+        updatedAt,
+        data.deleted ? 1 : 0,
+        null, // size — not in API response
+        data.md5 ?? null,
+        webdavPath,
+        JSON.stringify(apiItem),
+      );
+    }
+
     // Sync tags to item_tags table
     const tags: Array<{ tag: string; type?: number }> = data.tags ?? [];
     if (tags.length > 0) {
