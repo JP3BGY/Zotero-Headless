@@ -5,9 +5,9 @@
  * Provides stateful session management (cwd persists across calls).
  */
 
-import { Bash, type BashExecResult } from 'just-bash';
+import { Bash, type BashExecResult, type CustomCommand } from 'just-bash';
 import { ZoteroFs } from './zotero-fs.js';
-import { customLs, customGrep } from './custom-commands.js';
+import { customLs, customGrep, customCat, customTree } from './custom-commands.js';
 import type { CommandResult } from './types.js';
 
 const DEFAULT_OUTPUT_LIMIT = 200_000; // ~50k tokens
@@ -19,6 +19,8 @@ export interface ZoteroShellOptions {
   cwd?: string;
   /** Maximum characters for command output (default: 200000) */
   outputLimit?: number;
+  /** Additional custom commands to register alongside built-in VFS commands */
+  customCommands?: CustomCommand[];
 }
 
 export class ZoteroShell {
@@ -41,7 +43,7 @@ export class ZoteroShell {
         TERM: 'xterm-256color',
         PS1: 'zotero-vfs$ ',
       },
-      customCommands: [customLs, customGrep],
+      customCommands: [customLs, customGrep, customCat, customTree, ...(options?.customCommands ?? [])],
     });
 
     this.outputLimit = options?.outputLimit ?? DEFAULT_OUTPUT_LIMIT;
@@ -102,6 +104,13 @@ export class ZoteroShell {
    */
   getCwd(): string {
     return this.cwd;
+  }
+
+  /**
+   * Get the underlying filesystem for direct queries (e.g. path completion).
+   */
+  getFs(): ZoteroFs {
+    return this.bash.fs as ZoteroFs;
   }
 
   /**

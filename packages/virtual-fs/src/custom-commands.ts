@@ -2,8 +2,10 @@
  * Custom Commands for the Zotero Virtual Filesystem
  *
  * Overrides built-in just-bash commands with database-optimized versions:
+ * - cat: Shows formatted item summary when given an item directory
  * - grep: Uses FTS5 for recursive content search
  * - ls: Shows item titles alongside keys
+ * - tree: Depth-limited directory tree with proper cwd handling
  */
 
 import { defineCommand, type ExecResult, type CommandContext } from 'just-bash';
@@ -11,6 +13,310 @@ import { parseItemData } from '@zotero-headless/types';
 import { resolvePath, getItemVirtualEntries } from './path-resolver.js';
 import { getCollectionTree } from './cache.js';
 import type { ResolvedPath } from './types.js';
+
+// ============ Custom cat ============
+
+/**
+ * Custom cat that shows formatted item summaries when given item directories.
+ *
+ * - `cat /items/KEY` or `cat KEY` (within a collection) → formatted item summary
+ * - `cat KEY/metadata.json` → pretty-printed JSON (same as built-in)
+ * - `cat KEY/abstract.txt` → plain text (same as built-in)
+ * - Multiple files supported: `cat file1 file2`
+ */
+export const customCat = defineCommand('cat', async (args: string[], ctx: CommandContext): Promise<ExecResult> => {
+  // Parse flags
+  let lineNumbers = false;
+  const paths: string[] = [];
+
+  for (const arg of args) {
+    if (arg === '-n' || arg === '--number') {
+      lineNumbers = true;
+    } else if (arg === '--') {
+      continue;
+    } else if (!arg.startsWith('-') || arg === '-') {
+      paths.push(arg);
+    }
+    // Ignore other flags silently
+  }
+
+  // If stdin is piped and no paths, read stdin
+  if (paths.length === 0 && ctx.stdin) {
+    const content = lineNumbers ? addLineNumbers(ctx.stdin) : ctx.stdin;
+    return { stdout: content, stderr: '', exitCode: 0 };
+  }
+
+  if (paths.length === 0) {
+    return { stdout: '', stderr: 'cat: missing operand\n', exitCode: 1 };
+  }
+
+  const outputs: string[] = [];
+  let hasError = false;
+
+  for (const rawPath of paths) {
+    const absPath = rawPath.startsWith('/') ? rawPath : ctx.fs.resolvePath(ctx.cwd, rawPath);
+
+    try {
+      const stat = await ctx.fs.stat(absPath);
+
+      if (stat.isDirectory) {
+        // Check if this is an item directory — show formatted summary
+        const resolved = await resolvePath(absPath);
+        if (resolved && resolved.type === 'item') {
+          const summary = await formatItemSummary(resolved.libraryId, resolved.itemKey);
+          if (summary) {
+            outputs.push(summary);
+            continue;
+          }
+        }
+        // Not an item directory — error like regular cat
+        outputs.push(`cat: ${rawPath}: Is a directory`);
+        hasError = true;
+      } else {
+        let content = await ctx.fs.readFile(absPath);
+        if (lineNumbers) {
+          content = addLineNumbers(content);
+        }
+        outputs.push(content);
+      }
+    } catch (e: any) {
+      outputs.push(`cat: ${rawPath}: ${e.message}`);
+      hasError = true;
+    }
+  }
+
+  const stdout = outputs.join('\n');
+  return {
+    stdout: stdout.endsWith('\n') ? stdout : stdout + '\n',
+    stderr: '',
+    exitCode: hasError && outputs.length === 1 ? 1 : 0,
+  };
+});
+
+function addLineNumbers(text: string): string {
+  const lines = text.split('\n');
+  const width = String(lines.length).length;
+  return lines.map((line, i) => `${String(i + 1).padStart(width)}  ${line}`).join('\n');
+}
+
+/**
+ * Format a nice item summary (similar to the CLI `get` command).
+ */
+async function formatItemSummary(libraryId: number, itemKey: string): Promise<string | null> {
+  const { getDatabase, items, attachments } = await getDb();
+  const { eq, and, like } = await getDrizzle();
+  const db = getDatabase();
+
+  const item = (db as any).select().from(items)
+    .where(and(eq(items.key, itemKey), eq(items.libraryId, libraryId)))
+    .get();
+
+  if (!item) return null;
+
+  const data = parseItemData(item.rawJson);
+  const lines: string[] = [];
+
+  // Title
+  lines.push(`Title:    ${item.title || '(untitled)'}`);
+  lines.push(`Type:     ${item.itemType}`);
+  lines.push(`Key:      ${item.key}`);
+
+  // Creators
+  if (data.creators && data.creators.length > 0) {
+    const authors = data.creators.map(c => {
+      if (c.name) return c.name;
+      return [c.lastName, c.firstName].filter(Boolean).join(', ');
+    });
+    lines.push(`Authors:  ${authors.join('; ')}`);
+  }
+
+  // Date
+  if (data.date) lines.push(`Date:     ${data.date}`);
+
+  // Journal / Publisher
+  if (data.publicationTitle) lines.push(`Journal:  ${data.publicationTitle}`);
+  if (data.publisher) lines.push(`Publisher: ${data.publisher}`);
+  if (data.volume || data.issue || data.pages) {
+    const parts: string[] = [];
+    if (data.volume) parts.push(`Vol. ${data.volume}`);
+    if (data.issue) parts.push(`No. ${data.issue}`);
+    if (data.pages) parts.push(`pp. ${data.pages}`);
+    lines.push(`          ${parts.join(', ')}`);
+  }
+
+  // Identifiers
+  if (data.DOI) lines.push(`DOI:      ${data.DOI}`);
+  if (data.url) lines.push(`URL:      ${data.url}`);
+  if (data.ISBN) lines.push(`ISBN:     ${data.ISBN}`);
+  if (data.ISSN) lines.push(`ISSN:     ${data.ISSN}`);
+
+  // Tags
+  if (data.tags && data.tags.length > 0) {
+    const tags = data.tags.map(t => typeof t === 'string' ? t : t.tag);
+    lines.push(`Tags:     ${tags.join(', ')}`);
+  }
+
+  // Abstract (truncated)
+  if (data.abstractNote) {
+    lines.push('');
+    const abstract = data.abstractNote.length > 500
+      ? data.abstractNote.slice(0, 497) + '...'
+      : data.abstractNote;
+    lines.push(`Abstract:`);
+    lines.push(abstract);
+  }
+
+  // Attachments count
+  const atts = (db as any).select().from(attachments)
+    .where(and(eq(attachments.parentItemKey, itemKey), eq(attachments.libraryId, libraryId)))
+    .all() as any[];
+  if (atts.length > 0) {
+    lines.push('');
+    lines.push(`Attachments (${atts.length}):`);
+    for (const att of atts) {
+      if (att.filename) {
+        lines.push(`  ${att.filename}`);
+      }
+    }
+  }
+
+  // Notes count
+  const notes = (db as any).select().from(items)
+    .where(and(
+      eq(items.libraryId, libraryId),
+      eq(items.itemType, 'note'),
+      like(items.rawJson, `%"parentItem":"${itemKey}"%`),
+    ))
+    .all() as any[];
+  if (notes.length > 0) {
+    lines.push(`Notes:    ${notes.length}`);
+  }
+
+  return lines.join('\n');
+}
+
+// ============ Custom tree ============
+
+/**
+ * Custom tree command with proper cwd handling and depth limiting.
+ *
+ * Recursively lists directory structure. Limits depth to prevent
+ * overwhelming output from large Zotero libraries.
+ */
+export const customTree = defineCommand('tree', async (args: string[], ctx: CommandContext): Promise<ExecResult> => {
+  // Parse args
+  let maxDepth = 3; // Default depth limit
+  let dirsOnly = false;
+  const paths: string[] = [];
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '-L' && i + 1 < args.length) {
+      maxDepth = parseInt(args[++i], 10) || 3;
+    } else if (arg === '-d' || arg === '--dirs-only') {
+      dirsOnly = true;
+    } else if (arg.startsWith('-L')) {
+      maxDepth = parseInt(arg.slice(2), 10) || 3;
+    } else if (!arg.startsWith('-')) {
+      paths.push(arg);
+    }
+  }
+
+  if (paths.length === 0) {
+    paths.push(ctx.cwd);
+  }
+
+  const allOutput: string[] = [];
+
+  for (const rawPath of paths) {
+    const absPath = rawPath.startsWith('/') ? rawPath : ctx.fs.resolvePath(ctx.cwd, rawPath);
+
+    try {
+      const stat = await ctx.fs.stat(absPath);
+      if (!stat.isDirectory) {
+        allOutput.push(rawPath);
+        allOutput.push('');
+        allOutput.push('0 directories, 1 file');
+        continue;
+      }
+    } catch (e: any) {
+      return { stdout: '', stderr: `tree: '${rawPath}': No such file or directory\n`, exitCode: 2 };
+    }
+
+    // Show the root path
+    const displayRoot = rawPath === ctx.cwd ? '.' : rawPath;
+    allOutput.push(displayRoot);
+
+    const counts = { dirs: 0, files: 0 };
+    const lines = await buildTree(ctx, absPath, '', maxDepth, 0, dirsOnly, counts);
+    allOutput.push(...lines);
+    allOutput.push('');
+    allOutput.push(`${counts.dirs} director${counts.dirs === 1 ? 'y' : 'ies'}, ${counts.files} file${counts.files === 1 ? '' : 's'}`);
+  }
+
+  return { stdout: allOutput.join('\n') + '\n', stderr: '', exitCode: 0 };
+});
+
+async function buildTree(
+  ctx: CommandContext,
+  dirPath: string,
+  prefix: string,
+  maxDepth: number,
+  currentDepth: number,
+  dirsOnly: boolean,
+  counts: { dirs: number; files: number },
+): Promise<string[]> {
+  if (currentDepth >= maxDepth) return [];
+
+  const lines: string[] = [];
+
+  let entries: string[];
+  try {
+    entries = await ctx.fs.readdir(dirPath);
+  } catch {
+    return [];
+  }
+
+  // Get stat for each entry to determine type
+  const entryInfos: Array<{ name: string; isDir: boolean }> = [];
+  for (const name of entries) {
+    const fullPath = ctx.fs.resolvePath(dirPath, name);
+    try {
+      const s = await ctx.fs.stat(fullPath);
+      if (dirsOnly && !s.isDirectory) continue;
+      entryInfos.push({ name, isDir: s.isDirectory });
+    } catch {
+      entryInfos.push({ name, isDir: false });
+    }
+  }
+
+  for (let i = 0; i < entryInfos.length; i++) {
+    const entry = entryInfos[i];
+    const isLast = i === entryInfos.length - 1;
+    const connector = isLast ? '└── ' : '├── ';
+    const childPrefix = isLast ? '    ' : '│   ';
+
+    if (entry.isDir) {
+      counts.dirs++;
+      lines.push(`${prefix}${connector}${entry.name}/`);
+      const childLines = await buildTree(
+        ctx,
+        ctx.fs.resolvePath(dirPath, entry.name),
+        prefix + childPrefix,
+        maxDepth,
+        currentDepth + 1,
+        dirsOnly,
+        counts,
+      );
+      lines.push(...childLines);
+    } else {
+      counts.files++;
+      lines.push(`${prefix}${connector}${entry.name}`);
+    }
+  }
+
+  return lines;
+}
 
 // ============ DB Helpers ============
 

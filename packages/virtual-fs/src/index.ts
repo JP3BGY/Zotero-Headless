@@ -14,6 +14,7 @@ export { ZoteroFs } from './zotero-fs.js';
 export { ZoteroShell } from './zotero-shell.js';
 export type { ZoteroShellOptions } from './zotero-shell.js';
 export type { CommandResult, VfsSession, VfsOptions } from './types.js';
+export type { CustomCommand } from 'just-bash';
 
 import { ZoteroShell, type ZoteroShellOptions } from './zotero-shell.js';
 import type { CommandResult, VfsSession, VfsOptions } from './types.js';
