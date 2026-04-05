@@ -289,11 +289,13 @@ async function getItemByKey(libraryId: number, key: string): Promise<any | null>
 }
 
 async function getAttachmentByFilename(libraryId: number, parentItemKey: string, filename: string): Promise<any | null> {
-  const { getDatabase, attachments } = await import('@zotero-headless/database');
-  const { eq, and } = await import('drizzle-orm');
+  const { getDatabase, attachments, items } = await import('@zotero-headless/database');
+  const { eq, and, like } = await import('drizzle-orm');
+  const { parseItemData } = await import('@zotero-headless/types');
   const db = getDatabase();
 
-  return (db as any)
+  // Try attachments table first
+  const att = (db as any)
     .select()
     .from(attachments)
     .where(and(
@@ -301,7 +303,32 @@ async function getAttachmentByFilename(libraryId: number, parentItemKey: string,
       eq(attachments.libraryId, libraryId),
       eq(attachments.filename, filename),
     ))
-    .get() ?? null;
+    .get();
+
+  if (att) return att;
+
+  // Fallback: check items table for attachment children
+  const attItems = (db as any)
+    .select()
+    .from(items)
+    .where(and(
+      eq(items.libraryId, libraryId),
+      eq(items.itemType, 'attachment'),
+      eq(items.deleted, false),
+      like(items.rawJson, `%"parentItem":"${parentItemKey}"%`),
+    ))
+    .all() as any[];
+
+  for (const item of attItems) {
+    const data = parseItemData(item.rawJson);
+    const itemFilename = data.filename ?? data.title ?? item.key;
+    if (itemFilename === filename) {
+      // Return in a shape compatible with the attachments table format
+      return { key: item.key, parentItemKey, libraryId, filename: itemFilename, size: null };
+    }
+  }
+
+  return null;
 }
 
 /**

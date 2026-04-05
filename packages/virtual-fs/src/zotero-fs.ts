@@ -30,6 +30,7 @@ import {
   metadataFileStat,
   abstractFileStat,
 } from './node-factory.js';
+import { parseItemData } from '@zotero-headless/types';
 import type { ResolvedPath } from './types.js';
 
 const MAX_LIST_ITEMS = 200;
@@ -398,8 +399,13 @@ export class ZoteroFs implements IFileSystem {
         const att = (db as any).select().from(attachments)
           .where(and(eq(attachments.key, resolved.attachmentKey), eq(attachments.libraryId, resolved.libraryId)))
           .get();
-        if (!att) throw new NotFoundError(path);
-        return fileStat(att.size ?? 0);
+        if (att) return fileStat(att.size ?? 0);
+        // Fallback: check items table
+        const attItem = (db as any).select().from(items)
+          .where(and(eq(items.key, resolved.attachmentKey), eq(items.libraryId, resolved.libraryId)))
+          .get();
+        if (!attItem) throw new NotFoundError(path);
+        return fileStat(0);
       }
 
       case 'annotation-file': {
@@ -503,7 +509,8 @@ export class ZoteroFs implements IFileSystem {
       }
 
       case 'attachments-dir': {
-        const atts = (db as any).select().from(attachments)
+        // Query attachments table first
+        const attsFromTable = (db as any).select().from(attachments)
           .where(and(
             eq(attachments.parentItemKey, resolved.itemKey),
             eq(attachments.libraryId, resolved.libraryId),
@@ -511,19 +518,53 @@ export class ZoteroFs implements IFileSystem {
           ))
           .all() as any[];
 
-        return atts
+        const entries: DirentEntry[] = attsFromTable
           .filter((a: any) => a.filename)
           .map((a: any) => direntFile(a.filename));
-      }
 
-      case 'annotations-dir': {
-        const annotations = (db as any).select().from(items)
+        // Also check items table for attachment children not in attachments table
+        const attKeysInTable = new Set(attsFromTable.map((a: any) => a.key));
+        const attItems = (db as any).select().from(items)
           .where(and(
             eq(items.libraryId, resolved.libraryId),
-            eq(items.itemType, 'annotation'),
+            eq(items.itemType, 'attachment'),
+            eq(items.deleted, false),
             like(items.rawJson, `%"parentItem":"${resolved.itemKey}"%`),
           ))
           .all() as any[];
+
+        for (const attItem of attItems) {
+          if (attKeysInTable.has(attItem.key)) continue;
+          const data = parseItemData(attItem.rawJson);
+          const filename = data.filename ?? data.title ?? attItem.key;
+          if (filename) entries.push(direntFile(filename));
+        }
+
+        return entries;
+      }
+
+      case 'annotations-dir': {
+        // Annotations are children of attachments, not the top-level item.
+        // Find all attachment keys for this item, then find annotations under them.
+        const attChildren = (db as any).select().from(items)
+          .where(and(
+            eq(items.libraryId, resolved.libraryId),
+            eq(items.itemType, 'attachment'),
+            like(items.rawJson, `%"parentItem":"${resolved.itemKey}"%`),
+          ))
+          .all() as any[];
+
+        const annotations: any[] = [];
+        for (const att of attChildren) {
+          const attAnnotations = (db as any).select().from(items)
+            .where(and(
+              eq(items.libraryId, resolved.libraryId),
+              eq(items.itemType, 'annotation'),
+              like(items.rawJson, `%"parentItem":"${att.key}"%`),
+            ))
+            .all() as any[];
+          annotations.push(...attAnnotations);
+        }
 
         return annotations.map((a: any) => direntFile(`${a.key}.txt`));
       }
