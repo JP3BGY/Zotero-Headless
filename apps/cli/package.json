@@ -35,6 +35,7 @@
     "@zotero-headless/database": "workspace:*",
     "@zotero-headless/sync-engine": "workspace:*",
     "@zotero-headless/types": "workspace:*",
+    "@zotero-headless/virtual-fs": "workspace:*",
     "@zotero-headless/webdav-client": "file:../../packages/webdav-client",
     "commander": "^14.0.3",
     "jsdom": "^28.1.0",

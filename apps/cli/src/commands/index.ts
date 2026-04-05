@@ -34,6 +34,7 @@ import { importCommands } from './import-cmd.js';
 import { mvCommands } from './mv.js';
 import { classifyCommands } from './classify.js';
 import { pluginCommands } from './plugin.js';
+import { vfsCommands } from './vfs.js';
 
 export const commands: Command[] = [
   ...syncCommands,
@@ -69,4 +70,5 @@ export const commands: Command[] = [
   ...mvCommands,
   ...classifyCommands,
   ...pluginCommands,
+  ...vfsCommands,
 ];
