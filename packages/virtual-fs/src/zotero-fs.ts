@@ -32,6 +32,7 @@ import {
 } from './node-factory.js';
 import { parseItemData } from '@zotero-headless/types';
 import type { ResolvedPath } from './types.js';
+import { getDb, getDrizzle } from './db-helpers.js';
 
 const MAX_LIST_ITEMS = 200;
 
@@ -63,24 +64,6 @@ class IsDirectoryError extends Error {
     super(`EISDIR: illegal operation on a directory, '${path}'`);
     this.name = 'IsDirectoryError';
   }
-}
-
-// ============ DB Helpers (lazy loaded) ============
-
-let _dbModule: any;
-async function getDb() {
-  if (!_dbModule) {
-    _dbModule = await import('@zotero-headless/database');
-  }
-  return _dbModule;
-}
-
-let _drizzleModule: any;
-async function getDrizzle() {
-  if (!_drizzleModule) {
-    _drizzleModule = await import('drizzle-orm');
-  }
-  return _drizzleModule;
 }
 
 // ============ ZoteroFs Class ============
@@ -545,7 +528,7 @@ export class ZoteroFs implements IFileSystem {
 
       case 'annotations-dir': {
         // Annotations are children of attachments, not the top-level item.
-        // Find all attachment keys for this item, then find annotations under them.
+        // Find attachment keys, then batch-query annotations in a single IN clause.
         const attChildren = (db as any).select().from(items)
           .where(and(
             eq(items.libraryId, resolved.libraryId),
@@ -554,17 +537,19 @@ export class ZoteroFs implements IFileSystem {
           ))
           .all() as any[];
 
-        const annotations: any[] = [];
-        for (const att of attChildren) {
-          const attAnnotations = (db as any).select().from(items)
-            .where(and(
-              eq(items.libraryId, resolved.libraryId),
-              eq(items.itemType, 'annotation'),
-              like(items.rawJson, `%"parentItem":"${att.key}"%`),
-            ))
-            .all() as any[];
-          annotations.push(...attAnnotations);
-        }
+        if (attChildren.length === 0) return [];
+
+        const { getRawSQLite } = await getDb();
+        const sqlite = getRawSQLite();
+        const placeholders = attChildren.map(() => '?').join(',');
+        const attKeys = attChildren.map((a: any) => `%"parentItem":"${a.key}"%`);
+        const likeConditions = attKeys.map((_: string, i: number) => `raw_json LIKE ?${i + 2}`).join(' OR ');
+        // Use raw SQL for dynamic IN/LIKE conditions
+        const annotations = sqlite.prepare(`
+          SELECT key FROM items
+          WHERE library_id = ? AND item_type = 'annotation'
+          AND (${attKeys.map(() => 'raw_json LIKE ?').join(' OR ')})
+        `).all(resolved.libraryId, ...attKeys) as any[];
 
         return annotations.map((a: any) => direntFile(`${a.key}.txt`));
       }

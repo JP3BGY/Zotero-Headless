@@ -13,6 +13,9 @@ import { parseItemData } from '@zotero-headless/types';
 import { resolvePath, getItemVirtualEntries } from './path-resolver.js';
 import { getCollectionTree } from './cache.js';
 import type { ResolvedPath } from './types.js';
+import { getDb, getDrizzle } from './db-helpers.js';
+
+const MAX_ABSTRACT_DISPLAY_LENGTH = 500;
 
 // ============ Custom cat ============
 
@@ -51,26 +54,32 @@ export const customCat = defineCommand('cat', async (args: string[], ctx: Comman
   }
 
   const outputs: string[] = [];
+  const errors: string[] = [];
   let hasError = false;
 
   for (const rawPath of paths) {
     const absPath = rawPath.startsWith('/') ? rawPath : ctx.fs.resolvePath(ctx.cwd, rawPath);
 
     try {
-      const stat = await ctx.fs.stat(absPath);
+      // Resolve once — avoids double path resolution for item directories
+      const resolved = await resolvePath(absPath);
+      if (!resolved) {
+        errors.push(`cat: ${rawPath}: No such file or directory`);
+        hasError = true;
+        continue;
+      }
 
-      if (stat.isDirectory) {
-        // Check if this is an item directory — show formatted summary
-        const resolved = await resolvePath(absPath);
-        if (resolved && resolved.type === 'item') {
-          const summary = await formatItemSummary(resolved.libraryId, resolved.itemKey);
-          if (summary) {
-            outputs.push(summary);
-            continue;
-          }
+      if (resolved.type === 'item') {
+        const summary = await formatItemSummary(resolved.libraryId, resolved.itemKey);
+        if (summary) {
+          outputs.push(summary);
+          continue;
         }
-        // Not an item directory — error like regular cat
-        outputs.push(`cat: ${rawPath}: Is a directory`);
+      }
+
+      const stat = await ctx.fs.stat(absPath);
+      if (stat.isDirectory) {
+        errors.push(`cat: ${rawPath}: Is a directory`);
         hasError = true;
       } else {
         let content = await ctx.fs.readFile(absPath);
@@ -80,16 +89,16 @@ export const customCat = defineCommand('cat', async (args: string[], ctx: Comman
         outputs.push(content);
       }
     } catch (e: any) {
-      outputs.push(`cat: ${rawPath}: ${e.message}`);
+      errors.push(`cat: ${rawPath}: ${e.message}`);
       hasError = true;
     }
   }
 
   const stdout = outputs.join('\n');
   return {
-    stdout: stdout.endsWith('\n') ? stdout : stdout + '\n',
-    stderr: '',
-    exitCode: hasError && outputs.length === 1 ? 1 : 0,
+    stdout: stdout ? (stdout.endsWith('\n') ? stdout : stdout + '\n') : '',
+    stderr: errors.length > 0 ? errors.join('\n') + '\n' : '',
+    exitCode: hasError ? 1 : 0,
   };
 });
 
@@ -159,8 +168,8 @@ async function formatItemSummary(libraryId: number, itemKey: string): Promise<st
   // Abstract (truncated)
   if (data.abstractNote) {
     lines.push('');
-    const abstract = data.abstractNote.length > 500
-      ? data.abstractNote.slice(0, 497) + '...'
+    const abstract = data.abstractNote.length > MAX_ABSTRACT_DISPLAY_LENGTH
+      ? data.abstractNote.slice(0, MAX_ABSTRACT_DISPLAY_LENGTH - 3) + '...'
       : data.abstractNote;
     lines.push(`Abstract:`);
     lines.push(abstract);
@@ -270,24 +279,31 @@ async function buildTree(
 
   const lines: string[] = [];
 
-  let entries: string[];
+  let rawEntries: Array<{ name: string; isDirectory: boolean }>;
   try {
-    entries = await ctx.fs.readdir(dirPath);
+    if (ctx.fs.readdirWithFileTypes) {
+      const dirents = await ctx.fs.readdirWithFileTypes(dirPath);
+      rawEntries = dirents.map(d => ({ name: d.name, isDirectory: d.isDirectory }));
+    } else {
+      const names = await ctx.fs.readdir(dirPath);
+      rawEntries = [];
+      for (const name of names) {
+        try {
+          const s = await ctx.fs.stat(ctx.fs.resolvePath(dirPath, name));
+          rawEntries.push({ name, isDirectory: s.isDirectory });
+        } catch {
+          rawEntries.push({ name, isDirectory: false });
+        }
+      }
+    }
   } catch {
     return [];
   }
 
-  // Get stat for each entry to determine type
   const entryInfos: Array<{ name: string; isDir: boolean }> = [];
-  for (const name of entries) {
-    const fullPath = ctx.fs.resolvePath(dirPath, name);
-    try {
-      const s = await ctx.fs.stat(fullPath);
-      if (dirsOnly && !s.isDirectory) continue;
-      entryInfos.push({ name, isDir: s.isDirectory });
-    } catch {
-      entryInfos.push({ name, isDir: false });
-    }
+  for (const e of rawEntries) {
+    if (dirsOnly && !e.isDirectory) continue;
+    entryInfos.push({ name: e.name, isDir: e.isDirectory });
   }
 
   for (let i = 0; i < entryInfos.length; i++) {
@@ -316,24 +332,6 @@ async function buildTree(
   }
 
   return lines;
-}
-
-// ============ DB Helpers ============
-
-let _dbModule: any;
-async function getDb() {
-  if (!_dbModule) {
-    _dbModule = await import('@zotero-headless/database');
-  }
-  return _dbModule;
-}
-
-let _drizzleModule: any;
-async function getDrizzle() {
-  if (!_drizzleModule) {
-    _drizzleModule = await import('drizzle-orm');
-  }
-  return _drizzleModule;
 }
 
 // ============ Custom ls ============
@@ -395,31 +393,35 @@ export const customLs = defineCommand('ls', async (args: string[], ctx: CommandC
       const entries = await getItemListingEntries(resolved, longFormat);
       lines.push(...entries);
     } else {
-      // Use standard readdir for non-item directories
       try {
-        const entries = await ctx.fs.readdir(absPath);
-        if (longFormat) {
-          for (const name of entries) {
-            const fullPath = ctx.fs.resolvePath(absPath, name);
-            try {
-              const s = await ctx.fs.stat(fullPath);
-              const typeChar = s.isDirectory ? 'd' : '-';
-              const sizeStr = String(s.size).padStart(8);
-              const dateStr = formatLsDate(s.mtime);
-              const suffix = s.isDirectory ? '/' : '';
-              lines.push(`${typeChar}rw-r--r--  ${sizeStr}  ${dateStr}  ${name}${suffix}`);
-            } catch {
-              lines.push(`?---------         ?  ?             ${name}`);
+        if (ctx.fs.readdirWithFileTypes) {
+          const dirents = await ctx.fs.readdirWithFileTypes(absPath);
+          for (const d of dirents) {
+            if (longFormat) {
+              const typeChar = d.isDirectory ? 'd' : '-';
+              const suffix = d.isDirectory ? '/' : '';
+              lines.push(`${typeChar}rw-r--r--         -  -             ${d.name}${suffix}`);
+            } else {
+              lines.push(d.isDirectory ? `${d.name}/` : d.name);
             }
           }
         } else {
-          for (const name of entries) {
+          const names = await ctx.fs.readdir(absPath);
+          for (const name of names) {
             const fullPath = ctx.fs.resolvePath(absPath, name);
             try {
               const s = await ctx.fs.stat(fullPath);
-              lines.push(s.isDirectory ? `${name}/` : name);
+              if (longFormat) {
+                const typeChar = s.isDirectory ? 'd' : '-';
+                const suffix = s.isDirectory ? '/' : '';
+                const sizeStr = String(s.size).padStart(8);
+                const dateStr = formatLsDate(s.mtime);
+                lines.push(`${typeChar}rw-r--r--  ${sizeStr}  ${dateStr}  ${name}${suffix}`);
+              } else {
+                lines.push(s.isDirectory ? `${name}/` : name);
+              }
             } catch {
-              lines.push(name);
+              lines.push(longFormat ? `?---------         ?  ?             ${name}` : name);
             }
           }
         }
@@ -771,12 +773,19 @@ async function ftsGrep(
         LIMIT 50
       `).all(`"${ftsQuery}"`, resolved.libraryId) as any[];
 
-      for (const row of ftsRows) {
-        // Look up the attachment filename
-        const att = (db as any).select().from(attachments)
-          .where(and(eq(attachments.key, row.attachment_key), eq(attachments.libraryId, row.library_id)))
-          .get();
+      // Batch-fetch attachment filenames to avoid N+1 queries
+      const attKeys = [...new Set(ftsRows.map((r: any) => r.attachment_key))];
+      const attMap = new Map<string, any>();
+      if (attKeys.length > 0) {
+        const { inArray } = await getDrizzle();
+        const atts = (db as any).select().from(attachments)
+          .where(and(inArray(attachments.key, attKeys), eq(attachments.libraryId, resolved.libraryId)))
+          .all() as any[];
+        for (const a of atts) attMap.set(a.key, a);
+      }
 
+      for (const row of ftsRows) {
+        const att = attMap.get(row.attachment_key);
         const filename = att?.filename ?? row.attachment_key;
         const parentKey = row.parent_item_key ?? att?.parentItemKey ?? '?';
         const path = `/items/${parentKey}/attachments/${filename}`;
