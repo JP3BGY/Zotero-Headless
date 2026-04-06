@@ -44,6 +44,13 @@ export interface ZoteroCollectionResponse {
   data: Record<string, unknown>;
 }
 
+export interface ZoteroSearchResponse {
+  key: string;
+  version: number;
+  library: { id: number; type: 'user' | 'group' };
+  data: Record<string, unknown>;
+}
+
 // ============ Rate Limiter ============
 
 class RateLimiter {
@@ -208,14 +215,19 @@ export class ZoteroAPIClient {
   async getItemVersions(
     libraryId: string | number,
     since: number,
-    libraryType: 'user' | 'group' = 'user'
-  ): Promise<Record<string, number>> {
+    libraryType: 'user' | 'group' = 'user',
+    options?: { top?: boolean }
+  ): Promise<{ versions: Record<string, number>; libraryVersion: number }> {
+    const params: Record<string, string | number | boolean> = { since, format: 'versions', includeTrashed: true };
+    if (options?.top) {
+      params.top = true;
+    }
     const response = await this.request<Record<string, number>>(
       'GET',
       `${this.getLibraryPath(libraryId, libraryType)}/items`,
-      { params: { since, format: 'versions', includeTrashed: true } }
+      { params }
     );
-    return response.data;
+    return { versions: response.data, libraryVersion: response.version };
   }
 
   /** Batch get items */
@@ -223,8 +235,8 @@ export class ZoteroAPIClient {
     libraryId: string | number,
     itemKeys: string[],
     libraryType: 'user' | 'group' = 'user'
-  ): Promise<ZoteroItemResponse[]> {
-    if (itemKeys.length === 0) return [];
+  ): Promise<{ items: ZoteroItemResponse[]; libraryVersion: number }> {
+    if (itemKeys.length === 0) return { items: [], libraryVersion: 0 };
 
     const response = await this.request<ZoteroItemResponse[]>(
       'GET',
@@ -237,7 +249,7 @@ export class ZoteroAPIClient {
         }
       }
     );
-    return response.data;
+    return { items: response.data, libraryVersion: response.version };
   }
 
   /** Get single item */
@@ -332,13 +344,13 @@ export class ZoteroAPIClient {
     libraryId: string | number,
     since: number,
     libraryType: 'user' | 'group' = 'user'
-  ): Promise<DeletedObjects> {
+  ): Promise<{ deleted: DeletedObjects; libraryVersion: number }> {
     const response = await this.request<DeletedObjects>(
       'GET',
       `${this.getLibraryPath(libraryId, libraryType)}/deleted`,
       { params: { since } }
     );
-    return response.data;
+    return { deleted: response.data, libraryVersion: response.version };
   }
 
   // ============ Collection Operations ============
@@ -348,13 +360,13 @@ export class ZoteroAPIClient {
     libraryId: string | number,
     since: number,
     libraryType: 'user' | 'group' = 'user'
-  ): Promise<Record<string, number>> {
+  ): Promise<{ versions: Record<string, number>; libraryVersion: number }> {
     const response = await this.request<Record<string, number>>(
       'GET',
       `${this.getLibraryPath(libraryId, libraryType)}/collections`,
       { params: { since, format: 'versions' } }
     );
-    return response.data;
+    return { versions: response.data, libraryVersion: response.version };
   }
 
   /** Get collections */
@@ -362,8 +374,8 @@ export class ZoteroAPIClient {
     libraryId: string | number,
     collectionKeys: string[],
     libraryType: 'user' | 'group' = 'user'
-  ): Promise<ZoteroCollectionResponse[]> {
-    if (collectionKeys.length === 0) return [];
+  ): Promise<{ collections: ZoteroCollectionResponse[]; libraryVersion: number }> {
+    if (collectionKeys.length === 0) return { collections: [], libraryVersion: 0 };
 
     const response = await this.request<ZoteroCollectionResponse[]>(
       'GET',
@@ -375,7 +387,7 @@ export class ZoteroAPIClient {
         }
       }
     );
-    return response.data;
+    return { collections: response.data, libraryVersion: response.version };
   }
 
   /** Create a collection */
@@ -435,6 +447,248 @@ export class ZoteroAPIClient {
       'DELETE',
       `${this.getLibraryPath(libraryId, libraryType)}/collections/${collectionKey}`
     );
+  }
+
+  // ============ Search Operations ============
+
+  /** Get search versions for incremental sync */
+  async getSearchVersions(
+    libraryId: string | number,
+    since: number,
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<{ versions: Record<string, number>; libraryVersion: number }> {
+    const response = await this.request<Record<string, number>>(
+      'GET',
+      `${this.getLibraryPath(libraryId, libraryType)}/searches`,
+      { params: { since, format: 'versions' } }
+    );
+    return { versions: response.data, libraryVersion: response.version };
+  }
+
+  /** Get searches by keys */
+  async getSearches(
+    libraryId: string | number,
+    searchKeys: string[],
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<{ searches: ZoteroSearchResponse[]; libraryVersion: number }> {
+    if (searchKeys.length === 0) return { searches: [], libraryVersion: 0 };
+
+    const response = await this.request<ZoteroSearchResponse[]>(
+      'GET',
+      `${this.getLibraryPath(libraryId, libraryType)}/searches`,
+      {
+        params: {
+          searchKey: searchKeys.join(','),
+          format: 'json'
+        }
+      }
+    );
+    return { searches: response.data, libraryVersion: response.version };
+  }
+
+  /** Create searches (POST, batch) */
+  async createSearches(
+    libraryId: string | number,
+    searches: Array<Record<string, unknown>>,
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<WriteResponse & { libraryVersion: number }> {
+    const response = await this.request<WriteResponse>(
+      'POST',
+      `${this.getLibraryPath(libraryId, libraryType)}/searches`,
+      { body: searches }
+    );
+    return { ...response.data, libraryVersion: response.version };
+  }
+
+  /** Update a search (PATCH) */
+  async updateSearch(
+    libraryId: string | number,
+    searchKey: string,
+    data: Record<string, unknown>,
+    version: number,
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<number> {
+    const response = await this.request<unknown>(
+      'PATCH',
+      `${this.getLibraryPath(libraryId, libraryType)}/searches/${searchKey}`,
+      {
+        body: data,
+        headers: { 'If-Unmodified-Since-Version': String(version) }
+      }
+    );
+    return response.version;
+  }
+
+  /** Delete searches (batch DELETE) */
+  async deleteSearches(
+    libraryId: string | number,
+    searchKeys: string[],
+    version: number,
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<void> {
+    if (searchKeys.length === 0) return;
+    await this.request(
+      'DELETE',
+      `${this.getLibraryPath(libraryId, libraryType)}/searches`,
+      {
+        params: { searchKey: searchKeys.join(',') },
+        headers: { 'If-Unmodified-Since-Version': String(version) }
+      }
+    );
+  }
+
+  // ============ Settings Operations ============
+
+  /** Get synced settings */
+  async getSettings(
+    libraryId: string | number,
+    since: number,
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<{ settings: Record<string, { value: unknown; version: number }>; libraryVersion: number }> {
+    const response = await this.request<Record<string, { value: unknown; version: number }>>(
+      'GET',
+      `${this.getLibraryPath(libraryId, libraryType)}/settings`,
+      { params: { since } }
+    );
+    return { settings: response.data ?? {}, libraryVersion: response.version };
+  }
+
+  /** Upload settings */
+  async uploadSettings(
+    libraryId: string | number,
+    settings: Record<string, { value: unknown }>,
+    libraryVersion: number,
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<{ libraryVersion: number }> {
+    const response = await this.request<unknown>(
+      'POST',
+      `${this.getLibraryPath(libraryId, libraryType)}/settings`,
+      {
+        body: settings,
+        headers: { 'If-Unmodified-Since-Version': String(libraryVersion) }
+      }
+    );
+    return { libraryVersion: response.version };
+  }
+
+  /** Delete settings */
+  async deleteSettings(
+    libraryId: string | number,
+    settingKeys: string[],
+    libraryVersion: number,
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<number> {
+    if (settingKeys.length === 0) return libraryVersion;
+    // Zotero API doesn't support batch setting deletion; delete one by one
+    let lastVersion = libraryVersion;
+    for (const key of settingKeys) {
+      const response = await this.request<unknown>(
+        'DELETE',
+        `${this.getLibraryPath(libraryId, libraryType)}/settings/${encodeURIComponent(key)}`,
+        { headers: { 'If-Unmodified-Since-Version': String(lastVersion) } }
+      );
+      lastVersion = response.version;
+    }
+    return lastVersion;
+  }
+
+  // ============ Full-Text Content Operations ============
+
+  /** Get fulltext versions for items changed since a version */
+  async getFulltextVersions(
+    libraryId: string | number,
+    since: number,
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<{ versions: Record<string, number>; libraryVersion: number }> {
+    const response = await this.request<Record<string, number>>(
+      'GET',
+      `${this.getLibraryPath(libraryId, libraryType)}/fulltext`,
+      { params: { since } }
+    );
+    return { versions: response.data ?? {}, libraryVersion: response.version };
+  }
+
+  /** Get fulltext for a single item */
+  async getFulltext(
+    libraryId: string | number,
+    itemKey: string,
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<{ content: string; indexedChars: number; totalChars: number; indexedPages?: number; totalPages?: number; version: number } | null> {
+    try {
+      const response = await this.request<{
+        content: string;
+        indexedChars: number;
+        totalChars: number;
+        indexedPages?: number;
+        totalPages?: number;
+      }>(
+        'GET',
+        `${this.getLibraryPath(libraryId, libraryType)}/items/${itemKey}/fulltext`
+      );
+      return { ...response.data, version: response.version };
+    } catch (e: any) {
+      if (e.message?.includes('404')) return null;
+      throw e;
+    }
+  }
+
+  /** Upload fulltext for a single item */
+  async setFulltext(
+    libraryId: string | number,
+    itemKey: string,
+    data: { content: string; indexedChars: number; totalChars: number; indexedPages?: number; totalPages?: number },
+    libraryVersion: number,
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<number> {
+    const response = await this.request<unknown>(
+      'PUT',
+      `${this.getLibraryPath(libraryId, libraryType)}/items/${itemKey}/fulltext`,
+      {
+        body: data,
+        headers: { 'If-Unmodified-Since-Version': String(libraryVersion) }
+      }
+    );
+    return response.version;
+  }
+
+  // ============ Batch Delete Operations ============
+
+  /** Delete items by keys (batch DELETE) */
+  async deleteItems(
+    libraryId: string | number,
+    itemKeys: string[],
+    version: number,
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<number> {
+    if (itemKeys.length === 0) return version;
+    const response = await this.request<unknown>(
+      'DELETE',
+      `${this.getLibraryPath(libraryId, libraryType)}/items`,
+      {
+        params: { itemKey: itemKeys.join(',') },
+        headers: { 'If-Unmodified-Since-Version': String(version) }
+      }
+    );
+    return response.version;
+  }
+
+  /** Delete collections by keys (batch DELETE) */
+  async deleteCollections(
+    libraryId: string | number,
+    collectionKeys: string[],
+    version: number,
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<number> {
+    if (collectionKeys.length === 0) return version;
+    const response = await this.request<unknown>(
+      'DELETE',
+      `${this.getLibraryPath(libraryId, libraryType)}/collections`,
+      {
+        params: { collectionKey: collectionKeys.join(',') },
+        headers: { 'If-Unmodified-Since-Version': String(version) }
+      }
+    );
+    return response.version;
   }
 
   // ============ Tag Operations ============
