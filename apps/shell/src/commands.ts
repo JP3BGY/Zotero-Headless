@@ -1,6 +1,7 @@
 import { commands, type Command, setShellMode } from '@zotero-headless/cli';
 import { getRawSQLite } from '@zotero-headless/database';
 import { ZoteroShell } from '@zotero-headless/virtual-fs';
+import { getCommandNames } from 'just-bash';
 
 import { getCliCustomCommands } from './cli-commands-registry.js';
 import type { ItemKeySuggestion, PathSuggestion } from './types.js';
@@ -162,6 +163,7 @@ export function tokenizeInput(input: string): {
 // Canonical commands that need an Item Key argument (for tab completion)
 const ITEM_KEY_CANONICAL = new Set([
   'delete', 'get', 'update', 'note', 'attachment', 'export',
+  'annotations', 'cite', 'related', 'creators', 'classify', 'mv',
 ]);
 
 /**
@@ -179,11 +181,26 @@ export function needsItemKey(cmd: string): boolean {
 
 /**
  * Get descriptions for all available commands (used for tab completion display).
+ *
+ * Priority: TUI builtins > CLI commands/aliases > bash builtins (no descriptions).
+ * Bash builtins (from just-bash) are included by name only — they don't need
+ * descriptions since they're standard unix commands.
  */
 export function getCommandDescriptions(): Map<string, string> {
   const descriptions = new Map<string, string>();
 
-  // TUI-only commands
+  // CLI commands (canonical names + all aliases)
+  commands.forEach((cmd: Command) => {
+    const shortDesc = cmd.description.split('.')[0];
+    descriptions.set(cmd.name, shortDesc);
+    cmd.aliases?.forEach((alias: string) => {
+      if (!descriptions.has(alias)) {
+        descriptions.set(alias, shortDesc);
+      }
+    });
+  });
+
+  // TUI-only commands (override CLI entries like help/config)
   descriptions.set('exit', 'Exit shell');
   descriptions.set('quit', 'Exit shell');
   descriptions.set('q', 'Exit shell');
@@ -192,42 +209,20 @@ export function getCommandDescriptions(): Map<string, string> {
   descriptions.set('config', 'Configuration panel');
   descriptions.set('/config', 'Configuration panel');
 
-  // Bash built-in / VFS commands
-  descriptions.set('ls', 'List directory contents');
-  descriptions.set('cd', 'Change directory');
-  descriptions.set('pwd', 'Print working directory');
-  descriptions.set('cat', 'Read file or show item summary');
-  descriptions.set('grep', 'Search file contents');
-  descriptions.set('find', 'Find files by name');
-  descriptions.set('tree', 'Display directory tree (depth-limited)');
-  descriptions.set('head', 'Show first lines of file');
-  descriptions.set('tail', 'Show last lines of file');
-  descriptions.set('wc', 'Count lines/words/bytes');
-  descriptions.set('stat', 'Display file status');
-  descriptions.set('echo', 'Print text');
-  descriptions.set('du', 'Estimate file space usage');
-
-  // CLI commands (canonical names + non-conflicting aliases)
-  commands.forEach((cmd: Command) => {
-    const shortDesc = cmd.description.split('.')[0];
-    if (!descriptions.has(cmd.name)) {
-      descriptions.set(cmd.name, shortDesc);
-    }
-    cmd.aliases?.forEach((alias: string) => {
-      if (!descriptions.has(alias)) {
-        descriptions.set(alias, shortDesc);
-      }
-    });
-  });
-
   return descriptions;
 }
 
 /**
  * Get all available command names (used for tab completion).
+ * Merges: just-bash builtins + CLI commands/aliases + TUI-only commands.
  */
 export function getAvailableCommands(): string[] {
   const commandNames = new Set<string>();
+
+  // Bash builtins from just-bash (ls, cat, grep, find, tree, head, tail, etc.)
+  for (const name of getCommandNames()) {
+    commandNames.add(name);
+  }
 
   // CLI commands + aliases
   commands.forEach((cmd: Command) => {
@@ -237,17 +232,8 @@ export function getAvailableCommands(): string[] {
     });
   });
 
-  // Bash built-ins / VFS commands
-  const bashBuiltins = [
-    'ls', 'cd', 'pwd', 'cat', 'grep', 'find', 'tree', 'head', 'tail',
-    'wc', 'stat', 'echo', 'du', 'sort', 'uniq', 'sed', 'awk', 'jq',
-  ];
-  bashBuiltins.forEach(cmd => commandNames.add(cmd));
-
   // TUI-only commands
-  const tuiCommands = [
-    'help', 'exit', 'quit', 'q', 'clear', 'cls', 'config', '/config',
-  ];
+  const tuiCommands = ['exit', 'quit', 'q', 'cls', '/config'];
   tuiCommands.forEach(cmd => commandNames.add(cmd));
 
   return Array.from(commandNames);

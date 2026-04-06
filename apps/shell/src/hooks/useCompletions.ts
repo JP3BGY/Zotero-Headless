@@ -12,9 +12,12 @@ import {
 } from '../commands.js';
 import type { CommandSuggestion, ItemKeySuggestion, PathSuggestion } from '../types.js';
 
+/** Bash commands where positional arguments are filesystem paths (triggers path completion). */
 const PATH_COMMANDS = new Set([
   'ls', 'cd', 'cat', 'tree', 'find', 'head', 'tail', 'stat',
-  'wc', 'du', 'grep', 'mkdir', 'mv', 'cp', 'rm',
+  'wc', 'du', 'grep', 'mkdir', 'mv', 'cp', 'rm', 'rmdir',
+  'touch', 'ln', 'chmod', 'readlink', 'basename', 'dirname',
+  'diff', 'file', 'tee', 'sort', 'nl', 'tac',
 ]);
 
 export function useCompletions() {
