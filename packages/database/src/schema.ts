@@ -215,6 +215,83 @@ export const classificationLog = sqliteTable('classification_log', {
   createdAt: integer('created_at').notNull(),
 }) as any;
 
+// ============ Sync Cache 表（三路合并所需的对象快照） ============
+export const syncCache = sqliteTable('sync_cache', {
+  libraryId: integer('library_id').notNull(),
+  key: textCol('key').notNull(),
+  objectType: textCol('object_type').notNull(),  // 'item' | 'collection'
+  version: integer('version').notNull(),
+  data: textCol('data').notNull(),               // JSON snapshot at this version
+}, (table) => ({
+  pk: primaryKey({ columns: [table.libraryId, table.key, table.objectType, table.version] }),
+  lookupIdx: index('sync_cache_lookup_idx').on(table.libraryId, table.key, table.objectType),
+})) as any;
+
+// ============ Sync Queue 表（失败对象重试队列） ============
+export const syncQueue = sqliteTable('sync_queue', {
+  libraryId: integer('library_id').notNull(),
+  key: textCol('key').notNull(),
+  objectType: textCol('object_type').notNull(),  // 'item' | 'collection'
+  lastCheck: integer('last_check').notNull().default(0),  // Unix timestamp of last attempt
+  tries: integer('tries').notNull().default(0),           // Number of retry attempts
+}, (table) => ({
+  pk: primaryKey({ columns: [table.libraryId, table.key, table.objectType] }),
+})) as any;
+
+// ============ Synced Settings 表 ============
+export const syncedSettings = sqliteTable('synced_settings', {
+  setting: textCol('setting').notNull(),
+  libraryId: integer('library_id').notNull(),
+  value: textCol('value').notNull(),  // JSON-encoded value
+  version: integer('version').notNull().default(0),
+  synced: integer('synced', { mode: 'boolean' }).notNull().default(false),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.setting, table.libraryId] }),
+})) as any;
+
+// ============ Saved Searches 表 ============
+export const savedSearches = sqliteTable('saved_searches', {
+  key: textCol('key').notNull(),
+  libraryId: integer('library_id').notNull(),
+  name: textCol('name').notNull(),
+  version: integer('version').notNull().default(0),
+  synced: integer('synced', { mode: 'boolean' }).notNull().default(true),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+  deleted: integer('deleted', { mode: 'boolean' }).notNull().default(false),
+  rawJson: textCol('raw_json').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.key, table.libraryId] }),
+  libraryIdx: index('saved_searches_library_idx').on(table.libraryId),
+})) as any;
+
+// ============ Saved Search Conditions 表 ============
+export const savedSearchConditions = sqliteTable('saved_search_conditions', {
+  searchKey: textCol('search_key').notNull(),
+  libraryId: integer('library_id').notNull(),
+  conditionIndex: integer('condition_index').notNull(),
+  condition: textCol('condition').notNull(),
+  operator: textCol('operator').notNull(),
+  value: textCol('value'),
+  required: integer('required', { mode: 'boolean' }).notNull().default(false),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.searchKey, table.libraryId, table.conditionIndex] }),
+})) as any;
+
+// ============ Fulltext Sync State 表 ============
+export const fulltextSyncState = sqliteTable('fulltext_sync_state', {
+  attachmentKey: textCol('attachment_key').notNull(),
+  libraryId: integer('library_id').notNull(),
+  version: integer('version').notNull().default(0),
+  synced: integer('synced', { mode: 'boolean' }).notNull().default(false),
+  indexedPages: integer('indexed_pages'),
+  totalPages: integer('total_pages'),
+  indexedChars: integer('indexed_chars'),
+  totalChars: integer('total_chars'),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.attachmentKey, table.libraryId] }),
+})) as any;
+
 // ============ Relations ============
 export const librariesRelations = relations(libraries, ({ many }) => ({
   items: many(items),
@@ -253,3 +330,15 @@ export type ContentCache = typeof contentCache.$inferSelect;
 export type NewContentCache = typeof contentCache.$inferInsert;
 export type ClassificationLog = typeof classificationLog.$inferSelect;
 export type NewClassificationLog = typeof classificationLog.$inferInsert;
+export type SyncCacheEntry = typeof syncCache.$inferSelect;
+export type NewSyncCacheEntry = typeof syncCache.$inferInsert;
+export type SyncQueueEntry = typeof syncQueue.$inferSelect;
+export type NewSyncQueueEntry = typeof syncQueue.$inferInsert;
+export type SyncedSetting = typeof syncedSettings.$inferSelect;
+export type NewSyncedSetting = typeof syncedSettings.$inferInsert;
+export type SavedSearch = typeof savedSearches.$inferSelect;
+export type NewSavedSearch = typeof savedSearches.$inferInsert;
+export type SavedSearchCondition = typeof savedSearchConditions.$inferSelect;
+export type NewSavedSearchCondition = typeof savedSearchConditions.$inferInsert;
+export type FulltextSyncState = typeof fulltextSyncState.$inferSelect;
+export type NewFulltextSyncState = typeof fulltextSyncState.$inferInsert;

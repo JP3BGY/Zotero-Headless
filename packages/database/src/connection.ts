@@ -300,6 +300,105 @@ export function initializeDatabase(options?: { quiet?: boolean }): Database {
     console.warn(`${symbols.warning} Database migration warning:`, e);
   }
 
+  // Migration: Create sync_cache table (for three-way merge conflict resolution)
+  try {
+    sqliteInstance.exec(`
+      CREATE TABLE IF NOT EXISTS sync_cache (
+        library_id INTEGER NOT NULL,
+        key TEXT NOT NULL,
+        object_type TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        data TEXT NOT NULL,
+        PRIMARY KEY (library_id, key, object_type, version)
+      );
+      CREATE INDEX IF NOT EXISTS idx_sync_cache_lookup ON sync_cache(library_id, key, object_type);
+    `);
+  } catch (e) {
+    console.warn(`${symbols.warning} Database migration warning (sync_cache):`, e);
+  }
+
+  // Migration: Create sync_queue table (for failed object retry)
+  try {
+    sqliteInstance.exec(`
+      CREATE TABLE IF NOT EXISTS sync_queue (
+        library_id INTEGER NOT NULL,
+        key TEXT NOT NULL,
+        object_type TEXT NOT NULL,
+        last_check INTEGER NOT NULL DEFAULT 0,
+        tries INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (library_id, key, object_type)
+      );
+    `);
+  } catch (e) {
+    console.warn(`${symbols.warning} Database migration warning (sync_queue):`, e);
+  }
+
+  // Migration: Create synced_settings table
+  try {
+    sqliteInstance.exec(`
+      CREATE TABLE IF NOT EXISTS synced_settings (
+        setting TEXT NOT NULL,
+        library_id INTEGER NOT NULL,
+        value TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 0,
+        synced INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (setting, library_id)
+      );
+    `);
+  } catch (e) {
+    console.warn(`${symbols.warning} Database migration warning (synced_settings):`, e);
+  }
+
+  // Migration: Create saved_searches and saved_search_conditions tables
+  try {
+    sqliteInstance.exec(`
+      CREATE TABLE IF NOT EXISTS saved_searches (
+        key TEXT NOT NULL,
+        library_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 0,
+        synced INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        deleted INTEGER NOT NULL DEFAULT 0,
+        raw_json TEXT NOT NULL,
+        PRIMARY KEY (key, library_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_saved_searches_library ON saved_searches(library_id);
+      CREATE TABLE IF NOT EXISTS saved_search_conditions (
+        search_key TEXT NOT NULL,
+        library_id INTEGER NOT NULL,
+        condition_index INTEGER NOT NULL,
+        condition TEXT NOT NULL,
+        operator TEXT NOT NULL,
+        value TEXT,
+        required INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (search_key, library_id, condition_index)
+      );
+    `);
+  } catch (e) {
+    console.warn(`${symbols.warning} Database migration warning (saved_searches):`, e);
+  }
+
+  // Migration: Create fulltext_sync_state table
+  try {
+    sqliteInstance.exec(`
+      CREATE TABLE IF NOT EXISTS fulltext_sync_state (
+        attachment_key TEXT NOT NULL,
+        library_id INTEGER NOT NULL,
+        version INTEGER NOT NULL DEFAULT 0,
+        synced INTEGER NOT NULL DEFAULT 0,
+        indexed_pages INTEGER,
+        total_pages INTEGER,
+        indexed_chars INTEGER,
+        total_chars INTEGER,
+        PRIMARY KEY (attachment_key, library_id)
+      );
+    `);
+  } catch (e) {
+    console.warn(`${symbols.warning} Database migration warning (fulltext_sync_state):`, e);
+  }
+
   // Migration: Create content_fts FTS5 table for full-text search
   try {
     sqliteInstance.exec(`
