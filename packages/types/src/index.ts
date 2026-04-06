@@ -112,7 +112,9 @@ export interface Collection {
 export interface DeletedObjects {
   items: string[];
   collections: string[];
+  searches: string[];
   tags: string[];
+  settings: string[];
 }
 
 // ============ Sync Types ============
@@ -133,6 +135,7 @@ export interface SyncOptions {
   syncAll?: boolean;         // Sync all libraries (user + groups)
   libraryType?: 'user' | 'group';  // Library type for current sync
   onProgress?: ProgressCallback;   // Progress callback
+  resetMode?: 'fromLocal' | 'fromServer';  // fullSync reconciliation mode
 }
 
 export interface SyncResult {
