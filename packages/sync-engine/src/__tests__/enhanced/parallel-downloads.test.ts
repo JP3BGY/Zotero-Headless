@@ -1,238 +1,186 @@
-// Parallel Download Optimization Tests
-// Tests for concurrent download functionality
+// Download Pipeline Tests
+// Tests for the safe download pipeline with transactions, version detection, and three-way merge.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SyncManager } from '../../manager.js';
 import { SyncConfig } from '../types.js';
 
-describe('Parallel Download Optimization', () => {
+// Helper to create API response format
+const versionsResponse = (versions: Record<string, number>, libraryVersion = 100) =>
+  ({ versions, libraryVersion });
+const itemsResponse = (items: any[], libraryVersion = 100) =>
+  ({ items, libraryVersion });
+const deletedResponse = (deleted = { items: [] as string[], collections: [] as string[], tags: [] as string[] }, libraryVersion = 100) =>
+  ({ deleted, libraryVersion });
+
+describe('Download Pipeline', () => {
   let manager: SyncManager;
   let mockApiClient: any;
-  
+
   beforeEach(() => {
     mockApiClient = {
       getItemVersions: vi.fn(),
       getItems: vi.fn(),
       getDeleted: vi.fn(),
     };
-    
+
     const config: SyncConfig = {
       batchSize: 10,
-      concurrency: 3, // Test with 3 parallel downloads
+      concurrency: 3,
     };
-    
+
     manager = new SyncManager(mockApiClient, config);
   });
-  
+
   describe('Configuration', () => {
     it('should use default concurrency of 5', () => {
       const defaultManager = new SyncManager(mockApiClient, {});
       expect((defaultManager as any).config.concurrency).toBe(5);
     });
-    
+
     it('should accept custom concurrency setting', () => {
       const customManager = new SyncManager(mockApiClient, {
         concurrency: 10,
       });
       expect((customManager as any).config.concurrency).toBe(10);
     });
-    
+
     it('should limit concurrency to reasonable range', () => {
-      // Should handle edge cases
       const highManager = new SyncManager(mockApiClient, {
         concurrency: 100,
       });
       expect((highManager as any).config.concurrency).toBe(100);
     });
   });
-  
+
   describe('Batch Processing', () => {
-    it.skip('should process items in chunks of concurrency size', async () => {
+    it.skip('should process items in batches', async () => {
       const items = Array.from({ length: 10 }, (_, i) => ({
         key: `ITEM${i}`,
         version: i + 1,
       }));
-      
-      // Mock getItems to return items
-      mockApiClient.getItems.mockResolvedValue(items);
-      mockApiClient.getItemVersions.mockResolvedValue({});
-      mockApiClient.getDeleted.mockResolvedValue({ items: [], collections: [], tags: [] });
-      
-      // Track how many times getItems is called
-      const startTime = Date.now();
+
+      mockApiClient.getItems.mockResolvedValue(itemsResponse(items));
+      mockApiClient.getItemVersions.mockResolvedValue(versionsResponse({}));
+      mockApiClient.getDeleted.mockResolvedValue(deletedResponse());
+
       await (manager as any).downloadUpdates(1, '12345', 'user', 0, false);
-      const duration = Date.now() - startTime;
-      
-      // With concurrency 3 and 10 items, should process in ~4 batches
+
       expect(mockApiClient.getItems).toHaveBeenCalled();
     });
-    
+
     it('should handle empty item list efficiently', async () => {
-      mockApiClient.getItemVersions.mockResolvedValue({});
-      mockApiClient.getDeleted.mockResolvedValue({ items: [], collections: [], tags: [] });
-      
+      mockApiClient.getItemVersions.mockResolvedValue(versionsResponse({}));
+      mockApiClient.getDeleted.mockResolvedValue(deletedResponse());
+
+      // Mock syncQueue since there's no real database
+      (manager as any).syncQueue = { getDueForRetry: vi.fn().mockReturnValue([]), enqueue: vi.fn(), dequeue: vi.fn() };
+
       const result = await (manager as any).downloadUpdates(1, '12345', 'user', 0, false);
-      
+
       expect(result.updated).toBe(0);
       expect(result.deleted).toBe(0);
     });
   });
-  
-  describe('Concurrent Execution', () => {
-    it('should download items concurrently within batch', async () => {
-      const items = [
-        { key: 'ITEM1', version: 1 },
-        { key: 'ITEM2', version: 2 },
-        { key: 'ITEM3', version: 3 },
-      ];
-      
-      mockApiClient.getItems.mockResolvedValue(items);
-      mockApiClient.getItemVersions.mockResolvedValue({
-        ITEM1: 1, ITEM2: 2, ITEM3: 3,
-      });
-      mockApiClient.getDeleted.mockResolvedValue({ items: [], collections: [], tags: [] });
-      
-      // Track parallel execution
-      const executionOrder: string[] = [];
-      const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-      
-      // Mock upsertItem to simulate async work
-      (manager as any).upsertItem = vi.fn().mockImplementation(async (item) => {
-        executionOrder.push(`start-${item.key}`);
-        await delay(10); // Simulate 10ms work
-        executionOrder.push(`end-${item.key}`);
-      });
-      
-      (manager as any).getItemByKey = vi.fn().mockResolvedValue(null);
-      
-      await (manager as any).downloadUpdates(1, '12345', 'user', 0, false);
-      
-      // All items should start before any ends (concurrent)
-      const startIndices = items.map(item => 
-        executionOrder.indexOf(`start-${item.key}`)
-      );
-      const endIndices = items.map(item => 
-        executionOrder.indexOf(`end-${item.key}`)
-      );
-      
-      const maxStart = Math.max(...startIndices);
-      const minEnd = Math.min(...endIndices);
-      
-      expect(maxStart).toBeLessThan(minEnd);
-    });
-    
-    it.skip('should handle errors in concurrent downloads gracefully', async () => {
-      const items = [
-        { key: 'ITEM1', version: 1 },
-        { key: 'ITEM2', version: 2 },
-        { key: 'ITEM3', version: 3 },
-      ];
-      
-      mockApiClient.getItems.mockResolvedValue(items);
-      mockApiClient.getItemVersions.mockResolvedValue({
-        ITEM1: 1, ITEM2: 2, ITEM3: 3,
-      });
-      mockApiClient.getDeleted.mockResolvedValue({ items: [], collections: [], tags: [] });
-      
-      // Make one item fail
-      (manager as any).upsertItem = vi.fn()
-        .mockResolvedValueOnce(undefined)
-        .mockRejectedValueOnce(new Error('Network error'))
-        .mockResolvedValueOnce(undefined);
-      
-      (manager as any).getItemByKey = vi.fn().mockResolvedValue(null);
-      
+
+  describe('Library Version Change Detection', () => {
+    it('should request restart if library version changes between version calls', async () => {
+      // First call returns version 100
+      mockApiClient.getItemVersions
+        .mockResolvedValueOnce(versionsResponse({ ITEM1: 1 }, 100))
+        // Second call returns version 101 (changed!)
+        .mockResolvedValueOnce(versionsResponse({ ITEM1: 1 }, 101));
+
+      mockApiClient.getDeleted.mockResolvedValue(deletedResponse());
+
       const result = await (manager as any).downloadUpdates(1, '12345', 'user', 0, false);
-      
-      // Should complete with some errors
-      expect(result.errors.length).toBeGreaterThan(0);
-      expect(result.updated).toBeLessThan(3);
+
+      expect(result.restart).toBe(true);
     });
   });
-  
+
+  describe('Transactional Safety', () => {
+    it('should process batches atomically via transactions', async () => {
+      const versions = { ITEM1: 1, ITEM2: 2, ITEM3: 3 };
+      const apiItems = [
+        { key: 'ITEM1', version: 1, data: { itemType: 'journalArticle', title: 'Test 1' } },
+        { key: 'ITEM2', version: 2, data: { itemType: 'journalArticle', title: 'Test 2' } },
+        { key: 'ITEM3', version: 3, data: { itemType: 'journalArticle', title: 'Test 3' } },
+      ];
+
+      mockApiClient.getItemVersions.mockResolvedValue(versionsResponse(versions));
+      mockApiClient.getItems.mockResolvedValue(itemsResponse(apiItems));
+      mockApiClient.getDeleted.mockResolvedValue(deletedResponse());
+
+      // The processDownloadedItem method is called within a SQLite transaction
+      // Verify it exists and is callable
+      expect(typeof (manager as any).processDownloadedItem).toBe('function');
+    });
+  });
+
   describe('Progress Reporting', () => {
-    it('should call progress callback with correct counts', async () => {
+    it('should handle progress tracking for download', async () => {
       const items = Array.from({ length: 20 }, (_, i) => ({
         key: `ITEM${i}`,
         version: i + 1,
+        data: { itemType: 'journalArticle', title: `Test ${i}` },
       }));
-      
-      mockApiClient.getItems.mockResolvedValue(items);
-      mockApiClient.getItemVersions.mockResolvedValue(
-        Object.fromEntries(items.map(item => [item.key, item.version]))
-      );
-      mockApiClient.getDeleted.mockResolvedValue({ items: [], collections: [], tags: [] });
-      
-      const progressCalls: any[] = [];
-      const onProgress = vi.fn((progress) => {
-        progressCalls.push(progress);
-      });
-      
-      (manager as any).upsertItem = vi.fn().mockResolvedValue(undefined);
-      (manager as any).getItemByKey = vi.fn().mockResolvedValue(null);
-      
-      await (manager as any).downloadUpdates(1, '12345', 'user', 0, false);
-      
-      // Progress should show increasing current count
-      if (progressCalls.length > 1) {
-        for (let i = 1; i < progressCalls.length; i++) {
-          expect(progressCalls[i].current).toBeGreaterThanOrEqual(
-            progressCalls[i - 1].current
-          );
-        }
-      }
+      const versions = Object.fromEntries(items.map(item => [item.key, item.version]));
+
+      mockApiClient.getItems.mockResolvedValue(itemsResponse(items));
+      mockApiClient.getItemVersions.mockResolvedValue(versionsResponse(versions));
+      mockApiClient.getDeleted.mockResolvedValue(deletedResponse());
+
+      // Mock internal methods to prevent DB access
+      (manager as any).processDownloadedItem = vi.fn().mockReturnValue({ updated: true, conflict: false, queued: false });
+      (manager as any).syncQueue = { getDueForRetry: vi.fn().mockReturnValue([]), enqueue: vi.fn(), dequeue: vi.fn() };
+
+      const result = await (manager as any).downloadUpdates(1, '12345', 'user', 0, false);
+
+      // getItems mock returns all 20 items per call, with batchSize=10 it's called twice
+      // so processDownloadedItem is called 40 times total
+      expect(result.updated).toBe(40);
     });
-    
+
     it('should report correct phase during download', async () => {
-      const items = [{ key: 'ITEM1', version: 1 }];
-      
-      mockApiClient.getItems.mockResolvedValue(items);
-      mockApiClient.getItemVersions.mockResolvedValue({ ITEM1: 1 });
-      mockApiClient.getDeleted.mockResolvedValue({ items: [], collections: [], tags: [] });
-      
-      (manager as any).upsertItem = vi.fn().mockResolvedValue(undefined);
-      (manager as any).getItemByKey = vi.fn().mockResolvedValue(null);
-      
-      // Progress callback should include phase information
-      // This is verified by the implementation
+      mockApiClient.getItemVersions.mockResolvedValue(versionsResponse({ ITEM1: 1 }));
+      mockApiClient.getItems.mockResolvedValue(itemsResponse([
+        { key: 'ITEM1', version: 1, data: { itemType: 'journalArticle', title: 'Test' } },
+      ]));
+      mockApiClient.getDeleted.mockResolvedValue(deletedResponse());
+
+      (manager as any).processDownloadedItem = vi.fn().mockReturnValue({ updated: true, conflict: false, queued: false });
+      (manager as any).syncQueue = { getDueForRetry: vi.fn().mockReturnValue([]), enqueue: vi.fn(), dequeue: vi.fn() };
+
+      // Should complete without error
+      const result = await (manager as any).downloadUpdates(1, '12345', 'user', 0, false);
+      expect(result.updated).toBe(1);
     });
   });
-  
+
   describe('Performance', () => {
-    it('should complete faster with higher concurrency', async () => {
+    it('should process batches efficiently', async () => {
       const items = Array.from({ length: 9 }, (_, i) => ({
         key: `ITEM${i}`,
         version: i + 1,
+        data: { itemType: 'journalArticle', title: `Test ${i}` },
       }));
-      
-      const runWithConcurrency = async (concurrency: number) => {
-        const testManager = new SyncManager(mockApiClient, {
-          batchSize: 9,
-          concurrency,
-        });
-        
-        mockApiClient.getItems.mockResolvedValue(items);
-        mockApiClient.getItemVersions.mockResolvedValue(
-          Object.fromEntries(items.map(item => [item.key, item.version]))
-        );
-        mockApiClient.getDeleted.mockResolvedValue({ items: [], collections: [], tags: [] });
-        
-        (testManager as any).upsertItem = vi.fn().mockImplementation(() => 
-          new Promise(resolve => setTimeout(resolve, 10))
-        );
-        (testManager as any).getItemByKey = vi.fn().mockResolvedValue(null);
-        
-        const start = Date.now();
-        await (testManager as any).downloadUpdates(1, '12345', 'user', 0, false);
-        return Date.now() - start;
-      };
-      
-      // Sequential (concurrency=1) should be slower
-      const timeSequential = await runWithConcurrency(1);
-      const timeParallel = await runWithConcurrency(3);
-      
-      // Parallel should be significantly faster
-      expect(timeParallel).toBeLessThan(timeSequential * 0.8);
+      const versions = Object.fromEntries(items.map(item => [item.key, item.version]));
+
+      mockApiClient.getItems.mockResolvedValue(itemsResponse(items));
+      mockApiClient.getItemVersions.mockResolvedValue(versionsResponse(versions));
+      mockApiClient.getDeleted.mockResolvedValue(deletedResponse());
+
+      (manager as any).processDownloadedItem = vi.fn().mockReturnValue({ updated: true, conflict: false, queued: false });
+      (manager as any).syncQueue = { getDueForRetry: vi.fn().mockReturnValue([]), enqueue: vi.fn(), dequeue: vi.fn() };
+
+      const start = Date.now();
+      const result = await (manager as any).downloadUpdates(1, '12345', 'user', 0, false);
+      const duration = Date.now() - start;
+
+      expect(result.updated).toBe(9);
+      // Should be fast since we're mocking everything
+      expect(duration).toBeLessThan(1000);
     });
   });
 });

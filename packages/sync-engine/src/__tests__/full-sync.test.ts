@@ -72,9 +72,9 @@ describe('Full Sync Option - Unit Tests', () => {
       const mockApiClient = {
         verifyKey: vi.fn().mockResolvedValue({ username: 'test', userID: 12345 }),
         getLibraryVersion: vi.fn().mockResolvedValue(10),
-        getItemVersions: vi.fn().mockResolvedValue({}),
-        getItems: vi.fn().mockResolvedValue([]),
-        getDeleted: vi.fn().mockResolvedValue({ items: [], collections: [] })
+        getItemVersions: vi.fn().mockResolvedValue({ versions: {}, libraryVersion: 10 }),
+        getItems: vi.fn().mockResolvedValue({ items: [], libraryVersion: 10 }),
+        getDeleted: vi.fn().mockResolvedValue({ deleted: { items: [], collections: [] }, libraryVersion: 10 })
       };
 
       const syncManager = new SyncManager(mockApiClient as any);
@@ -90,13 +90,13 @@ describe('Full Sync Option - Unit Tests', () => {
       const mockApiClient = {
         verifyKey: vi.fn().mockResolvedValue({ username: 'test', userID: 12345 }),
         getLibraryVersion: vi.fn().mockResolvedValue(10),
-        getItemVersions: vi.fn().mockResolvedValue({ 'ITEM1': 5 }),
-        getItems: vi.fn().mockResolvedValue([{
+        getItemVersions: vi.fn().mockResolvedValue({ versions: { 'ITEM1': 5 }, libraryVersion: 10 }),
+        getItems: vi.fn().mockResolvedValue({ items: [{
           key: 'ITEM1',
           version: 5,
           data: { itemType: 'journalArticle', title: 'Test', date: '2024' }
-        }]),
-        getDeleted: vi.fn().mockResolvedValue({ items: [], collections: [] })
+        }], libraryVersion: 10 }),
+        getDeleted: vi.fn().mockResolvedValue({ deleted: { items: [], collections: [] }, libraryVersion: 10 })
       };
 
       const syncManager = new SyncManager(mockApiClient as any);
@@ -144,14 +144,17 @@ describe('Full Sync Integration', () => {
       getLibraryVersion: vi.fn().mockResolvedValue(8),
       // Return items even though versions will match
       getItemVersions: vi.fn().mockResolvedValue({
-        'ITEM001': 5,
-        'ITEM002': 6
+        versions: { 'ITEM001': 5, 'ITEM002': 6 },
+        libraryVersion: 8
       }),
-      getItems: vi.fn().mockResolvedValue([
-        { key: 'ITEM001', version: 5, data: { itemType: 'article', title: 'Item 1', date: '2024' } },
-        { key: 'ITEM002', version: 6, data: { itemType: 'article', title: 'Item 2', date: '2024' } }
-      ]),
-      getDeleted: vi.fn().mockResolvedValue({ items: [], collections: [] })
+      getItems: vi.fn().mockResolvedValue({
+        items: [
+          { key: 'ITEM001', version: 5, data: { itemType: 'article', title: 'Item 1', date: '2024' } },
+          { key: 'ITEM002', version: 6, data: { itemType: 'article', title: 'Item 2', date: '2024' } }
+        ],
+        libraryVersion: 8
+      }),
+      getDeleted: vi.fn().mockResolvedValue({ deleted: { items: [], collections: [] }, libraryVersion: 8 })
     };
 
     const syncManager = new SyncManager(mockApiClient as any);
