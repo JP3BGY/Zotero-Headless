@@ -390,6 +390,24 @@ export class ZoteroAPIClient {
     return { collections: response.data, libraryVersion: response.version };
   }
 
+  /** Get top-level item keys in a collection */
+  async getCollectionItemKeys(
+    libraryId: string | number,
+    collectionKey: string,
+    libraryType: 'user' | 'group' = 'user'
+  ): Promise<string[]> {
+    const response = await this.request<Record<string, number>>(
+      'GET',
+      `${this.getLibraryPath(libraryId, libraryType)}/collections/${collectionKey}/items/top`,
+      {
+        params: {
+          format: 'versions'
+        }
+      }
+    );
+    return Object.keys(response.data ?? {});
+  }
+
   /** Create a collection */
   async createCollection(
     libraryId: string | number,
