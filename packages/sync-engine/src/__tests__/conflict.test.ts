@@ -84,6 +84,58 @@ describe('ConflictResolver', () => {
     });
   });
   
+  describe('resolveForSync - creators ordering', () => {
+    it('should treat creators in different order as a conflict', () => {
+      const creatorA = { firstName: 'Alice', lastName: 'Smith', creatorType: 'author' };
+      const creatorB = { firstName: 'Bob', lastName: 'Jones', creatorType: 'author' };
+      const base = { title: 'Test', creators: [creatorA, creatorB] };
+      const local = { title: 'Test', creators: [creatorA, creatorB] };
+      const remote = { title: 'Test', creators: [creatorB, creatorA] }; // Reordered
+
+      const result = resolver.resolveForSync(base, local, remote);
+      // Remote changed creator order, local didn't — should accept remote
+      expect(result.data.creators).toEqual([creatorB, creatorA]);
+    });
+
+    it('should detect conflict when both sides reorder creators differently', () => {
+      const creatorA = { firstName: 'Alice', lastName: 'Smith', creatorType: 'author' };
+      const creatorB = { firstName: 'Bob', lastName: 'Jones', creatorType: 'author' };
+      const creatorC = { firstName: 'Carol', lastName: 'White', creatorType: 'author' };
+      const base = { title: 'Test', creators: [creatorA, creatorB, creatorC] };
+      const local = { title: 'Test', creators: [creatorC, creatorA, creatorB] }; // Local reorder
+      const remote = { title: 'Test', creators: [creatorB, creatorC, creatorA] }; // Remote reorder
+
+      const result = resolver.resolveForSync(base, local, remote);
+      // Both changed creators differently — should be a conflict
+      expect(result.type).toBe('conflict');
+      expect(result.conflicts.some(c => c.field === 'creators')).toBe(true);
+    });
+
+    it('should NOT collapse same creators in different order as equal', () => {
+      const creatorA = { firstName: 'Alice', lastName: 'Smith', creatorType: 'author' };
+      const creatorB = { firstName: 'Bob', lastName: 'Jones', creatorType: 'author' };
+      const base = { title: 'Test', creators: [creatorA, creatorB] };
+      const local = { title: 'Test', creators: [creatorB, creatorA] }; // Local reorder
+      const remote = { title: 'Test', creators: [creatorB, creatorA] }; // Same reorder
+
+      const result = resolver.resolveForSync(base, local, remote);
+      // Both changed the same way — should resolve cleanly
+      expect(result.type).toBe('resolved');
+      expect(result.data.creators).toEqual([creatorB, creatorA]);
+    });
+
+    it('should treat identical creators in same order as equal', () => {
+      const creatorA = { firstName: 'Alice', lastName: 'Smith', creatorType: 'author' };
+      const creatorB = { firstName: 'Bob', lastName: 'Jones', creatorType: 'author' };
+      const base = { title: 'Test', creators: [creatorA, creatorB] };
+      const local = { title: 'Test', creators: [creatorA, creatorB] }; // Same
+      const remote = { title: 'Test', creators: [creatorA, creatorB] }; // Same
+
+      const result = resolver.resolveForSync(base, local, remote);
+      expect(result.type).toBe('resolved');
+    });
+  });
+
   describe('autoResolve', () => {
     it('should auto-resolve non-conflicting changes', () => {
       const base = { title: 'Original', author: 'John' };
