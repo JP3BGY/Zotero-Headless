@@ -340,9 +340,9 @@ export class ConflictResolver {
   private _creatorsEqual(a: unknown, b: unknown): boolean {
     if (!Array.isArray(a) || !Array.isArray(b)) return false;
     if (a.length !== b.length) return false;
-    const sortedA = a.map(c => JSON.stringify(c)).sort();
-    const sortedB = b.map(c => JSON.stringify(c)).sort();
-    return sortedA.every((v, i) => v === sortedB[i]);
+    // Compare element-by-element in order — creator order is semantically meaningful
+    // (first author vs second author). Matches official Zotero's positional comparison.
+    return a.every((c, i) => JSON.stringify(c) === JSON.stringify(b[i]));
   }
 
   /**
