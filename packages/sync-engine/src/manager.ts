@@ -3,10 +3,12 @@
 // See Zotero-Headless-Complete-Design.md Section 5
 
 import { EventEmitter } from 'events';
-import { getDatabase, getRawSQLite, libraries, items, collections, itemTags, syncLogs, attachments, webdavConfig, logDeletion, type Database } from '@zotero-headless/database';
+import { getDatabase, getRawSQLite, libraries, items, collections, itemTags, syncLogs, attachments, webdavConfig, savedSearches, savedSearchConditions, logDeletion, type Database } from '@zotero-headless/database';
 import { ZoteroAPIClient } from '@zotero-headless/api';
 import { appConfig, symbols } from '@zotero-headless/core';
 import { ConflictResolver, conflictResolver } from './conflict.js';
+import { SyncCacheManager } from './sync-cache.js';
+import { SyncQueueManager } from './sync-queue.js';
 import { PayloadBuilder } from './payload-builder.js';
 import { parseItemData, parseRawJson } from '@zotero-headless/types';
 import type { SyncOptions, SyncResult, Library, Item } from '@zotero-headless/types';
@@ -26,10 +28,16 @@ const DEFAULT_CONFIG: SyncConfig = {
   conflictStrategy: 'local',
 };
 
+// Delay intervals for download restarts when library version changes mid-sync (in ms)
+const DOWNLOAD_RESTART_DELAYS = [10000, 20000, 40000, 60000, 120000, 240000, 300000];
+const MAX_DOWNLOAD_RESTARTS = 5;
+
 export class SyncManager extends EventEmitter {
   private db: Database;
   private apiClient: ZoteroAPIClient;
   private conflictResolver: ConflictResolver;
+  private syncCache: SyncCacheManager;
+  private syncQueue: SyncQueueManager;
   private config: SyncConfig;
 
   constructor(
@@ -40,6 +48,8 @@ export class SyncManager extends EventEmitter {
     this.db = getDatabase();
     this.apiClient = apiClient ?? new ZoteroAPIClient();
     this.conflictResolver = conflictResolver;
+    this.syncCache = new SyncCacheManager();
+    this.syncQueue = new SyncQueueManager();
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
@@ -91,6 +101,24 @@ export class SyncManager extends EventEmitter {
 
         console.log(`Versions - Local: ${localVersion}, Remote: ${remoteVersion}`);
 
+        // Handle resetMode before normal sync
+        if (options.resetMode === 'fromLocal') {
+          await this._restoreToServer(libraryId, zoteroId, 'user');
+          return { success: true, updated: 0, deleted: 0, errors: [] };
+        } else if (options.resetMode === 'fromServer') {
+          // Wipe local and download everything
+          const sqlite = getRawSQLite();
+          this.syncCache.clearForLibrary(libraryId);
+          this.syncQueue.clearForLibrary(libraryId);
+          sqlite.prepare('DELETE FROM items WHERE library_id = ?').run(libraryId);
+          sqlite.prepare('DELETE FROM collections WHERE library_id = ?').run(libraryId);
+          sqlite.prepare('DELETE FROM saved_searches WHERE library_id = ?').run(libraryId);
+          sqlite.prepare('DELETE FROM synced_settings WHERE library_id = ?').run(libraryId);
+          sqlite.prepare('DELETE FROM attachments WHERE library_id = ?').run(libraryId);
+          await this.updateLibraryVersion(libraryId, 0);
+          options.fullSync = true;
+        }
+
         const unsyncedItems = await this.getUnsyncedItems(libraryId);
         const hasUnsyncedChanges = unsyncedItems.length > 0;
 
@@ -102,12 +130,10 @@ export class SyncManager extends EventEmitter {
         const hasUnsyncedCollections = unsyncedColCount.length > 0;
 
         if (remoteVersion <= localVersion && !options.fullSync && !hasUnsyncedChanges && !hasUnsyncedCollections) {
-          // Items are up to date, but still sync collections (lightweight version check)
-          try {
-            await this.syncCollections(libraryId, zoteroId, 'user', localVersion);
-          } catch (e) {
-            // Non-fatal: log but don't fail
-          }
+          // Items are up to date, but still sync collections/searches/settings
+          try { await this.syncSettings(libraryId, zoteroId, 'user', localVersion); } catch { /* non-fatal */ }
+          try { await this.syncCollections(libraryId, zoteroId, 'user', localVersion); } catch { /* non-fatal */ }
+          try { await this.syncSearches(libraryId, zoteroId, 'user', localVersion); } catch { /* non-fatal */ }
           console.log(`${symbols.success} Library is up to date!`);
           return { success: true, updated: 0, deleted: 0, errors: [] };
         }
@@ -328,7 +354,8 @@ export class SyncManager extends EventEmitter {
   }
 
   /**
-   * Two-way sync: download changes + upload local changes
+   * Two-way sync: upload first, then download, with restart-on-conflict.
+   * Matches official Zotero's sync loop (syncEngine.js:138-220).
    */
   private async twoWaySync(
     libraryId: number,
@@ -344,36 +371,74 @@ export class SyncManager extends EventEmitter {
     const errors: string[] = [];
     const conflicts: string[] = [];
 
-    // ===== PHASE 1: Download from remote =====
-    if (!skipDownload) {
-      console.log('\nPhase 1: Downloading from remote...');
-      const sinceVersion = fullSync ? 0 : localVersion;
-      const downloadResult = await this.downloadUpdates(libraryId, zoteroId, libraryType, sinceVersion);
-      totalUpdated += downloadResult.updated;
-      totalDeleted += downloadResult.deleted;
-      errors.push(...downloadResult.errors);
-      conflicts.push(...downloadResult.conflicts);
-    } else {
-      console.log('\nPhase 1: Skipped (local changes only)');
-    }
-
-    // ===== PHASE 2: Upload to remote =====
-    console.log('\nPhase 2: Uploading local changes...');
+    // ===== PHASE 1: Upload local changes first =====
+    // Upload first reduces conflict chance (official Zotero pattern)
+    console.log('\nPhase 1: Uploading local changes...');
     const uploadResult = await this.uploadChanges(libraryId, zoteroId, libraryType, remoteVersion);
     totalUpdated += uploadResult.updated;
     totalDeleted += uploadResult.deleted;
     errors.push(...uploadResult.errors);
     conflicts.push(...uploadResult.conflicts);
 
+    // ===== PHASE 2: Download from remote (with restart-on-version-change) =====
+    if (!skipDownload) {
+      console.log('\nPhase 2: Downloading from remote...');
+      const sinceVersion = fullSync ? 0 : localVersion;
+      let downloadRestarts = 0;
+
+      while (downloadRestarts < MAX_DOWNLOAD_RESTARTS) {
+        const downloadResult = await this.downloadUpdates(libraryId, zoteroId, libraryType, sinceVersion);
+
+        if (downloadResult.restart) {
+          downloadRestarts++;
+          if (downloadRestarts >= MAX_DOWNLOAD_RESTARTS) {
+            errors.push(`Download failed: library version changed ${MAX_DOWNLOAD_RESTARTS} times during sync`);
+            break;
+          }
+          const delay = DOWNLOAD_RESTART_DELAYS[Math.min(downloadRestarts - 1, DOWNLOAD_RESTART_DELAYS.length - 1)];
+          console.log(`   Restarting download in ${delay / 1000}s (attempt ${downloadRestarts + 1}/${MAX_DOWNLOAD_RESTARTS})...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+
+        // Handle 409 → full sync reconciliation
+        if (downloadResult.needsFullSync) {
+          try {
+            const lastVersion = await this._fullSync(libraryId, zoteroId, libraryType);
+            await this.updateLibraryVersion(libraryId, lastVersion);
+          } catch (e) {
+            errors.push(`Full sync reconciliation failed: ${e}`);
+          }
+        }
+
+        totalUpdated += downloadResult.updated;
+        totalDeleted += downloadResult.deleted;
+        errors.push(...downloadResult.errors);
+        conflicts.push(...downloadResult.conflicts);
+        break;
+      }
+    } else {
+      console.log('\nPhase 2: Skipped (local changes only)');
+    }
+
+    // ===== PHASE 2b: Full-text content sync =====
+    try {
+      const ftSinceVersion = fullSync ? 0 : localVersion;
+      await this.syncFulltext(libraryId, zoteroId, libraryType, ftSinceVersion);
+    } catch (e) {
+      console.log(`   ! Full-text sync failed: ${e}`);
+      // Non-fatal — fulltext can always retry later
+    }
+
     // ===== PHASE 3: WebDAV sync (if autoSync enabled) =====
-    const webdavConfig = await this.getWebDAVConfig();
-    if (webdavConfig?.enabled && webdavConfig?.autoSync) {
+    const webdavCfg = await this.getWebDAVConfig();
+    if (webdavCfg?.enabled && webdavCfg?.autoSync) {
       console.log('\nPhase 3: Syncing attachments to WebDAV (autoSync enabled)...');
       try {
         const { AttachmentManager } = await import('@zotero-headless/attachment-manager');
         const attachmentManager = new AttachmentManager();
         const webdavResult = await attachmentManager.syncAllToWebDAV();
-        
+
         if (webdavResult.success) {
           console.log(`${symbols.success} WebDAV sync complete: ${webdavResult.synced} attachments synced`);
         } else {
@@ -386,6 +451,13 @@ export class SyncManager extends EventEmitter {
       }
     }
 
+    // Purge old cache versions periodically
+    try {
+      this.syncCache.purgeOldVersions('item', libraryId);
+      this.syncCache.purgeOldVersions('collection', libraryId);
+      this.syncCache.purgeOldVersions('search', libraryId);
+    } catch { /* non-fatal */ }
+
     return {
       success: errors.length === 0 && conflicts.length === 0,
       updated: totalUpdated,
@@ -396,95 +468,173 @@ export class SyncManager extends EventEmitter {
   }
 
   /**
-   * Download from remote updates
+   * Download remote updates with:
+   * - Library version change detection (restarts if remote changed mid-download)
+   * - Top-level items first (prevents missing-parent errors)
+   * - Three-way merge via sync cache (field-level conflict resolution)
+   * - Batch transaction safety (atomic per-batch writes)
+   * - Sync queue integration (failed items queued for retry)
    */
   private async downloadUpdates(
     libraryId: number,
     zoteroId: string,
     libraryType: 'user' | 'group' = 'user',
     sinceVersion: number
-  ): Promise<{ updated: number; deleted: number; errors: string[]; conflicts: string[] }> {
+  ): Promise<{ updated: number; deleted: number; errors: string[]; conflicts: string[]; restart?: boolean; needsFullSync?: boolean }> {
     let updated = 0;
     let deleted = 0;
     const errors: string[] = [];
     const conflicts: string[] = [];
 
-    // 1. Get changed item versions
-    const versionMap = await this.apiClient.getItemVersions(zoteroId, sinceVersion, libraryType);
-    const changedKeys = Object.keys(versionMap);
-    console.log(`   Found ${changedKeys.length} changed items`);
+    // 1. Get changed item versions (top-level first to ensure parents exist before children)
+    const { versions: topVersionMap, libraryVersion: newLibraryVersion } =
+      await this.apiClient.getItemVersions(zoteroId, sinceVersion, libraryType, { top: true });
+    const topKeys = Object.keys(topVersionMap);
 
-    // 2. Parallel download with batch processing
+    // Also get all changed versions (includes children)
+    const { versions: allVersionMap, libraryVersion: allLibVersion } =
+      await this.apiClient.getItemVersions(zoteroId, sinceVersion, libraryType);
+
+    // Check for library version change between the two calls
+    if (allLibVersion !== newLibraryVersion) {
+      console.log('   Library version changed during version fetch -- requesting restart');
+      return { updated: 0, deleted: 0, errors: [], conflicts: [], restart: true };
+    }
+
+    // Child keys = all keys minus top-level keys
+    const topKeySet = new Set(topKeys);
+    const childKeys = Object.keys(allVersionMap).filter(k => !topKeySet.has(k));
+
+    // Include queued items that are due for retry
+    const queuedKeys = this.syncQueue.getDueForRetry('item', libraryId);
+    if (queuedKeys.length > 0) {
+      console.log(`   Retrying ${queuedKeys.length} queued item(s)`);
+    }
+
+    // Build ordered download list: top-level first, then children, then queued
+    const allKeys = [...new Set([...topKeys, ...childKeys, ...queuedKeys])];
+    console.log(`   Found ${allKeys.length} items to download (${topKeys.length} top-level, ${childKeys.length} children, ${queuedKeys.length} queued)`);
+
+    // 2. Download and process in batches with transaction safety
     const batchSize = this.config.batchSize ?? 50;
-    const concurrency = this.config.concurrency ?? 5;
-    
-    console.log(`   Downloading with ${concurrency} parallel connections...`);
-    
-    for (let i = 0; i < changedKeys.length; i += batchSize) {
-      const batch = changedKeys.slice(i, i + batchSize);
-      
+
+    for (let i = 0; i < allKeys.length; i += batchSize) {
+      const batch = allKeys.slice(i, i + batchSize);
+
       try {
-        // Fetch batch from API
-        const apiItems = await this.apiClient.getItems(zoteroId, batch, libraryType);
-        
-        // Process batch in parallel with concurrency limit
-        const chunkSize = Math.min(concurrency, apiItems.length);
-        
-        for (let j = 0; j < apiItems.length; j += chunkSize) {
-          const chunk = apiItems.slice(j, j + chunkSize);
-          
-          await Promise.all(chunk.map(async (apiItem) => {
-            try {
-              const localItem = await this.getItemByKey(apiItem.key, libraryId);
-              
-              if (localItem && !localItem.synced) {
-                // Conflict detected
-                console.log(`   !  Conflict: ${apiItem.key}`);
-                conflicts.push(apiItem.key);
-                
-                if (this.config.conflictStrategy === 'remote') {
-                  await this.upsertItem(apiItem, libraryId);
-                  updated++;
-                }
-              } else {
-                // No conflict
-                await this.upsertItem(apiItem, libraryId);
-                updated++;
-              }
-            } catch (e) {
-              console.error(`${symbols.error} Failed: ${apiItem.key}:`, e);
-            }
-          }));
+        const { items: apiItems, libraryVersion: batchLibVersion } =
+          await this.apiClient.getItems(zoteroId, batch, libraryType);
+
+        // Check for library version change
+        if (batchLibVersion !== newLibraryVersion) {
+          console.log('   Library version changed during download -- requesting restart');
+          return { updated, deleted, errors, conflicts, restart: true };
         }
-        
+
+        // Process entire batch in a single SQLite transaction for atomicity
+        const sqlite = getRawSQLite();
+        const batchResult = { batchUpdated: 0, batchConflicts: [] as string[], batchQueued: [] as string[] };
+
+        const processBatch = sqlite.transaction(() => {
+          for (const apiItem of apiItems) {
+            try {
+              const result = this.processDownloadedItem(apiItem, libraryId, sqlite);
+              if (result.updated) batchResult.batchUpdated++;
+              if (result.conflict) batchResult.batchConflicts.push(apiItem.key);
+              if (result.queued) batchResult.batchQueued.push(apiItem.key);
+            } catch (e) {
+              // Item failed within transaction — queue for retry
+              batchResult.batchQueued.push(apiItem.key);
+            }
+          }
+        });
+        processBatch();
+
+        updated += batchResult.batchUpdated;
+        conflicts.push(...batchResult.batchConflicts);
+
+        // Queue failed items for retry (outside transaction)
+        if (batchResult.batchQueued.length > 0) {
+          this.syncQueue.enqueue('item', libraryId, batchResult.batchQueued);
+        }
+
+        // Dequeue successfully processed items
+        const successKeys = apiItems
+          .map(item => item.key)
+          .filter(k => !batchResult.batchQueued.includes(k) && !batchResult.batchConflicts.includes(k));
+        if (successKeys.length > 0) {
+          this.syncQueue.dequeue('item', libraryId, successKeys);
+        }
+
         // Progress update
-        const progress = Math.min(i + batchSize, changedKeys.length);
-        console.log(`   Progress: ${progress}/${changedKeys.length} items (${Math.floor(progress / changedKeys.length * 100)}%)`);
-        
+        const progress = Math.min(i + batchSize, allKeys.length);
+        console.log(`   Progress: ${progress}/${allKeys.length} items (${Math.floor(progress / allKeys.length * 100)}%)`);
+
       } catch (e) {
         errors.push(`Batch ${Math.floor(i / batchSize) + 1} failed: ${e}`);
       }
     }
 
-    // 3. Handle deletions
-    const deletedData = await this.apiClient.getDeleted(zoteroId, sinceVersion, libraryType);
-    deleted = deletedData.items.length;
+    // 3. Handle deletions (with 409 detection)
+    try {
+      const { deleted: deletedData, libraryVersion: delLibVersion } =
+        await this.apiClient.getDeleted(zoteroId, sinceVersion, libraryType);
 
-    if (deleted > 0) {
-      await this.softDeleteItems(deletedData.items, libraryId);
-    }
-
-    // 3b. Handle deleted collections
-    if (deletedData.collections && deletedData.collections.length > 0) {
-      console.log(`   Removing ${deletedData.collections.length} deleted collection(s)...`);
-      for (const collKey of deletedData.collections) {
-        await this.db.delete(collections)
-          .where(and(eq(collections.key, collKey), eq(collections.libraryId, libraryId)))
-          .run();
+      if (delLibVersion !== newLibraryVersion) {
+        console.log('   Library version changed during deletion fetch -- requesting restart');
+        return { updated, deleted, errors, conflicts, restart: true };
       }
+
+      deleted = deletedData.items.length;
+
+      if (deleted > 0) {
+        await this.softDeleteItems(deletedData.items, libraryId);
+      }
+
+      // 3b. Handle deleted collections
+      if (deletedData.collections && deletedData.collections.length > 0) {
+        console.log(`   Removing ${deletedData.collections.length} deleted collection(s)...`);
+        for (const collKey of deletedData.collections) {
+          await this.db.delete(collections)
+            .where(and(eq(collections.key, collKey), eq(collections.libraryId, libraryId)))
+            .run();
+        }
+      }
+
+      // 3c. Handle deleted searches
+      if (deletedData.searches && deletedData.searches.length > 0) {
+        console.log(`   Removing ${deletedData.searches.length} deleted search(es)...`);
+        for (const searchKey of deletedData.searches) {
+          await this.db.delete(savedSearches)
+            .where(and(eq(savedSearches.key, searchKey), eq(savedSearches.libraryId, libraryId)))
+            .run();
+        }
+      }
+
+      // 3d. Handle deleted settings
+      if (deletedData.settings && deletedData.settings.length > 0) {
+        const sqlite = getRawSQLite();
+        for (const settingKey of deletedData.settings) {
+          sqlite.prepare('DELETE FROM synced_settings WHERE setting = ? AND library_id = ?')
+            .run(settingKey, libraryId);
+        }
+      }
+    } catch (e: any) {
+      if (e.message?.includes('409')) {
+        console.log('   Delete log too old (409) -- triggering full sync reconciliation');
+        return { updated, deleted, errors, conflicts, needsFullSync: true };
+      }
+      throw e;
     }
 
-    // 4. Sync collections
+    // 4. Sync settings
+    try {
+      await this.syncSettings(libraryId, zoteroId, libraryType, sinceVersion);
+    } catch (e) {
+      errors.push(`Settings sync failed: ${e}`);
+    }
+
+    // 5. Sync collections
     try {
       await this.syncCollections(libraryId, zoteroId, libraryType, sinceVersion);
     } catch (e) {
@@ -492,7 +642,209 @@ export class SyncManager extends EventEmitter {
       errors.push(`Collection sync failed: ${e}`);
     }
 
+    // 6. Sync searches
+    try {
+      await this.syncSearches(libraryId, zoteroId, libraryType, sinceVersion);
+    } catch (e) {
+      errors.push(`Search sync failed: ${e}`);
+    }
+
     return { updated, deleted, errors, conflicts };
+  }
+
+  /**
+   * Process a single downloaded item with three-way merge conflict resolution.
+   * Called within a SQLite transaction for atomicity.
+   * Returns { updated, conflict, queued } flags.
+   */
+  private processDownloadedItem(
+    apiItem: any,
+    libraryId: number,
+    sqlite: any
+  ): { updated: boolean; conflict: boolean; queued: boolean } {
+    // Check for existing local item
+    const localRow = sqlite.prepare(
+      'SELECT key, version, synced, raw_json FROM items WHERE key = ? AND library_id = ?'
+    ).get(apiItem.key, libraryId) as { key: string; version: number; synced: number; raw_json: string } | undefined;
+
+    if (!localRow || localRow.synced) {
+      // No local item, or local is synced (no local changes) — just upsert
+      this.upsertItemRaw(apiItem, libraryId, sqlite);
+      this.syncCache.save('item', libraryId, apiItem);
+      return { updated: true, conflict: false, queued: false };
+    }
+
+    // Local has unsynced changes — attempt three-way merge
+    const cachedSnapshot = this.syncCache.get('item', libraryId, apiItem.key, localRow.version);
+
+    if (cachedSnapshot) {
+      // Three-way merge: cached (base) vs local vs remote
+      const baseData = (cachedSnapshot as any).data ?? cachedSnapshot;
+      let localData: Record<string, unknown>;
+      try {
+        const parsed = JSON.parse(localRow.raw_json);
+        localData = parsed.data ?? parsed;
+      } catch {
+        localData = {};
+      }
+      const remoteData = apiItem.data;
+
+      const mergeResult = this.conflictResolver.resolveForSync(baseData, localData, remoteData);
+
+      if (mergeResult.type === 'resolved') {
+        // Auto-merged successfully — upsert the merged result
+        const mergedApiItem = { ...apiItem, data: { ...mergeResult.data } };
+        // Preserve remote metadata fields
+        mergedApiItem.data.version = apiItem.data.version;
+        mergedApiItem.data.dateAdded = apiItem.data.dateAdded;
+        mergedApiItem.data.dateModified = apiItem.data.dateModified;
+        this.upsertItemRaw(mergedApiItem, libraryId, sqlite, mergeResult.localChanged);
+        this.syncCache.save('item', libraryId, mergedApiItem);
+        return { updated: true, conflict: false, queued: false };
+      } else {
+        // Has conflicts — apply merge result but mark as unresolved
+        if (this.config.conflictStrategy === 'remote') {
+          this.upsertItemRaw(apiItem, libraryId, sqlite);
+          this.syncCache.save('item', libraryId, apiItem);
+          return { updated: true, conflict: true, queued: false };
+        } else if (this.config.conflictStrategy === 'local') {
+          // Keep local version, don't overwrite. Save remote to cache for next merge.
+          this.syncCache.save('item', libraryId, apiItem);
+          return { updated: false, conflict: true, queued: false };
+        } else {
+          // Manual — record conflict, keep local for now
+          this.syncCache.save('item', libraryId, apiItem);
+          return { updated: false, conflict: true, queued: false };
+        }
+      }
+    } else {
+      // No cache — use two-way reconciliation (conservative)
+      let localData: Record<string, unknown>;
+      try {
+        const parsed = JSON.parse(localRow.raw_json);
+        localData = parsed.data ?? parsed;
+      } catch {
+        localData = {};
+      }
+      const remoteData = apiItem.data;
+
+      const mergeResult = this.conflictResolver.resolveWithoutCache(localData, remoteData);
+
+      if (mergeResult.type === 'resolved') {
+        const mergedApiItem = { ...apiItem, data: { ...mergeResult.data } };
+        mergedApiItem.data.version = apiItem.data.version;
+        mergedApiItem.data.dateAdded = apiItem.data.dateAdded;
+        mergedApiItem.data.dateModified = apiItem.data.dateModified;
+        this.upsertItemRaw(mergedApiItem, libraryId, sqlite, mergeResult.localChanged);
+        this.syncCache.save('item', libraryId, mergedApiItem);
+        return { updated: true, conflict: false, queued: false };
+      } else {
+        // Without cache, scalar conflicts exist
+        if (this.config.conflictStrategy === 'remote') {
+          this.upsertItemRaw(apiItem, libraryId, sqlite);
+          this.syncCache.save('item', libraryId, apiItem);
+          return { updated: true, conflict: true, queued: false };
+        } else {
+          this.syncCache.save('item', libraryId, apiItem);
+          return { updated: false, conflict: true, queued: false };
+        }
+      }
+    }
+  }
+
+  /**
+   * Raw SQLite upsert for use within transactions.
+   * If localChanged is true, marks item as synced=false (has remaining local changes to upload).
+   */
+  private upsertItemRaw(apiItem: any, libraryId: number, sqlite: any, localChanged: boolean = false): void {
+    const data = apiItem.data;
+    const createdAt = data.dateAdded
+      ? Math.floor(new Date(data.dateAdded).getTime() / 1000)
+      : Math.floor(Date.now() / 1000);
+    const updatedAt = data.dateModified
+      ? Math.floor(new Date(data.dateModified).getTime() / 1000)
+      : Math.floor(Date.now() / 1000);
+
+    sqlite.prepare(`
+      INSERT OR REPLACE INTO items (
+        key, library_id, version, synced, deleted,
+        created_at, updated_at, item_type, title,
+        publication_date, abstract, doi, url, isbn, issn,
+        publisher, journal, volume, issue, pages,
+        creators, collection_keys, tags, extra, raw_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      apiItem.key,
+      libraryId,
+      apiItem.version,
+      localChanged ? 0 : 1, // synced: false if local has remaining changes
+      data.deleted ? 1 : 0,
+      createdAt,
+      updatedAt,
+      data.itemType ?? 'document',
+      data.title ?? null,
+      data.date ?? null,
+      data.abstractNote ?? null,
+      data.DOI ?? null,
+      data.url ?? null,
+      data.ISBN ?? null,
+      data.ISSN ?? null,
+      data.publisher ?? null,
+      data.publicationTitle ?? null,
+      data.volume ?? null,
+      data.issue ?? null,
+      data.pages ?? null,
+      JSON.stringify(data.creators ?? []),
+      JSON.stringify(data.collections ?? []),
+      JSON.stringify(data.tags ?? []),
+      JSON.stringify(data.extra ?? {}),
+      JSON.stringify(apiItem)
+    );
+
+    // Sync attachment metadata
+    if (data.itemType === 'attachment' && data.parentItem) {
+      const linkMode = data.linkMode ?? '';
+      const webdavPath = (linkMode === 'imported_file' || linkMode === 'imported_url')
+        ? `${apiItem.key}.zip` : null;
+      sqlite.prepare(`
+        INSERT OR REPLACE INTO attachments (
+          key, parent_item_key, library_id, filename, content_type,
+          file_type, path, url, version, created_at, updated_at,
+          deleted, size, md5, webdav_path, raw_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        apiItem.key,
+        data.parentItem,
+        libraryId,
+        data.filename ?? data.title ?? null,
+        data.contentType ?? null,
+        linkMode || null,
+        null,
+        data.url ?? null,
+        apiItem.version,
+        createdAt,
+        updatedAt,
+        data.deleted ? 1 : 0,
+        null,
+        data.md5 ?? null,
+        webdavPath,
+        JSON.stringify(apiItem),
+      );
+    }
+
+    // Sync tags
+    const tags: Array<{ tag: string; type?: number }> = data.tags ?? [];
+    if (tags.length > 0) {
+      const now = Math.floor(Date.now() / 1000);
+      sqlite.prepare('DELETE FROM item_tags WHERE item_key = ? AND library_id = ?')
+        .run(apiItem.key, libraryId);
+      const tagStmt = sqlite.prepare(
+        'INSERT OR IGNORE INTO item_tags (item_key, library_id, tag, tag_type, created_at) VALUES (?, ?, ?, ?, ?)'
+      );
+      for (const t of tags) {
+        tagStmt.run(apiItem.key, libraryId, t.tag, t.type ?? 0, now);
+      }
+    }
   }
 
   /**
@@ -515,13 +867,13 @@ export class SyncManager extends EventEmitter {
     const effectiveSince = (localCount?.cnt ?? 0) === 0 ? 0 : sinceVersion;
 
     // Get changed collection versions
-    const versionMap = await this.apiClient.getCollectionVersions(zoteroId, effectiveSince, libraryType);
+    const { versions: versionMap } = await this.apiClient.getCollectionVersions(zoteroId, effectiveSince, libraryType);
     const changedKeys = Object.keys(versionMap);
 
     if (changedKeys.length === 0 && effectiveSince > 0) {
       // No incremental changes — still reconcile to catch missed deletions
       // Fetch all remote collection keys
-      const allRemoteVersions = await this.apiClient.getCollectionVersions(zoteroId, 0, libraryType);
+      const { versions: allRemoteVersions } = await this.apiClient.getCollectionVersions(zoteroId, 0, libraryType);
       const remoteKeys = Object.keys(allRemoteVersions);
       if (remoteKeys.length > 0) {
         const deleted = await db.delete(collections)
@@ -540,7 +892,7 @@ export class SyncManager extends EventEmitter {
     console.log(`   Syncing ${changedKeys.length} collection(s)...`);
 
     // Fetch collection data
-    const apiCollections = await this.apiClient.getCollections(zoteroId, changedKeys, libraryType);
+    const { collections: apiCollections } = await this.apiClient.getCollections(zoteroId, changedKeys, libraryType);
 
     const now = Math.floor(Date.now() / 1000);
 
@@ -590,7 +942,7 @@ export class SyncManager extends EventEmitter {
     // otherwise fetch all keys for reconciliation
     const allRemoteVersions = effectiveSince === 0
       ? versionMap
-      : await this.apiClient.getCollectionVersions(zoteroId, 0, libraryType);
+      : (await this.apiClient.getCollectionVersions(zoteroId, 0, libraryType)).versions;
     const allRemoteKeys = Object.keys(allRemoteVersions);
     if (allRemoteKeys.length > 0) {
       const purged = await db.delete(collections)
@@ -607,50 +959,6 @@ export class SyncManager extends EventEmitter {
     console.log(`   ${symbols.success} Synced ${apiCollections.length} collection(s)`);
   }
 
-  /**
-   * Download items in parallel with concurrency limit
-   */
-  private async downloadItemsParallel(
-    items: any[],
-    libraryId: number,
-    concurrency: number
-  ): Promise<{ updated: number; conflicts: string[] }> {
-    const updated = 0;
-    const conflicts: string[] = [];
-    
-    // Process items in chunks with concurrency limit
-    for (let i = 0; i < items.length; i += concurrency) {
-      const chunk = items.slice(i, i + concurrency);
-      
-      await Promise.all(chunk.map(async (apiItem) => {
-        try {
-          const localItem = await this.getItemByKey(apiItem.key, libraryId);
-          
-          if (localItem && !localItem.synced) {
-            // Conflict detected
-            conflicts.push(apiItem.key);
-            
-            if (this.config.conflictStrategy === 'remote') {
-              await this.upsertItem(apiItem, libraryId);
-            }
-            // 'local' or 'manual' - skip, will handle later
-          } else {
-            // No conflict
-            await this.upsertItem(apiItem, libraryId);
-          }
-        } catch (e) {
-          console.error(`Failed to download item ${apiItem.key}:`, e);
-        }
-      }));
-      
-      // Progress update
-      if (i + concurrency < items.length) {
-        console.log(`   Downloaded ${Math.min(i + concurrency, items.length)}/${items.length} items...`);
-      }
-    }
-    
-    return { updated, conflicts };
-  }
 
   /**
    * Upload local changes to remote
@@ -1039,6 +1347,7 @@ export class SyncManager extends EventEmitter {
               const remoteItem = await this.apiClient.getItem(zoteroId, item.key, libraryType);
               if (remoteItem) {
                 await this.upsertItem(remoteItem, libraryId);
+                this.syncCache.save('item', libraryId, remoteItem);
                 console.log(`${symbols.success} Applied remote version for ${item.key}`);
               }
             } catch (fetchError) {
@@ -1359,6 +1668,16 @@ export class SyncManager extends EventEmitter {
       .set(updates)
       .where(and(eq(items.key, key), eq(items.libraryId, libraryId)))
       .run();
+
+    // Save current item state to sync cache (for future three-way merge)
+    try {
+      const item = await this.getItemByKey(key, libraryId);
+      if (item?.rawJson) {
+        const envelope = JSON.parse(item.rawJson);
+        if (version != null) envelope.version = version;
+        this.syncCache.save('item', libraryId, envelope);
+      }
+    } catch { /* non-fatal */ }
   }
 
   /**
@@ -1398,7 +1717,7 @@ export class SyncManager extends EventEmitter {
         childKeys.push(child.key);
       }
       await this.db.update(items)
-        .set({ deleted: true, deletedAt: Math.floor(Date.now() / 1000), updatedAt: Math.floor(Date.now() / 1000), synced: false })
+        .set({ deleted: true, deletedAt: Math.floor(Date.now() / 1000), updatedAt: Math.floor(Date.now() / 1000), synced: true })
         .where(and(
           eq(items.libraryId, libraryId),
           inArray(items.key, childKeys)
@@ -1420,8 +1739,9 @@ export class SyncManager extends EventEmitter {
     }
 
     // Then mark the parent items as deleted
+    // synced=true because this deletion came from the server — no need to re-upload
     await this.db.update(items)
-      .set({ deleted: true, deletedAt: Math.floor(Date.now() / 1000), updatedAt: Math.floor(Date.now() / 1000), synced: false })
+      .set({ deleted: true, deletedAt: Math.floor(Date.now() / 1000), updatedAt: Math.floor(Date.now() / 1000), synced: true })
       .where(and(
         eq(items.libraryId, libraryId),
         inArray(items.key, keys)
@@ -1504,6 +1824,593 @@ export class SyncManager extends EventEmitter {
         errorMessage: result.errors?.join('; ') ?? result.conflicts?.join('; ') ?? null,
       })
       .run();
+  }
+
+  // ============ Settings Sync ============
+
+  /**
+   * Sync settings from/to remote.
+   * Settings are simple key-value pairs — remote wins on conflict (matching official Zotero).
+   */
+  private async syncSettings(
+    libraryId: number,
+    zoteroId: string,
+    libraryType: 'user' | 'group',
+    sinceVersion: number
+  ): Promise<void> {
+    const sqlite = getRawSQLite();
+
+    // Download settings
+    try {
+      const { settings, libraryVersion } = await this.apiClient.getSettings(zoteroId, sinceVersion, libraryType);
+      const settingEntries = Object.entries(settings);
+
+      if (settingEntries.length > 0) {
+        console.log(`   Syncing ${settingEntries.length} setting(s)...`);
+        const upsert = sqlite.prepare(`
+          INSERT OR REPLACE INTO synced_settings (setting, library_id, value, version, synced)
+          VALUES (?, ?, ?, ?, 1)
+        `);
+        const runBatch = sqlite.transaction((entries: Array<[string, { value: unknown; version: number }]>) => {
+          for (const [key, { value, version }] of entries) {
+            upsert.run(key, libraryId, JSON.stringify(value), version);
+          }
+        });
+        runBatch(settingEntries);
+      }
+    } catch (e) {
+      console.log(`   ! Settings download failed: ${e}`);
+    }
+
+    // Upload unsynced settings
+    try {
+      const unsyncedRows = sqlite.prepare(
+        'SELECT setting, value FROM synced_settings WHERE library_id = ? AND synced = 0'
+      ).all(libraryId) as Array<{ setting: string; value: string }>;
+
+      if (unsyncedRows.length > 0) {
+        console.log(`   Uploading ${unsyncedRows.length} setting(s)...`);
+        const settingsPayload: Record<string, { value: unknown }> = {};
+        for (const row of unsyncedRows) {
+          try {
+            settingsPayload[row.setting] = { value: JSON.parse(row.value) };
+          } catch {
+            settingsPayload[row.setting] = { value: row.value };
+          }
+        }
+
+        const remoteVersion = await this.apiClient.getLibraryVersion(zoteroId, libraryType);
+        const { libraryVersion: newVersion } = await this.apiClient.uploadSettings(
+          zoteroId, settingsPayload, remoteVersion, libraryType
+        );
+
+        // Mark as synced
+        sqlite.prepare(
+          'UPDATE synced_settings SET synced = 1, version = ? WHERE library_id = ? AND synced = 0'
+        ).run(newVersion, libraryId);
+      }
+    } catch (e) {
+      console.log(`   ! Settings upload failed: ${e}`);
+    }
+  }
+
+  // ============ Saved Searches Sync ============
+
+  /**
+   * Sync saved searches from/to remote.
+   * Follows the same pattern as syncCollections().
+   */
+  private async syncSearches(
+    libraryId: number,
+    zoteroId: string,
+    libraryType: 'user' | 'group',
+    sinceVersion: number
+  ): Promise<void> {
+    const db = this.db;
+    const sqlite = getRawSQLite();
+    const { eq, and, count, notInArray } = await import('drizzle-orm');
+
+    // If no local searches exist yet, do a full search sync from version 0
+    const localCount = await db.select({ cnt: count() })
+      .from(savedSearches)
+      .where(eq(savedSearches.libraryId, libraryId))
+      .get();
+    const effectiveSince = (localCount?.cnt ?? 0) === 0 ? 0 : sinceVersion;
+
+    // Get changed search versions
+    const { versions: versionMap } = await this.apiClient.getSearchVersions(zoteroId, effectiveSince, libraryType);
+    const changedKeys = Object.keys(versionMap);
+
+    if (changedKeys.length === 0 && effectiveSince > 0) {
+      // No incremental changes — reconcile to catch missed deletions
+      const { versions: allRemoteVersions } = await this.apiClient.getSearchVersions(zoteroId, 0, libraryType);
+      const remoteKeys = Object.keys(allRemoteVersions);
+      if (remoteKeys.length > 0) {
+        const deleted = await db.delete(savedSearches)
+          .where(and(
+            eq(savedSearches.libraryId, libraryId),
+            notInArray(savedSearches.key, remoteKeys)
+          ))
+          .run();
+        if (deleted.changes > 0) {
+          // Also clean up conditions for deleted searches
+          sqlite.prepare(
+            `DELETE FROM saved_search_conditions WHERE library_id = ? AND search_key NOT IN (${remoteKeys.map(() => '?').join(',')})`
+          ).run(libraryId, ...remoteKeys);
+          console.log(`   Removed ${deleted.changes} stale search(es) not present on remote`);
+        }
+      }
+      return;
+    }
+
+    console.log(`   Syncing ${changedKeys.length} search(es)...`);
+
+    // Fetch search data
+    const { searches: apiSearches } = await this.apiClient.getSearches(zoteroId, changedKeys, libraryType);
+    const now = Math.floor(Date.now() / 1000);
+
+    // Upsert each search and its conditions in a transaction
+    const upsertSearch = sqlite.prepare(`
+      INSERT OR REPLACE INTO saved_searches (key, library_id, name, version, synced, created_at, updated_at, deleted, raw_json)
+      VALUES (?, ?, ?, ?, 1, ?, ?, 0, ?)
+    `);
+    const deleteConditions = sqlite.prepare(
+      'DELETE FROM saved_search_conditions WHERE search_key = ? AND library_id = ?'
+    );
+    const insertCondition = sqlite.prepare(`
+      INSERT INTO saved_search_conditions (search_key, library_id, condition_index, condition, operator, value, required)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const processSearches = sqlite.transaction((searches: typeof apiSearches) => {
+      for (const apiSearch of searches) {
+        const data = (apiSearch.data || {}) as Record<string, any>;
+        const key = apiSearch.key;
+        const name = (data.name as string) || key;
+        const version = apiSearch.version;
+
+        upsertSearch.run(key, libraryId, name, version, now, now, JSON.stringify(apiSearch));
+
+        // Replace conditions
+        deleteConditions.run(key, libraryId);
+        const conditions = (data.conditions as Array<{ condition: string; operator: string; value?: string; required?: boolean }>) || [];
+        for (let idx = 0; idx < conditions.length; idx++) {
+          const cond = conditions[idx];
+          insertCondition.run(key, libraryId, idx, cond.condition, cond.operator, cond.value ?? null, cond.required ? 1 : 0);
+        }
+      }
+    });
+    processSearches(apiSearches);
+
+    // Save to sync cache
+    for (const apiSearch of apiSearches) {
+      this.syncCache.save('search', libraryId, apiSearch);
+    }
+
+    // Reconcile: remove local searches not present on remote
+    const allRemoteVersions = effectiveSince === 0
+      ? versionMap
+      : (await this.apiClient.getSearchVersions(zoteroId, 0, libraryType)).versions;
+    const allRemoteKeys = Object.keys(allRemoteVersions);
+    if (allRemoteKeys.length > 0) {
+      const purged = await db.delete(savedSearches)
+        .where(and(
+          eq(savedSearches.libraryId, libraryId),
+          notInArray(savedSearches.key, allRemoteKeys)
+        ))
+        .run();
+      if (purged.changes > 0) {
+        console.log(`   Removed ${purged.changes} stale search(es) not present on remote`);
+      }
+    }
+
+    console.log(`   ${symbols.success} Synced ${apiSearches.length} search(es)`);
+  }
+
+  // ============ Full-Text Content Sync ============
+
+  /**
+   * Sync full-text content for PDF attachments.
+   * Downloads remote fulltext, uploads local extractions.
+   */
+  private async syncFulltext(
+    libraryId: number,
+    zoteroId: string,
+    libraryType: 'user' | 'group',
+    sinceVersion: number
+  ): Promise<void> {
+    const sqlite = getRawSQLite();
+
+    // Get the fulltext library version from synced_settings
+    const ftVersionRow = sqlite.prepare(
+      'SELECT value FROM synced_settings WHERE setting = ? AND library_id = ?'
+    ).get('fulltextLibraryVersion', libraryId) as { value: string } | undefined;
+    const fulltextSince = ftVersionRow ? Number(JSON.parse(ftVersionRow.value)) : 0;
+
+    // Download phase
+    try {
+      const { versions: ftVersions, libraryVersion: ftLibVersion } =
+        await this.apiClient.getFulltextVersions(zoteroId, fulltextSince, libraryType);
+
+      const changedKeys = Object.keys(ftVersions);
+      if (changedKeys.length > 0) {
+        console.log(`   Downloading fulltext for ${changedKeys.length} item(s)...`);
+
+        let downloaded = 0;
+        for (const key of changedKeys) {
+          try {
+            const ft = await this.apiClient.getFulltext(zoteroId, key, libraryType);
+            if (!ft) continue;
+
+            // Store in content_cache
+            sqlite.prepare(`
+              INSERT OR REPLACE INTO content_cache (attachment_key, library_id, file_md5, content, format, extracted_at)
+              VALUES (?, ?, 'remote-sync', ?, 'text', ?)
+            `).run(key, libraryId, ft.content, Math.floor(Date.now() / 1000));
+
+            // Update fulltext_sync_state
+            sqlite.prepare(`
+              INSERT OR REPLACE INTO fulltext_sync_state (attachment_key, library_id, version, synced, indexed_pages, total_pages, indexed_chars, total_chars)
+              VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+            `).run(key, libraryId, ft.version, ft.indexedPages ?? null, ft.totalPages ?? null, ft.indexedChars, ft.totalChars);
+
+            // Update FTS5 index — look up parent item key from attachments table
+            const attRow = sqlite.prepare(
+              'SELECT parent_item_key FROM attachments WHERE key = ? AND library_id = ?'
+            ).get(key, libraryId) as { parent_item_key: string } | undefined;
+
+            // Delete existing FTS entry and insert new one
+            sqlite.prepare('DELETE FROM content_fts WHERE attachment_key = ? AND library_id = ?').run(key, libraryId);
+            sqlite.prepare(
+              'INSERT INTO content_fts (content, attachment_key, library_id, parent_item_key) VALUES (?, ?, ?, ?)'
+            ).run(ft.content, key, libraryId, attRow?.parent_item_key ?? '');
+
+            downloaded++;
+          } catch (e) {
+            // Non-fatal per item
+          }
+        }
+        if (downloaded > 0) {
+          console.log(`   ${symbols.success} Downloaded fulltext for ${downloaded} item(s)`);
+        }
+      }
+
+      // Save the new fulltext library version
+      sqlite.prepare(`
+        INSERT OR REPLACE INTO synced_settings (setting, library_id, value, version, synced)
+        VALUES ('fulltextLibraryVersion', ?, ?, ?, 1)
+      `).run(libraryId, JSON.stringify(ftLibVersion), ftLibVersion);
+    } catch (e) {
+      console.log(`   ! Fulltext download failed: ${e}`);
+    }
+
+    // Upload phase — find locally extracted content not yet synced
+    try {
+      const unsyncedRows = sqlite.prepare(`
+        SELECT cc.attachment_key, cc.content
+        FROM content_cache cc
+        LEFT JOIN fulltext_sync_state fts
+          ON cc.attachment_key = fts.attachment_key AND cc.library_id = fts.library_id
+        WHERE cc.library_id = ?
+          AND cc.file_md5 != 'remote-sync'
+          AND (fts.synced IS NULL OR fts.synced = 0)
+      `).all(libraryId) as Array<{ attachment_key: string; content: string }>;
+
+      if (unsyncedRows.length > 0) {
+        console.log(`   Uploading fulltext for ${unsyncedRows.length} item(s)...`);
+        let uploaded = 0;
+        const remoteVersion = await this.apiClient.getLibraryVersion(zoteroId, libraryType);
+
+        for (const row of unsyncedRows) {
+          try {
+            const content = row.content;
+            const newVersion = await this.apiClient.setFulltext(
+              zoteroId, row.attachment_key,
+              { content, indexedChars: content.length, totalChars: content.length },
+              remoteVersion, libraryType
+            );
+
+            sqlite.prepare(`
+              INSERT OR REPLACE INTO fulltext_sync_state (attachment_key, library_id, version, synced, indexed_chars, total_chars)
+              VALUES (?, ?, ?, 1, ?, ?)
+            `).run(row.attachment_key, libraryId, newVersion, content.length, content.length);
+
+            uploaded++;
+          } catch (e) {
+            // Non-fatal per item
+          }
+        }
+        if (uploaded > 0) {
+          console.log(`   ${symbols.success} Uploaded fulltext for ${uploaded} item(s)`);
+        }
+      }
+    } catch (e) {
+      console.log(`   ! Fulltext upload failed: ${e}`);
+    }
+  }
+
+  // ============ Full Sync Reconciliation (409 handling) ============
+
+  /**
+   * Full sync reconciliation — downloads ALL remote objects, compares with ALL local,
+   * and reconciles differences. Triggered when getDeleted returns 409.
+   * Mirrors official Zotero's _fullSync (syncEngine.js:368-527).
+   */
+  private async _fullSync(
+    libraryId: number,
+    zoteroId: string,
+    libraryType: 'user' | 'group'
+  ): Promise<number> {
+    const sqlite = getRawSQLite();
+    console.log('   Performing full sync reconciliation...');
+
+    let lastLibraryVersion = 0;
+
+    // 1. Download deletions from version 0
+    try {
+      const { deleted: deletedData, libraryVersion } =
+        await this.apiClient.getDeleted(zoteroId, 0, libraryType);
+      lastLibraryVersion = Math.max(lastLibraryVersion, libraryVersion);
+
+      if (deletedData.items.length > 0) {
+        await this.softDeleteItems(deletedData.items, libraryId);
+      }
+      if (deletedData.collections?.length > 0) {
+        for (const collKey of deletedData.collections) {
+          await this.db.delete(collections)
+            .where(and(eq(collections.key, collKey), eq(collections.libraryId, libraryId)))
+            .run();
+        }
+      }
+      if (deletedData.searches?.length > 0) {
+        for (const searchKey of deletedData.searches) {
+          await this.db.delete(savedSearches)
+            .where(and(eq(savedSearches.key, searchKey), eq(savedSearches.libraryId, libraryId)))
+            .run();
+        }
+      }
+    } catch (e) {
+      console.log(`   ! Deletion fetch failed during fullSync: ${e}`);
+    }
+
+    // 2. Download settings from version 0
+    try {
+      await this.syncSettings(libraryId, zoteroId, libraryType, 0);
+    } catch (e) {
+      console.log(`   ! Settings sync failed during fullSync: ${e}`);
+    }
+
+    // 3. Reconcile each object type: collections, searches, items
+    // 3a. Collections
+    try {
+      const { versions: remoteColVersions, libraryVersion: colLibVer } =
+        await this.apiClient.getCollectionVersions(zoteroId, 0, libraryType);
+      lastLibraryVersion = Math.max(lastLibraryVersion, colLibVer);
+
+      const localCols = sqlite.prepare(
+        'SELECT key, version FROM collections WHERE library_id = ?'
+      ).all(libraryId) as Array<{ key: string; version: number }>;
+      const localColMap = new Map(localCols.map(c => [c.key, c.version]));
+
+      // Download remote-only or remote-newer collections
+      const colsToDownload = Object.entries(remoteColVersions)
+        .filter(([key, ver]) => !localColMap.has(key) || localColMap.get(key)! < ver)
+        .map(([key]) => key);
+
+      if (colsToDownload.length > 0) {
+        const { collections: apiCols } = await this.apiClient.getCollections(zoteroId, colsToDownload, libraryType);
+        const now = Math.floor(Date.now() / 1000);
+        for (const apiCol of apiCols) {
+          const data = (apiCol.data || {}) as Record<string, any>;
+          sqlite.prepare(`
+            INSERT OR REPLACE INTO collections (key, library_id, name, parent_key, version, synced, created_at, updated_at, deleted, raw_json)
+            VALUES (?, ?, ?, ?, ?, 1, ?, ?, 0, ?)
+          `).run(apiCol.key, libraryId, data.name || apiCol.key, data.parentCollection || null, apiCol.version, now, now, JSON.stringify(apiCol));
+        }
+      }
+
+      // Local-only collections → mark for upload
+      const remoteColKeySet = new Set(Object.keys(remoteColVersions));
+      const localOnlyCols = localCols.filter(c => !remoteColKeySet.has(c.key)).map(c => c.key);
+      if (localOnlyCols.length > 0) {
+        sqlite.prepare(
+          `UPDATE collections SET version = 0, synced = 0 WHERE library_id = ? AND key IN (${localOnlyCols.map(() => '?').join(',')})`
+        ).run(libraryId, ...localOnlyCols);
+      }
+    } catch (e) {
+      console.log(`   ! Collection reconciliation failed: ${e}`);
+    }
+
+    // 3b. Searches
+    try {
+      const { versions: remoteSearchVersions, libraryVersion: searchLibVer } =
+        await this.apiClient.getSearchVersions(zoteroId, 0, libraryType);
+      lastLibraryVersion = Math.max(lastLibraryVersion, searchLibVer);
+
+      const localSearches = sqlite.prepare(
+        'SELECT key, version FROM saved_searches WHERE library_id = ?'
+      ).all(libraryId) as Array<{ key: string; version: number }>;
+      const localSearchMap = new Map(localSearches.map(s => [s.key, s.version]));
+
+      const searchesToDownload = Object.entries(remoteSearchVersions)
+        .filter(([key, ver]) => !localSearchMap.has(key) || localSearchMap.get(key)! < ver)
+        .map(([key]) => key);
+
+      if (searchesToDownload.length > 0) {
+        const { searches: apiSearches } = await this.apiClient.getSearches(zoteroId, searchesToDownload, libraryType);
+        const now = Math.floor(Date.now() / 1000);
+        for (const apiSearch of apiSearches) {
+          const data = (apiSearch.data || {}) as Record<string, any>;
+          sqlite.prepare(`
+            INSERT OR REPLACE INTO saved_searches (key, library_id, name, version, synced, created_at, updated_at, deleted, raw_json)
+            VALUES (?, ?, ?, ?, 1, ?, ?, 0, ?)
+          `).run(apiSearch.key, libraryId, data.name || apiSearch.key, apiSearch.version, now, now, JSON.stringify(apiSearch));
+
+          // Replace conditions
+          sqlite.prepare('DELETE FROM saved_search_conditions WHERE search_key = ? AND library_id = ?').run(apiSearch.key, libraryId);
+          const conditions = (data.conditions as Array<{ condition: string; operator: string; value?: string; required?: boolean }>) || [];
+          for (let idx = 0; idx < conditions.length; idx++) {
+            const cond = conditions[idx];
+            sqlite.prepare(`
+              INSERT INTO saved_search_conditions (search_key, library_id, condition_index, condition, operator, value, required)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+            `).run(apiSearch.key, libraryId, idx, cond.condition, cond.operator, cond.value ?? null, cond.required ? 1 : 0);
+          }
+        }
+      }
+
+      // Local-only searches → mark for upload
+      const remoteSearchKeySet = new Set(Object.keys(remoteSearchVersions));
+      const localOnlySearches = localSearches.filter(s => !remoteSearchKeySet.has(s.key)).map(s => s.key);
+      if (localOnlySearches.length > 0) {
+        sqlite.prepare(
+          `UPDATE saved_searches SET version = 0, synced = 0 WHERE library_id = ? AND key IN (${localOnlySearches.map(() => '?').join(',')})`
+        ).run(libraryId, ...localOnlySearches);
+      }
+    } catch (e) {
+      console.log(`   ! Search reconciliation failed: ${e}`);
+    }
+
+    // 3c. Items
+    try {
+      const { versions: remoteItemVersions, libraryVersion: itemLibVer } =
+        await this.apiClient.getItemVersions(zoteroId, 0, libraryType);
+      lastLibraryVersion = Math.max(lastLibraryVersion, itemLibVer);
+
+      const localItems = sqlite.prepare(
+        'SELECT key, version FROM items WHERE library_id = ?'
+      ).all(libraryId) as Array<{ key: string; version: number }>;
+      const localItemMap = new Map(localItems.map(i => [i.key, i.version]));
+
+      const itemsToDownload = Object.entries(remoteItemVersions)
+        .filter(([key, ver]) => !localItemMap.has(key) || localItemMap.get(key)! < ver)
+        .map(([key]) => key);
+
+      if (itemsToDownload.length > 0) {
+        console.log(`   Downloading ${itemsToDownload.length} item(s) for reconciliation...`);
+        const batchSize = this.config.batchSize ?? 50;
+        for (let i = 0; i < itemsToDownload.length; i += batchSize) {
+          const batch = itemsToDownload.slice(i, i + batchSize);
+          const { items: apiItems } = await this.apiClient.getItems(zoteroId, batch, libraryType);
+          const processBatch = sqlite.transaction(() => {
+            for (const apiItem of apiItems) {
+              this.upsertItemRaw(apiItem, libraryId, sqlite);
+              this.syncCache.save('item', libraryId, apiItem);
+            }
+          });
+          processBatch();
+        }
+      }
+
+      // Local-only items → mark for upload
+      const remoteItemKeySet = new Set(Object.keys(remoteItemVersions));
+      const localOnlyItems = localItems.filter(i => !remoteItemKeySet.has(i.key)).map(i => i.key);
+      if (localOnlyItems.length > 0) {
+        sqlite.prepare(
+          `UPDATE items SET version = 0, synced = 0 WHERE library_id = ? AND key IN (${localOnlyItems.map(() => '?').join(',')})`
+        ).run(libraryId, ...localOnlyItems);
+      }
+    } catch (e) {
+      console.log(`   ! Item reconciliation failed: ${e}`);
+    }
+
+    // 4. Purge old cache
+    try {
+      this.syncCache.purgeOldVersions('item', libraryId);
+      this.syncCache.purgeOldVersions('collection', libraryId);
+      this.syncCache.purgeOldVersions('search', libraryId);
+    } catch { /* non-fatal */ }
+
+    console.log(`   ${symbols.success} Full sync reconciliation complete`);
+    return lastLibraryVersion;
+  }
+
+  /**
+   * Restore local library to server — pushes entire local library to remote.
+   * Mirrors official Zotero's _restoreToServer (syncEngine.js:530-600).
+   */
+  private async _restoreToServer(
+    libraryId: number,
+    zoteroId: string,
+    libraryType: 'user' | 'group'
+  ): Promise<void> {
+    const sqlite = getRawSQLite();
+    console.log('   Restoring local library to server...');
+
+    // 1. Clear sync state
+    this.syncCache.clearForLibrary(libraryId);
+    this.syncQueue.clearForLibrary(libraryId);
+
+    // 2. Mark all settings as unsynced
+    sqlite.prepare('UPDATE synced_settings SET synced = 0, version = 0 WHERE library_id = ?').run(libraryId);
+
+    // 3. Mark all objects as unsynced with version 0
+    sqlite.prepare('UPDATE items SET version = 0, synced = 0 WHERE library_id = ?').run(libraryId);
+    sqlite.prepare('UPDATE collections SET version = 0, synced = 0 WHERE library_id = ?').run(libraryId);
+    sqlite.prepare('UPDATE saved_searches SET version = 0, synced = 0 WHERE library_id = ?').run(libraryId);
+
+    // 4. Delete remote-only objects
+    let currentVersion = await this.apiClient.getLibraryVersion(zoteroId, libraryType);
+
+    // Collections
+    try {
+      const { versions: remoteCols } = await this.apiClient.getCollectionVersions(zoteroId, 0, libraryType);
+      const localColKeys = new Set(
+        (sqlite.prepare('SELECT key FROM collections WHERE library_id = ?').all(libraryId) as Array<{ key: string }>).map(r => r.key)
+      );
+      const toDeleteCols = Object.keys(remoteCols).filter(k => !localColKeys.has(k));
+      if (toDeleteCols.length > 0) {
+        // Batch delete in groups of 50
+        for (let i = 0; i < toDeleteCols.length; i += 50) {
+          const batch = toDeleteCols.slice(i, i + 50);
+          currentVersion = await this.apiClient.deleteCollections(zoteroId, batch, currentVersion, libraryType);
+        }
+      }
+    } catch (e) {
+      console.log(`   ! Remote collection cleanup failed: ${e}`);
+    }
+
+    // Searches
+    try {
+      const { versions: remoteSearches } = await this.apiClient.getSearchVersions(zoteroId, 0, libraryType);
+      const localSearchKeys = new Set(
+        (sqlite.prepare('SELECT key FROM saved_searches WHERE library_id = ?').all(libraryId) as Array<{ key: string }>).map(r => r.key)
+      );
+      const toDeleteSearches = Object.keys(remoteSearches).filter(k => !localSearchKeys.has(k));
+      if (toDeleteSearches.length > 0) {
+        for (let i = 0; i < toDeleteSearches.length; i += 50) {
+          const batch = toDeleteSearches.slice(i, i + 50);
+          await this.apiClient.deleteSearches(zoteroId, batch, currentVersion, libraryType);
+        }
+      }
+    } catch (e) {
+      console.log(`   ! Remote search cleanup failed: ${e}`);
+    }
+
+    // Items
+    try {
+      const { versions: remoteItems } = await this.apiClient.getItemVersions(zoteroId, 0, libraryType);
+      const localItemKeys = new Set(
+        (sqlite.prepare('SELECT key FROM items WHERE library_id = ?').all(libraryId) as Array<{ key: string }>).map(r => r.key)
+      );
+      const toDeleteItems = Object.keys(remoteItems).filter(k => !localItemKeys.has(k));
+      if (toDeleteItems.length > 0) {
+        for (let i = 0; i < toDeleteItems.length; i += 50) {
+          const batch = toDeleteItems.slice(i, i + 50);
+          currentVersion = await this.apiClient.deleteItems(zoteroId, batch, currentVersion, libraryType);
+        }
+      }
+    } catch (e) {
+      console.log(`   ! Remote item cleanup failed: ${e}`);
+    }
+
+    // 5. Upload all local objects (reuse existing uploadChanges)
+    const uploadResult = await this.uploadChanges(libraryId, zoteroId, libraryType, currentVersion);
+    console.log(`   ${symbols.success} Restore to server complete: ${uploadResult.updated} uploaded`);
+
+    // 6. Update library version
+    const finalVersion = await this.apiClient.getLibraryVersion(zoteroId, libraryType);
+    await this.updateLibraryVersion(libraryId, finalVersion);
   }
 
   /**
