@@ -163,6 +163,22 @@ export class ConflictResolver {
         }
       }
 
+      // ISBN normalization: different hyphenation is not a real conflict
+      // Mirrors official Zotero (syncLocal.js:1836-1851)
+      if (field === 'ISBN' && typeof localVal === 'string' && typeof remoteVal === 'string'
+          && this._normalizeISBN(localVal) === this._normalizeISBN(remoteVal)) {
+        resolved[field] = remoteVal;
+        continue;
+      }
+
+      // Note normalization: different HTML markup for same text is not a real conflict
+      // Mirrors official Zotero (syncLocal.js:1853-1873)
+      if (field === 'note' && typeof localVal === 'string' && typeof remoteVal === 'string'
+          && this._normalizeNote(localVal) === this._normalizeNote(remoteVal)) {
+        resolved[field] = remoteVal;
+        continue;
+      }
+
       // True conflict
       conflicts.push({ field, local: localVal, remote: remoteVal });
       resolved[field] = localVal; // Default to local (preserve user edits)
@@ -222,6 +238,20 @@ export class ConflictResolver {
         continue;
       }
 
+      // ISBN normalization: different hyphenation is not a real conflict
+      if (field === 'ISBN' && typeof localVal === 'string' && typeof remoteVal === 'string'
+          && this._normalizeISBN(localVal) === this._normalizeISBN(remoteVal)) {
+        resolved[field] = remoteVal;
+        continue;
+      }
+
+      // Note normalization: different HTML markup for same text is not a real conflict
+      if (field === 'note' && typeof localVal === 'string' && typeof remoteVal === 'string'
+          && this._normalizeNote(localVal) === this._normalizeNote(remoteVal)) {
+        resolved[field] = remoteVal;
+        continue;
+      }
+
       // Without cache, scalar field differences are conflicts
       conflicts.push({ field, local: localVal, remote: remoteVal });
       resolved[field] = localVal;
@@ -256,6 +286,25 @@ export class ConflictResolver {
       resolved: result.data,
       conflicts: result.conflicts,
     };
+  }
+
+  /**
+   * Normalize ISBN for comparison by removing hyphens and spaces.
+   * Mirrors Zotero.Utilities.Internal.hyphenateISBN comparison (syncLocal.js:1836-1851).
+   */
+  private _normalizeISBN(isbn: string): string {
+    return isbn.replace(/[-\s]/g, '').toUpperCase();
+  }
+
+  /**
+   * Normalize note content by stripping HTML tags and normalizing whitespace.
+   * Mirrors official Zotero's note comparison (syncLocal.js:1853-1873).
+   */
+  private _normalizeNote(note: string): string {
+    return note.replace(/<[^>]*>/g, '')
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&nbsp;/g, ' ')
+      .replace(/\s+/g, ' ').trim();
   }
 
   /**
@@ -294,19 +343,53 @@ export class ConflictResolver {
       // If only one side removed, keep it (conservative)
     }
 
+    // Tag type normalization: when same tag exists on both sides with different types,
+    // normalize to type 0. Mirrors official Zotero (syncLocal.js:1660-1686).
+    if (field === 'tags') {
+      for (const [key, val] of result) {
+        const localTag = localSet.get(key) as { tag: string; type?: number } | undefined;
+        const remoteTag = remoteSet.get(key) as { tag: string; type?: number } | undefined;
+        if (localTag && remoteTag && (localTag.type ?? 0) !== (remoteTag.type ?? 0)) {
+          result.set(key, { tag: (val as { tag: string }).tag, type: 0 });
+        }
+      }
+    }
+
     return Array.from(result.values());
   }
 
   /**
    * Additive-only merge for set-array fields when no cache is available.
    * Union of both sides — never remove anything.
+   * For tags: dedup by tag name and normalize conflicting types to 0.
    */
-  private _mergeSetArrayAdditive(_field: string, localVal: unknown, remoteVal: unknown): unknown[] {
+  private _mergeSetArrayAdditive(field: string, localVal: unknown, remoteVal: unknown): unknown[] {
     const localArr = Array.isArray(localVal) ? localVal : [];
     const remoteArr = Array.isArray(remoteVal) ? remoteVal : [];
+
+    if (field === 'tags') {
+      const result = new Map<string, { tag: string; type?: number }>();
+      for (const item of localArr) {
+        const tagName = (item as { tag?: string })?.tag;
+        if (tagName) result.set(tagName, item as { tag: string; type?: number });
+      }
+      for (const item of remoteArr) {
+        const tagName = (item as { tag?: string })?.tag;
+        if (tagName) {
+          const existing = result.get(tagName);
+          if (existing && (existing.type ?? 0) !== ((item as { type?: number }).type ?? 0)) {
+            result.set(tagName, { tag: tagName, type: 0 });
+          } else if (!existing) {
+            result.set(tagName, item as { tag: string; type?: number });
+          }
+        }
+      }
+      return Array.from(result.values());
+    }
+
+    // Non-tag fields: original logic
     const seen = new Set<string>();
     const result: unknown[] = [];
-
     for (const item of [...localArr, ...remoteArr]) {
       const key = JSON.stringify(item);
       if (!seen.has(key)) {
