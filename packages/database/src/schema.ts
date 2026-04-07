@@ -185,6 +185,20 @@ export const deletionLog = sqliteTable('deletion_log', {
   deletedAt: integer('deleted_at').notNull(),          // Timestamp of this delete operation
 });
 
+// ============ Conflict Log 表（同步冲突审计） ============
+export const conflictLog = sqliteTable('conflict_log', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  key: textCol('key').notNull(),
+  libraryId: integer('library_id').notNull(),
+  objectType: textCol('object_type').notNull(),     // 'item' | 'collection' | 'search'
+  conflictType: textCol('conflict_type').notNull(),  // 'upload' | 'download' | 'deletion'
+  localData: textCol('local_data'),                  // JSON snapshot of local state
+  remoteData: textCol('remote_data'),                // JSON snapshot of remote state
+  resolvedBy: textCol('resolved_by').notNull(),      // 'local' | 'remote' | 'merge'
+  fields: textCol('fields'),                         // JSON array of conflicting field names
+  createdAt: integer('created_at').notNull(),
+});
+
 // ============ Content Cache 表 ============
 export const contentCache = sqliteTable('content_cache', {
   attachmentKey: textCol('attachment_key').notNull(),
