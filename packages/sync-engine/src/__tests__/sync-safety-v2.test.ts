@@ -9,6 +9,7 @@
  * - Fix #6: Tag type normalization
  */
 import { describe, it, expect } from 'vitest';
+import { createHash } from 'crypto';
 import { ConflictResolver } from '../conflict.js';
 import { PayloadBuilder } from '../payload-builder.js';
 
@@ -185,5 +186,76 @@ describe('Fix #1: PayloadBuilder.buildPatchPayload', () => {
     const patch = PayloadBuilder.buildPatchPayload(item as any, cached);
     expect(patch.date).toBe('2021');
     expect(patch).not.toHaveProperty('publicationDate');
+  });
+});
+
+// ============================================================
+// Fix: 412 merge must receive full item data, not patch data
+// ============================================================
+describe('412 merge: full data vs patch data', () => {
+  const resolver = new ConflictResolver();
+
+  it('three-way merge with full local data preserves non-conflicting remote changes', () => {
+    const base = { title: 'Original', abstractNote: 'Base abstract', url: 'http://example.com', itemType: 'book' };
+    const fullLocal = { title: 'New Title', abstractNote: 'Base abstract', url: 'http://example.com', itemType: 'book' };
+    const remote = { title: 'Original', abstractNote: 'Updated abstract', url: 'http://new.com', itemType: 'book' };
+
+    const result = resolver.resolveForSync(base, fullLocal, remote);
+    expect(result.type).toBe('resolved');
+    // Local changed title, remote changed abstractNote and url
+    expect(result.data.title).toBe('New Title');
+    expect(result.data.abstractNote).toBe('Updated abstract');
+    expect(result.data.url).toBe('http://new.com');
+  });
+
+  it('three-way merge with patch data INCORRECTLY loses remote changes', () => {
+    const base = { title: 'Original', abstractNote: 'Base abstract', url: 'http://example.com', itemType: 'book' };
+    // Patch only contains changed fields — abstractNote and url are MISSING
+    const patchLocal = { version: 5, title: 'New Title' };
+    const remote = { title: 'Original', abstractNote: 'Updated abstract', url: 'http://new.com', itemType: 'book' };
+
+    const result = resolver.resolveForSync(base, patchLocal, remote);
+    // With patch data, fields not in patch are treated as removed by local
+    // This causes incorrect behavior — abstractNote should be 'Updated abstract'
+    // but the merge sees local=undefined vs base='Base abstract' as a local change (deletion)
+    // The merge should NOT lose remote changes for fields untouched locally
+    expect(result.data.title).toBe('New Title');
+    // This test documents the BUG: patch data causes abstractNote to be lost
+    // (it will either be undefined or treated as conflict)
+    // After the fix, full data is always passed, so this scenario no longer occurs
+    const abstractResult = result.data.abstractNote;
+    expect(abstractResult).not.toBe('Updated abstract');
+  });
+});
+
+// ============================================================
+// Fix: Content hash for concurrent modification detection
+// ============================================================
+describe('Content hash for concurrent modification detection', () => {
+  function hashRawJson(rawJson: string | null): string {
+    return createHash('md5').update(rawJson ?? '').digest('hex');
+  }
+
+  it('produces identical hash for identical content', () => {
+    const json = '{"key":"ABC","data":{"title":"Test"}}';
+    expect(hashRawJson(json)).toBe(hashRawJson(json));
+  });
+
+  it('produces different hash for different content', () => {
+    const json1 = '{"key":"ABC","data":{"title":"Version 1"}}';
+    const json2 = '{"key":"ABC","data":{"title":"Version 2"}}';
+    expect(hashRawJson(json1)).not.toBe(hashRawJson(json2));
+  });
+
+  it('detects modifications that timestamps at 1-second precision would miss', () => {
+    // Simulate: two versions created in the same second
+    const v1 = JSON.stringify({ key: 'X', data: { title: 'Original', updated_at: 1700000000 } });
+    const v2 = JSON.stringify({ key: 'X', data: { title: 'Modified', updated_at: 1700000000 } });
+    // Timestamps are identical, but content hash differs
+    expect(hashRawJson(v1)).not.toBe(hashRawJson(v2));
+  });
+
+  it('handles null raw_json gracefully', () => {
+    expect(hashRawJson(null)).toBe(hashRawJson(''));
   });
 });
