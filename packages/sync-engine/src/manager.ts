@@ -3,6 +3,7 @@
 // See Zotero-Headless-Complete-Design.md Section 5
 
 import { EventEmitter } from 'events';
+import { createHash } from 'crypto';
 import { getDatabase, getRawSQLite, libraries, items, collections, itemTags, syncLogs, attachments, webdavConfig, savedSearches, savedSearchConditions, logDeletion, type Database } from '@zotero-headless/database';
 import { ZoteroAPIClient } from '@zotero-headless/api';
 import { appConfig, symbols } from '@zotero-headless/core';
@@ -700,10 +701,13 @@ export class SyncManager extends EventEmitter {
             // Re-create from remote
             this.upsertItemRaw(apiItem, libraryId, sqlite);
             this.syncCache.save('item', libraryId, apiItem);
-            this.logConflict({ key: apiItem.key, libraryId, objectType: 'item', conflictType: 'download', resolvedBy: 'remote' });
+            this.logConflict({ key: apiItem.key, libraryId, objectType: 'item', conflictType: 'download', localData: { deleted: true, caller: deletionEntry.caller }, remoteData: apiItem.data, resolvedBy: 'remote' });
             return { updated: true, conflict: true, queued: false };
           } else {
             // 'local' or 'manual': respect local deletion, skip download
+            const remoteTitle = apiItem.data?.title ?? apiItem.key;
+            console.log(`   !  Conflict: locally-deleted item "${remoteTitle}" (${apiItem.key}) was modified remotely — local deletion wins`);
+            this.logConflict({ key: apiItem.key, libraryId, objectType: 'item', conflictType: 'download', localData: { deleted: true, caller: deletionEntry.caller }, remoteData: apiItem.data, resolvedBy: 'local' });
             return { updated: false, conflict: true, queued: false };
           }
         }
@@ -1002,6 +1006,12 @@ export class SyncManager extends EventEmitter {
           deleted: false,
           rawJson: JSON.stringify(apiCol),
         });
+        // During incremental sync, a collection absent from local DB may have been
+        // hard-deleted by user. Restore its member items to be safe.
+        // (During first sync effectiveSince=0, every collection is new — skip.)
+        if (effectiveSince > 0) {
+          restoredCollectionKeys.push(key);
+        }
       }
     }
 
@@ -1233,16 +1243,29 @@ export class SyncManager extends EventEmitter {
     const newParentItems = parentItems.filter(item => item.version === 0 && !item.deleted);
     const existingOrDeletedParentItems = parentItems.filter(item => item.version !== 0 || item.deleted);
 
-    // Snapshot updated_at timestamps before upload to detect concurrent modifications
-    const parentTimestampMap = new Map<string, number>();
+    // Snapshot raw_json content hashes before upload to detect concurrent modifications.
+    // Using content hash instead of updated_at timestamp avoids 1-second granularity issues.
+    const parentHashMap = new Map<string, string>();
     for (const item of existingOrDeletedParentItems) {
-      parentTimestampMap.set(item.key, item.updatedAt ?? 0);
+      parentHashMap.set(item.key, this.hashRawJson(item.rawJson));
     }
-    const attachmentTimestampMap = new Map<string, number>();
+    const attachmentHashMap = new Map<string, string>();
     for (const item of attachmentItems) {
       if (item.version !== 0 || item.deleted) {
-        attachmentTimestampMap.set(item.key, item.updatedAt ?? 0);
+        attachmentHashMap.set(item.key, this.hashRawJson(item.rawJson));
       }
+    }
+
+    // Warn about items missing sync cache (will use conservative two-way merge on 412)
+    const uncachedKeys: string[] = [];
+    for (const item of existingOrDeletedParentItems) {
+      if (item.version > 0 && !item.deleted) {
+        const cached = this.syncCache.getLatest('item', libraryId, item.key);
+        if (!cached) uncachedKeys.push(item.key);
+      }
+    }
+    if (uncachedKeys.length > 0) {
+      console.warn(`   !  ${uncachedKeys.length} item(s) missing sync cache — 412 conflicts will use conservative two-way merge`);
     }
 
     // 2a. Batch create new parent items (10 per POST, matching Zotero Desktop)
@@ -1346,6 +1369,13 @@ export class SyncManager extends EventEmitter {
               this.syncQueue.dequeue('item', libraryId, [syncedKey]);
               updated++;
               batchSuccessCount++;
+            } else if (result.unchanged && result.unchanged[idx]) {
+              // Item already exists on server with same data — mark synced
+              const unchangedVal = result.unchanged[idx] as any;
+              const unchangedKey = typeof unchangedVal === 'string' ? unchangedVal : item.key;
+              await this.markAsSynced(unchangedKey, libraryId, resultVersion);
+              this.syncQueue.dequeue('item', libraryId, [unchangedKey]);
+              batchSuccessCount++;
             } else if (result.failed && result.failed[idx]) {
               console.log(`${symbols.error} Failed to create item ${item.key}: ${result.failed[idx].message}`);
               errors.push(`Create ${item.key} failed: ${result.failed[idx].message}`);
@@ -1431,6 +1461,10 @@ export class SyncManager extends EventEmitter {
         // rawJson may have a stale version from before local edits
         data.version = item.version;
 
+        // Save full item data before patching — needed for three-way merge on 412 conflict.
+        // The patch only contains changed fields, which is wrong input for resolveForSync().
+        const fullItemData = { ...data };
+
         // Patch mode: for existing, non-deleted items, only send changed fields.
         // Prevents silently overwriting concurrent remote changes on untouched fields.
         // Mirrors official Zotero's _getJSONForObject patch mode (syncEngine.js:1647-1686).
@@ -1444,19 +1478,19 @@ export class SyncManager extends EventEmitter {
 
         if (item.deleted) {
           // Soft delete: move to remote trash via PATCH (not permanent delete)
-          const preTs = parentTimestampMap.get(item.key) ?? 0;
+          const preHash = parentHashMap.get(item.key) ?? '';
           try {
             data.deleted = true;
             const trashVersion = await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
             console.log(`${symbols.success} Trashed ${item.key} on remote`);
-            await this.markAsSyncedIfUnchanged(item.key, libraryId, trashVersion, preTs);
+            await this.markAsSyncedIfUnchanged(item.key, libraryId, trashVersion, preHash);
             this.syncQueue.dequeue('item', libraryId, [item.key]);
             deleted++;
             batchSuccessCount++;
           } catch (e: any) {
             if (e.message?.includes('404')) {
               console.log(`    Item ${item.key} not found on remote, marking synced`);
-              await this.markAsSyncedIfUnchanged(item.key, libraryId, item.version, preTs);
+              await this.markAsSyncedIfUnchanged(item.key, libraryId, item.version, preHash);
               this.syncQueue.dequeue('item', libraryId, [item.key]);
               deleted++;
               batchSuccessCount++;
@@ -1469,7 +1503,7 @@ export class SyncManager extends EventEmitter {
                   data.deleted = true;
                   const retryVersion = await this.apiClient.updateItem(zoteroId, item.key, data, remoteVersion, libraryType);
                   console.log(`${symbols.success} Trashed ${item.key} on remote (resolved conflict)`);
-                  await this.markAsSyncedIfUnchanged(item.key, libraryId, retryVersion, preTs);
+                  await this.markAsSyncedIfUnchanged(item.key, libraryId, retryVersion, preHash);
                   this.syncQueue.dequeue('item', libraryId, [item.key]);
                   deleted++;
                   batchSuccessCount++;
@@ -1479,7 +1513,7 @@ export class SyncManager extends EventEmitter {
               } catch (retryError: any) {
                 if (retryError.message?.includes('404')) {
                   console.log(`    Item ${item.key} already gone on remote`);
-                  await this.markAsSyncedIfUnchanged(item.key, libraryId, item.version, preTs);
+                  await this.markAsSyncedIfUnchanged(item.key, libraryId, item.version, preHash);
                   deleted++;
                 } else {
                   errors.push(`Trash ${item.key} failed: ${retryError}`);
@@ -1491,14 +1525,13 @@ export class SyncManager extends EventEmitter {
           }
         } else {
           // Update existing item (version > 0)
-          const preTs = parentTimestampMap.get(item.key) ?? 0;
           const newVersion = await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
           console.log(`${symbols.success} Updated ${item.key}`);
           updated++;
           batchSuccessCount++;
 
           // Mark as synced with new version (if not modified during upload)
-          await this.markAsSyncedIfUnchanged(item.key, libraryId, newVersion, preTs);
+          await this.markAsSyncedIfUnchanged(item.key, libraryId, newVersion, preHash);
           this.syncQueue.dequeue('item', libraryId, [item.key]);
 
           // Save full item data to sync cache for future patch mode
@@ -1511,7 +1544,6 @@ export class SyncManager extends EventEmitter {
         if (e.message?.includes('412')) {
           // Conflict - remote was modified
           console.log(`   !  Conflict for ${item.key} (remote modified)`);
-          const preTs = parentTimestampMap.get(item.key) ?? 0;
 
           if (this.config.conflictStrategy === 'remote') {
             // Fetch remote version and apply to local
@@ -1548,9 +1580,9 @@ export class SyncManager extends EventEmitter {
               let mergeResult;
               if (cached) {
                 const baseData = (cached as any).data ?? cached;
-                mergeResult = this.conflictResolver.resolveForSync(baseData, data, remoteData);
+                mergeResult = this.conflictResolver.resolveForSync(baseData, fullItemData, remoteData);
               } else {
-                mergeResult = this.conflictResolver.resolveWithoutCache(data, remoteData);
+                mergeResult = this.conflictResolver.resolveWithoutCache(fullItemData, remoteData);
               }
 
               // mergeResult.data already defaults to local for conflicting fields
@@ -1562,7 +1594,7 @@ export class SyncManager extends EventEmitter {
               mergedData.version = remoteVersion;
 
               const mergedVersion = await this.apiClient.updateItem(zoteroId, item.key, mergedData, remoteVersion, libraryType);
-              await this.markAsSyncedIfUnchanged(item.key, libraryId, mergedVersion, preTs);
+              await this.markAsSyncedIfUnchanged(item.key, libraryId, mergedVersion, preHash);
               this.syncCache.save('item', libraryId, { ...remoteItem, data: mergedData, version: mergedVersion });
               console.log(`${symbols.success} Merged and updated ${item.key} (preserved non-conflicting remote changes)`);
               this.logConflict({ key: item.key, libraryId, objectType: 'item', conflictType: 'upload', resolvedBy: 'merge' });
@@ -1637,6 +1669,12 @@ export class SyncManager extends EventEmitter {
               }
               updated++;
               batchSuccessCount++;
+            } else if (result.unchanged && result.unchanged[idx]) {
+              const unchangedVal = result.unchanged[idx] as any;
+              const unchangedKey = typeof unchangedVal === 'string' ? unchangedVal : item.key;
+              await this.markAsSynced(unchangedKey, libraryId, attVersion);
+              this.syncQueue.dequeue('item', libraryId, [unchangedKey]);
+              batchSuccessCount++;
             } else if (result.failed && result.failed[idx]) {
               const errorMsg = result.failed[idx].message || 'Unknown error';
               this.syncQueue.enqueue('item', libraryId, [item.key]);
@@ -1659,7 +1697,7 @@ export class SyncManager extends EventEmitter {
       try {
         const attEnvelope = parseRawJson(item.rawJson);
         let data = attEnvelope.data;
-        const attPreTs = attachmentTimestampMap.get(item.key) ?? 0;
+        const attPreHash = attachmentHashMap.get(item.key) ?? '';
 
         if (typeof data.tags === 'string') {
           try { data.tags = JSON.parse(data.tags); } catch { data.tags = []; }
@@ -1671,14 +1709,14 @@ export class SyncManager extends EventEmitter {
             data.deleted = true;
             const attTrashVer = await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
             console.log(`${symbols.success} Trashed attachment ${item.key} on remote`);
-            await this.markAsSyncedIfUnchanged(item.key, libraryId, attTrashVer, attPreTs);
+            await this.markAsSyncedIfUnchanged(item.key, libraryId, attTrashVer, attPreHash);
             this.syncQueue.dequeue('item', libraryId, [item.key]);
             deleted++;
             batchSuccessCount++;
           } catch (e: any) {
             if (e.message?.includes('404') || (e.message?.includes('412') && e.message?.includes('not found'))) {
               console.log(`    Attachment ${item.key} not found on remote, marking synced`);
-              await this.markAsSyncedIfUnchanged(item.key, libraryId, item.version, attPreTs);
+              await this.markAsSyncedIfUnchanged(item.key, libraryId, item.version, attPreHash);
               this.syncQueue.dequeue('item', libraryId, [item.key]);
               deleted++;
               batchSuccessCount++;
@@ -1692,7 +1730,7 @@ export class SyncManager extends EventEmitter {
           try {
             delete data.key;
             const attUpdateVer = await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
-            await this.markAsSyncedIfUnchanged(item.key, libraryId, attUpdateVer, attPreTs);
+            await this.markAsSyncedIfUnchanged(item.key, libraryId, attUpdateVer, attPreHash);
             this.syncQueue.dequeue('item', libraryId, [item.key]);
             updated++;
             batchSuccessCount++;
@@ -1903,28 +1941,38 @@ export class SyncManager extends EventEmitter {
         if (version != null) envelope.version = version;
         this.syncCache.save('item', libraryId, envelope);
       }
-    } catch { /* non-fatal */ }
+    } catch (e) {
+      console.warn(`   !  Failed to save sync cache for ${key}: ${e}`);
+    }
+  }
+
+  /**
+   * Compute MD5 hash of raw_json for concurrent modification detection.
+   * More reliable than timestamp comparison (which has 1-second granularity).
+   */
+  private hashRawJson(rawJson: string | null): string {
+    return createHash('md5').update(rawJson ?? '').digest('hex');
   }
 
   /**
    * Mark item as synced only if it hasn't been modified during the upload.
-   * Compares the item's updated_at timestamp against a pre-upload snapshot.
-   * If the item was modified concurrently, only updates the version (so the next
-   * upload starts from the correct base) but keeps synced=false.
+   * Compares a pre-upload raw_json content hash against the current raw_json.
+   * If the content changed, only updates the version (so the next upload starts
+   * from the correct base) but keeps synced=false.
    * Mirrors official Zotero's changedObjects observer (syncEngine.js:1266-1288).
    */
   private async markAsSyncedIfUnchanged(
     key: string,
     libraryId: number,
     version: number,
-    preUploadTimestamp: number
+    preUploadHash: string
   ): Promise<boolean> {
-    const current = await this.db.select({ updatedAt: items.updatedAt })
+    const current = await this.db.select({ rawJson: items.rawJson })
       .from(items)
       .where(and(eq(items.key, key), eq(items.libraryId, libraryId)))
       .get();
 
-    if (current && current.updatedAt !== preUploadTimestamp) {
+    if (current && this.hashRawJson(current.rawJson) !== preUploadHash) {
       // Item was modified during upload — only update version, keep unsynced
       await this.db.update(items)
         .set({ version })
