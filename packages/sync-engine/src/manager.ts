@@ -364,7 +364,8 @@ export class SyncManager extends EventEmitter {
     localVersion: number,
     remoteVersion: number,
     fullSync: boolean,
-    skipDownload: boolean = false
+    skipDownload: boolean = false,
+    restartCount: number = 0
   ): Promise<SyncResult> {
     let totalUpdated = 0;
     let totalDeleted = 0;
@@ -379,6 +380,18 @@ export class SyncManager extends EventEmitter {
     totalDeleted += uploadResult.deleted;
     errors.push(...uploadResult.errors);
     conflicts.push(...uploadResult.conflicts);
+
+    // If upload detected a library-level conflict (412 with changed library version),
+    // restart the entire sync cycle. Mirrors official Zotero's UPLOAD_RESULT_LIBRARY_CONFLICT.
+    if (uploadResult.needsRestart) {
+      if (restartCount >= 3) {
+        errors.push('Upload restart limit reached (3 restarts) — stopping');
+        return { success: false, updated: totalUpdated, deleted: totalDeleted, errors, conflicts: conflicts.length > 0 ? conflicts : undefined };
+      }
+      console.log(`   Restarting sync cycle (attempt ${restartCount + 2}/4)...`);
+      const freshVersion = await this.apiClient.getLibraryVersion(zoteroId, libraryType);
+      return this.twoWaySync(libraryId, zoteroId, libraryType, localVersion, freshVersion, fullSync, skipDownload, restartCount + 1);
+    }
 
     // ===== PHASE 2: Download from remote (with restart-on-version-change) =====
     if (!skipDownload) {
@@ -599,24 +612,20 @@ export class SyncManager extends EventEmitter {
         conflicts.push(...delResult.conflicts);
       }
 
-      // 3b. Handle deleted collections
+      // 3b. Handle deleted collections (with conflict detection)
       if (deletedData.collections && deletedData.collections.length > 0) {
-        console.log(`   Removing ${deletedData.collections.length} deleted collection(s)...`);
-        for (const collKey of deletedData.collections) {
-          await this.db.delete(collections)
-            .where(and(eq(collections.key, collKey), eq(collections.libraryId, libraryId)))
-            .run();
-        }
+        console.log(`   Processing ${deletedData.collections.length} remotely deleted collection(s)...`);
+        const colDelResult = await this.processRemoteCollectionDeletions(deletedData.collections, libraryId);
+        deleted += colDelResult.deleted;
+        conflicts.push(...colDelResult.conflicts);
       }
 
-      // 3c. Handle deleted searches
+      // 3c. Handle deleted searches (with conflict detection)
       if (deletedData.searches && deletedData.searches.length > 0) {
-        console.log(`   Removing ${deletedData.searches.length} deleted search(es)...`);
-        for (const searchKey of deletedData.searches) {
-          await this.db.delete(savedSearches)
-            .where(and(eq(savedSearches.key, searchKey), eq(savedSearches.libraryId, libraryId)))
-            .run();
-        }
+        console.log(`   Processing ${deletedData.searches.length} remotely deleted search(es)...`);
+        const searchDelResult = await this.processRemoteSearchDeletions(deletedData.searches, libraryId);
+        deleted += searchDelResult.deleted;
+        conflicts.push(...searchDelResult.conflicts);
       }
 
       // 3d. Handle deleted settings
@@ -691,6 +700,7 @@ export class SyncManager extends EventEmitter {
             // Re-create from remote
             this.upsertItemRaw(apiItem, libraryId, sqlite);
             this.syncCache.save('item', libraryId, apiItem);
+            this.logConflict({ key: apiItem.key, libraryId, objectType: 'item', conflictType: 'download', resolvedBy: 'remote' });
             return { updated: true, conflict: true, queued: false };
           } else {
             // 'local' or 'manual': respect local deletion, skip download
@@ -946,17 +956,39 @@ export class SyncManager extends EventEmitter {
         if (existing.deleted) {
           restoredCollectionKeys.push(key);
         }
-        await db.update(collections)
-          .set({
-            name,
-            parentKey: parentKey || null,
-            version,
-            synced: true,
-            updatedAt: now,
-            deleted: false,
-            rawJson: JSON.stringify(apiCol),
-          })
-          .where(and(eq(collections.key, key), eq(collections.libraryId, libraryId)));
+
+        if (!existing.synced && !existing.deleted) {
+          // Local has unsynced changes — lightweight merge:
+          // preserve local name (user-visible), take remote structure (parentKey, version)
+          const mergedName = (existing.name !== name) ? existing.name : name;
+          if (existing.name !== name) {
+            console.log(`   !  Collection ${key}: preserved local name "${existing.name}" over remote "${name}"`);
+          }
+          await db.update(collections)
+            .set({
+              name: mergedName,
+              parentKey: parentKey || null,
+              version,
+              synced: false, // Keep unsynced — will re-upload local name on next cycle
+              updatedAt: now,
+              deleted: false,
+              rawJson: JSON.stringify(apiCol),
+            })
+            .where(and(eq(collections.key, key), eq(collections.libraryId, libraryId)));
+        } else {
+          // synced=true or deleted — safe to overwrite
+          await db.update(collections)
+            .set({
+              name,
+              parentKey: parentKey || null,
+              version,
+              synced: true,
+              updatedAt: now,
+              deleted: false,
+              rawJson: JSON.stringify(apiCol),
+            })
+            .where(and(eq(collections.key, key), eq(collections.libraryId, libraryId)));
+        }
       } else {
         await db.insert(collections).values({
           key,
@@ -1056,9 +1088,10 @@ export class SyncManager extends EventEmitter {
     zoteroId: string,
     libraryType: 'user' | 'group' = 'user',
     baseVersion: number
-  ): Promise<{ updated: number; deleted: number; errors: string[]; conflicts: string[] }> {
+  ): Promise<{ updated: number; deleted: number; errors: string[]; conflicts: string[]; needsRestart?: boolean }> {
     let updated = 0;
     let deleted = 0;
+    let batchSuccessCount = 0;
     const errors: string[] = [];
     const conflicts: string[] = [];
 
@@ -1308,11 +1341,15 @@ export class SyncManager extends EventEmitter {
                 });
                 console.log(`   Updated local key: ${item.key} -> ${newKey}`);
               }
-              await this.markAsSynced(newKey !== item.key ? newKey : item.key, libraryId, resultVersion);
+              const syncedKey = newKey !== item.key ? newKey : item.key;
+              await this.markAsSynced(syncedKey, libraryId, resultVersion);
+              this.syncQueue.dequeue('item', libraryId, [syncedKey]);
               updated++;
+              batchSuccessCount++;
             } else if (result.failed && result.failed[idx]) {
               console.log(`${symbols.error} Failed to create item ${item.key}: ${result.failed[idx].message}`);
               errors.push(`Create ${item.key} failed: ${result.failed[idx].message}`);
+              this.syncQueue.enqueue('item', libraryId, [item.key]);
             }
           }
         } catch (e: any) {
@@ -1394,6 +1431,17 @@ export class SyncManager extends EventEmitter {
         // rawJson may have a stale version from before local edits
         data.version = item.version;
 
+        // Patch mode: for existing, non-deleted items, only send changed fields.
+        // Prevents silently overwriting concurrent remote changes on untouched fields.
+        // Mirrors official Zotero's _getJSONForObject patch mode (syncEngine.js:1647-1686).
+        if (item.version > 0 && !item.deleted) {
+          const cached = this.syncCache.getLatest('item', libraryId, item.key);
+          if (cached) {
+            const cachedData = (cached as any).data ?? cached;
+            data = PayloadBuilder.buildPatchPayload(item, cachedData);
+          }
+        }
+
         if (item.deleted) {
           // Soft delete: move to remote trash via PATCH (not permanent delete)
           const preTs = parentTimestampMap.get(item.key) ?? 0;
@@ -1402,12 +1450,16 @@ export class SyncManager extends EventEmitter {
             const trashVersion = await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
             console.log(`${symbols.success} Trashed ${item.key} on remote`);
             await this.markAsSyncedIfUnchanged(item.key, libraryId, trashVersion, preTs);
+            this.syncQueue.dequeue('item', libraryId, [item.key]);
             deleted++;
+            batchSuccessCount++;
           } catch (e: any) {
             if (e.message?.includes('404')) {
               console.log(`    Item ${item.key} not found on remote, marking synced`);
               await this.markAsSyncedIfUnchanged(item.key, libraryId, item.version, preTs);
+              this.syncQueue.dequeue('item', libraryId, [item.key]);
               deleted++;
+              batchSuccessCount++;
             } else if (e.message?.includes('412')) {
               console.log(`   !  Version conflict for ${item.key}, fetching latest version...`);
               try {
@@ -1418,7 +1470,9 @@ export class SyncManager extends EventEmitter {
                   const retryVersion = await this.apiClient.updateItem(zoteroId, item.key, data, remoteVersion, libraryType);
                   console.log(`${symbols.success} Trashed ${item.key} on remote (resolved conflict)`);
                   await this.markAsSyncedIfUnchanged(item.key, libraryId, retryVersion, preTs);
+                  this.syncQueue.dequeue('item', libraryId, [item.key]);
                   deleted++;
+                  batchSuccessCount++;
                 } else {
                   errors.push(`Trash ${item.key} failed: could not resolve version conflict`);
                 }
@@ -1441,9 +1495,17 @@ export class SyncManager extends EventEmitter {
           const newVersion = await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
           console.log(`${symbols.success} Updated ${item.key}`);
           updated++;
+          batchSuccessCount++;
 
           // Mark as synced with new version (if not modified during upload)
           await this.markAsSyncedIfUnchanged(item.key, libraryId, newVersion, preTs);
+          this.syncQueue.dequeue('item', libraryId, [item.key]);
+
+          // Save full item data to sync cache for future patch mode
+          try {
+            const fullData = parseRawJson(item.rawJson);
+            this.syncCache.save('item', libraryId, { key: item.key, version: newVersion, data: fullData.data });
+          } catch { /* non-fatal */ }
         }
       } catch (e: any) {
         if (e.message?.includes('412')) {
@@ -1459,6 +1521,7 @@ export class SyncManager extends EventEmitter {
                 await this.upsertItem(remoteItem, libraryId);
                 this.syncCache.save('item', libraryId, remoteItem);
                 console.log(`${symbols.success} Applied remote version for ${item.key}`);
+                this.logConflict({ key: item.key, libraryId, objectType: 'item', conflictType: 'upload', resolvedBy: 'remote' });
               }
             } catch (fetchError) {
               console.error(`${symbols.error} Failed to fetch remote version for ${item.key}:`, fetchError);
@@ -1471,6 +1534,14 @@ export class SyncManager extends EventEmitter {
               const remoteItem = await this.apiClient.getItem(zoteroId, item.key, libraryType);
               const remoteData = remoteItem?.data ?? {};
               const remoteVersion = remoteData.version ?? remoteItem?.version ?? item.version;
+
+              // Verify library version hasn't changed during recovery
+              // Prevents TOCTOU race condition (syncEngine.js:2135-2136)
+              const currentLibVersion = await this.apiClient.getLibraryVersion(zoteroId, libraryType);
+              if (currentLibVersion !== baseVersion && currentLibVersion !== remoteVersion) {
+                console.log(`   !  Library version changed during 412 recovery (${baseVersion} -> ${currentLibVersion}), requesting restart`);
+                return { updated, deleted, errors, conflicts, needsRestart: true };
+              }
 
               // Attempt three-way merge using sync cache
               const cached = this.syncCache.getLatest('item', libraryId, item.key);
@@ -1494,7 +1565,10 @@ export class SyncManager extends EventEmitter {
               await this.markAsSyncedIfUnchanged(item.key, libraryId, mergedVersion, preTs);
               this.syncCache.save('item', libraryId, { ...remoteItem, data: mergedData, version: mergedVersion });
               console.log(`${symbols.success} Merged and updated ${item.key} (preserved non-conflicting remote changes)`);
+              this.logConflict({ key: item.key, libraryId, objectType: 'item', conflictType: 'upload', resolvedBy: 'merge' });
+              this.syncQueue.dequeue('item', libraryId, [item.key]);
               updated++;
+              batchSuccessCount++;
             } catch (mergeError) {
               console.error(`${symbols.error} Failed to merge-update ${item.key}:`, mergeError);
               conflicts.push(item.key);
@@ -1505,6 +1579,7 @@ export class SyncManager extends EventEmitter {
           }
         } else {
           errors.push(`Upload ${item.key} failed: ${e}`);
+          this.syncQueue.enqueue('item', libraryId, [item.key]);
         }
       }
     }
@@ -1555,12 +1630,16 @@ export class SyncManager extends EventEmitter {
                   .set({ key: newKey, synced: true, version: attVersion })
                   .where(and(eq(items.key, item.key), eq(items.libraryId, libraryId)))
                   .run();
+                this.syncQueue.dequeue('item', libraryId, [item.key]);
               } else {
                 await this.markAsSynced(item.key, libraryId, attVersion);
+                this.syncQueue.dequeue('item', libraryId, [item.key]);
               }
               updated++;
+              batchSuccessCount++;
             } else if (result.failed && result.failed[idx]) {
               const errorMsg = result.failed[idx].message || 'Unknown error';
+              this.syncQueue.enqueue('item', libraryId, [item.key]);
               if (errorMsg.includes('Parent item') && errorMsg.includes('not found')) {
                 console.log(`   !  Attachment ${item.key}: parent not synced yet, will retry on next sync`);
               } else {
@@ -1593,14 +1672,19 @@ export class SyncManager extends EventEmitter {
             const attTrashVer = await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
             console.log(`${symbols.success} Trashed attachment ${item.key} on remote`);
             await this.markAsSyncedIfUnchanged(item.key, libraryId, attTrashVer, attPreTs);
+            this.syncQueue.dequeue('item', libraryId, [item.key]);
             deleted++;
+            batchSuccessCount++;
           } catch (e: any) {
             if (e.message?.includes('404') || (e.message?.includes('412') && e.message?.includes('not found'))) {
               console.log(`    Attachment ${item.key} not found on remote, marking synced`);
               await this.markAsSyncedIfUnchanged(item.key, libraryId, item.version, attPreTs);
+              this.syncQueue.dequeue('item', libraryId, [item.key]);
               deleted++;
+              batchSuccessCount++;
             } else {
               errors.push(`Trash attachment ${item.key} failed: ${e}`);
+              this.syncQueue.enqueue('item', libraryId, [item.key]);
             }
           }
         } else {
@@ -1609,15 +1693,24 @@ export class SyncManager extends EventEmitter {
             delete data.key;
             const attUpdateVer = await this.apiClient.updateItem(zoteroId, item.key, data, item.version, libraryType);
             await this.markAsSyncedIfUnchanged(item.key, libraryId, attUpdateVer, attPreTs);
+            this.syncQueue.dequeue('item', libraryId, [item.key]);
             updated++;
+            batchSuccessCount++;
             console.log(`${symbols.success} Updated attachment ${item.key}`);
           } catch (e: any) {
             errors.push(`Update attachment ${item.key} failed: ${e}`);
+            this.syncQueue.enqueue('item', libraryId, [item.key]);
           }
         }
       } catch (e: any) {
         errors.push(`Process attachment ${item.key} failed: ${e}`);
       }
+    }
+
+    // Zero-progress detection: if no items succeeded but there were errors,
+    // stop early to avoid infinite retry loops. Mirrors official Zotero (syncEngine.js:1514).
+    if (batchSuccessCount === 0 && errors.length > 0) {
+      errors.push('Made no progress during upload -- stopping');
     }
 
     return { updated, deleted, errors, conflicts };
@@ -1880,6 +1973,7 @@ export class SyncManager extends EventEmitter {
         } else {
           // 'local' or 'manual': keep local version, it will be re-uploaded on next sync
           conflicts.push(key);
+          this.logConflict({ key, libraryId, objectType: 'item', conflictType: 'deletion', resolvedBy: 'local' });
           console.log(`   !  Conflict: remote deleted ${key} but local has unsynced changes — keeping local`);
         }
       }
@@ -1892,72 +1986,226 @@ export class SyncManager extends EventEmitter {
   }
 
   /**
-   * Soft delete items and cascade delete their attachments
+   * Process remote collection deletions with conflict detection.
+   * Checks synced flag before deleting — unsynced local collections are preserved.
+   */
+  private async processRemoteCollectionDeletions(
+    deletedKeys: string[],
+    libraryId: number
+  ): Promise<{ deleted: number; conflicts: string[] }> {
+    if (deletedKeys.length === 0) return { deleted: 0, conflicts: [] };
+
+    const safeToDelete: string[] = [];
+    const conflicts: string[] = [];
+
+    for (const key of deletedKeys) {
+      const localCol = await this.db.select()
+        .from(collections)
+        .where(and(eq(collections.key, key), eq(collections.libraryId, libraryId)))
+        .get();
+
+      if (!localCol) continue;
+
+      if (localCol.synced) {
+        safeToDelete.push(key);
+      } else if (localCol.deleted) {
+        safeToDelete.push(key);
+      } else {
+        if (this.config.conflictStrategy === 'remote') {
+          safeToDelete.push(key);
+        } else {
+          // Keep local: reset version to 0 so it will be re-uploaded
+          await this.db.update(collections)
+            .set({ version: 0, synced: false })
+            .where(and(eq(collections.key, key), eq(collections.libraryId, libraryId)));
+          conflicts.push(key);
+          this.logConflict({ key, libraryId, objectType: 'collection', conflictType: 'deletion', resolvedBy: 'local' });
+          console.log(`   !  Conflict: remote deleted collection ${key} but local has unsynced changes — keeping local`);
+        }
+      }
+    }
+
+    if (safeToDelete.length > 0) {
+      await this.db.delete(collections)
+        .where(and(eq(collections.libraryId, libraryId), inArray(collections.key, safeToDelete)))
+        .run();
+    }
+
+    return { deleted: safeToDelete.length, conflicts };
+  }
+
+  /**
+   * Process remote search deletions with conflict detection.
+   * Checks synced flag before deleting — unsynced local searches are preserved.
+   */
+  private async processRemoteSearchDeletions(
+    deletedKeys: string[],
+    libraryId: number
+  ): Promise<{ deleted: number; conflicts: string[] }> {
+    if (deletedKeys.length === 0) return { deleted: 0, conflicts: [] };
+
+    const safeToDelete: string[] = [];
+    const conflicts: string[] = [];
+
+    for (const key of deletedKeys) {
+      const localSearch = await this.db.select()
+        .from(savedSearches)
+        .where(and(eq(savedSearches.key, key), eq(savedSearches.libraryId, libraryId)))
+        .get();
+
+      if (!localSearch) continue;
+
+      if (localSearch.synced) {
+        safeToDelete.push(key);
+      } else if (localSearch.deleted) {
+        safeToDelete.push(key);
+      } else {
+        if (this.config.conflictStrategy === 'remote') {
+          safeToDelete.push(key);
+        } else {
+          await this.db.update(savedSearches)
+            .set({ version: 0, synced: false })
+            .where(and(eq(savedSearches.key, key), eq(savedSearches.libraryId, libraryId)));
+          conflicts.push(key);
+          this.logConflict({ key, libraryId, objectType: 'search', conflictType: 'deletion', resolvedBy: 'local' });
+          console.log(`   !  Conflict: remote deleted search ${key} but local has unsynced changes — keeping local`);
+        }
+      }
+    }
+
+    if (safeToDelete.length > 0) {
+      // Clean up search conditions first
+      await this.db.delete(savedSearchConditions)
+        .where(and(eq(savedSearchConditions.libraryId, libraryId), inArray(savedSearchConditions.searchKey, safeToDelete)))
+        .run();
+      await this.db.delete(savedSearches)
+        .where(and(eq(savedSearches.libraryId, libraryId), inArray(savedSearches.key, safeToDelete)))
+        .run();
+    }
+
+    return { deleted: safeToDelete.length, conflicts };
+  }
+
+  /**
+   * Soft delete items and cascade delete their attachments.
+   * All operations wrapped in a single SQLite transaction for atomicity —
+   * prevents orphaned state if process crashes mid-deletion.
    */
   private async softDeleteItems(keys: string[], libraryId: number): Promise<void> {
     if (keys.length === 0) return;
 
-    // First, mark child items (attachments/notes) of these items as deleted (cascade delete)
-    // Query all attachment/note items in this library, then filter by parentItem in JS
-    // This avoids fragile LIKE queries on rawJson that could false-match substrings
+    const sqlite = getRawSQLite();
+    const now = Math.floor(Date.now() / 1000);
     const parentKeySet = new Set(keys);
-    const candidateChildren = await this.db.select()
-      .from(items)
-      .where(and(
-        eq(items.libraryId, libraryId),
-        eq(items.deleted, false),
-      ))
-      .all();
+
+    // Query candidate children outside the transaction (read-only)
+    const candidateChildren = sqlite.prepare(
+      'SELECT key, title, item_type, raw_json FROM items WHERE library_id = ? AND deleted = 0'
+    ).all(libraryId) as Array<{ key: string; title: string | null; item_type: string | null; raw_json: string }>;
 
     const childItems = candidateChildren.filter(child => {
       try {
-        const data = parseItemData(child.rawJson);
+        const data = parseItemData(child.raw_json);
         return data.parentItem && parentKeySet.has(data.parentItem);
       } catch { return false; }
     });
 
-    if (childItems.length > 0) {
-      console.log(`    Cascading delete: ${childItems.length} child item(s)`);
-      const childKeys: string[] = [];
-      for (const child of childItems) {
-        await logDeletion({
-          itemKey: child.key, libraryId, title: child.title,
-          itemType: child.itemType, operationType: 'soft', caller: 'sync',
-          rawJsonSnapshot: child.rawJson,
-        });
-        childKeys.push(child.key);
+    // Query parent items for deletion log
+    const placeholders = keys.map(() => '?').join(',');
+    const parentItems = sqlite.prepare(
+      `SELECT key, title, item_type, raw_json FROM items WHERE library_id = ? AND key IN (${placeholders})`
+    ).all(libraryId, ...keys) as Array<{ key: string; title: string | null; item_type: string | null; raw_json: string }>;
+
+    // Synchronous deletion log helper
+    const logStmt = sqlite.prepare(
+      'INSERT INTO deletion_log (item_key, library_id, title, item_type, operation_type, caller, raw_json_snapshot, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    const updateStmt = sqlite.prepare(
+      'UPDATE items SET deleted = 1, deleted_at = ?, updated_at = ?, synced = 1 WHERE key = ? AND library_id = ?'
+    );
+
+    // Perform all mutations atomically
+    const doDelete = sqlite.transaction(() => {
+      // 1. Log and mark child items as deleted
+      if (childItems.length > 0) {
+        console.log(`    Cascading delete: ${childItems.length} child item(s)`);
+        for (const child of childItems) {
+          logStmt.run(child.key, libraryId, child.title, child.item_type, 'soft', 'sync', child.raw_json, now);
+          updateStmt.run(now, now, child.key, libraryId);
+        }
       }
-      await this.db.update(items)
-        .set({ deleted: true, deletedAt: Math.floor(Date.now() / 1000), updatedAt: Math.floor(Date.now() / 1000), synced: true })
-        .where(and(
-          eq(items.libraryId, libraryId),
-          inArray(items.key, childKeys)
-        ))
-        .run();
-    }
 
-    // Log parent item deletions
-    const parentItems = await this.db.select()
-      .from(items)
-      .where(and(eq(items.libraryId, libraryId), inArray(items.key, keys)))
-      .all();
-    for (const item of parentItems) {
-      await logDeletion({
-        itemKey: item.key, libraryId, title: item.title,
-        itemType: item.itemType, operationType: 'soft', caller: 'sync',
-        rawJsonSnapshot: item.rawJson,
-      });
-    }
+      // 2. Log and mark parent items as deleted
+      // synced=true because this deletion came from the server — no need to re-upload
+      for (const item of parentItems) {
+        logStmt.run(item.key, libraryId, item.title, item.item_type, 'soft', 'sync', item.raw_json, now);
+        updateStmt.run(now, now, item.key, libraryId);
+      }
+    });
 
-    // Then mark the parent items as deleted
-    // synced=true because this deletion came from the server — no need to re-upload
-    await this.db.update(items)
-      .set({ deleted: true, deletedAt: Math.floor(Date.now() / 1000), updatedAt: Math.floor(Date.now() / 1000), synced: true })
-      .where(and(
-        eq(items.libraryId, libraryId),
-        inArray(items.key, keys)
-      ))
-      .run();
+    doDelete();
+  }
+
+  /**
+   * Log a conflict to the conflict_log table for headless inspection.
+   * Non-fatal — logging failure never breaks sync.
+   */
+  private logConflict(params: {
+    key: string;
+    libraryId: number;
+    objectType: 'item' | 'collection' | 'search';
+    conflictType: 'upload' | 'download' | 'deletion';
+    localData?: unknown;
+    remoteData?: unknown;
+    resolvedBy: string;
+    fields?: string[];
+  }): void {
+    try {
+      const sqlite = getRawSQLite();
+      sqlite.prepare(`
+        INSERT INTO conflict_log (key, library_id, object_type, conflict_type, local_data, remote_data, resolved_by, fields, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        params.key, params.libraryId, params.objectType, params.conflictType,
+        params.localData ? JSON.stringify(params.localData) : null,
+        params.remoteData ? JSON.stringify(params.remoteData) : null,
+        params.resolvedBy,
+        params.fields ? JSON.stringify(params.fields) : null,
+        Math.floor(Date.now() / 1000)
+      );
+    } catch (e) {
+      // Non-fatal — don't let logging break sync
+    }
+  }
+
+  /**
+   * Get recent conflicts for a library (for programmatic access in headless mode).
+   */
+  getRecentConflicts(libraryId: number, limit: number = 50): Array<{
+    key: string;
+    objectType: string;
+    conflictType: string;
+    localData: unknown;
+    remoteData: unknown;
+    resolvedBy: string;
+    fields: string[];
+    createdAt: number;
+  }> {
+    const sqlite = getRawSQLite();
+    const rows = sqlite.prepare(
+      'SELECT * FROM conflict_log WHERE library_id = ? ORDER BY created_at DESC LIMIT ?'
+    ).all(libraryId, limit) as any[];
+
+    return rows.map((r: any) => ({
+      key: r.key,
+      objectType: r.object_type,
+      conflictType: r.conflict_type,
+      localData: r.local_data ? JSON.parse(r.local_data) : null,
+      remoteData: r.remote_data ? JSON.parse(r.remote_data) : null,
+      resolvedBy: r.resolved_by,
+      fields: r.fields ? JSON.parse(r.fields) : [],
+      createdAt: r.created_at,
+    }));
   }
 
   /**
@@ -2160,10 +2408,16 @@ export class SyncManager extends EventEmitter {
     const { searches: apiSearches } = await this.apiClient.getSearches(zoteroId, changedKeys, libraryType);
     const now = Math.floor(Date.now() / 1000);
 
+    // Query unsynced search keys to protect from overwrite
+    const unsyncedSearchRows = sqlite.prepare(
+      'SELECT key, name FROM saved_searches WHERE library_id = ? AND synced = 0 AND deleted = 0'
+    ).all(libraryId) as Array<{ key: string; name: string }>;
+    const unsyncedSearchMap = new Map(unsyncedSearchRows.map(r => [r.key, r.name]));
+
     // Upsert each search and its conditions in a transaction
     const upsertSearch = sqlite.prepare(`
       INSERT OR REPLACE INTO saved_searches (key, library_id, name, version, synced, created_at, updated_at, deleted, raw_json)
-      VALUES (?, ?, ?, ?, 1, ?, ?, 0, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
     `);
     const deleteConditions = sqlite.prepare(
       'DELETE FROM saved_search_conditions WHERE search_key = ? AND library_id = ?'
@@ -2177,12 +2431,22 @@ export class SyncManager extends EventEmitter {
       for (const apiSearch of searches) {
         const data = (apiSearch.data || {}) as Record<string, any>;
         const key = apiSearch.key;
-        const name = (data.name as string) || key;
+        const remoteName = (data.name as string) || key;
         const version = apiSearch.version;
 
-        upsertSearch.run(key, libraryId, name, version, now, now, JSON.stringify(apiSearch));
+        // If local has unsynced changes, preserve local name
+        const localUnsyncedName = unsyncedSearchMap.get(key);
+        let finalName = remoteName;
+        let finalSynced = 1; // synced=true
+        if (localUnsyncedName !== undefined && localUnsyncedName !== remoteName) {
+          finalName = localUnsyncedName;
+          finalSynced = 0; // Keep unsynced to re-upload local name
+          console.log(`   !  Search ${key}: preserved local name "${localUnsyncedName}" over remote "${remoteName}"`);
+        }
 
-        // Replace conditions
+        upsertSearch.run(key, libraryId, finalName, version, finalSynced, now, now, JSON.stringify(apiSearch));
+
+        // Replace conditions (always take remote structure)
         deleteConditions.run(key, libraryId);
         const conditions = (data.conditions as Array<{ condition: string; operator: string; value?: string; required?: boolean }>) || [];
         for (let idx = 0; idx < conditions.length; idx++) {
