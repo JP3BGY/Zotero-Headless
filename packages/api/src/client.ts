@@ -110,7 +110,7 @@ export class ZoteroAPIClient {
       headers?: Record<string, string>;
       body?: unknown;
     } = {}
-  ): Promise<{ data: T; version: number }> {
+  ): Promise<{ data: T; version: number; linkNext?: string; totalResults?: number }> {
     // Apply rate limiting
     await this.rateLimiter.acquire();
 
@@ -129,6 +129,7 @@ export class ZoteroAPIClient {
     const headers: Record<string, string> = {
       'Zotero-API-Key': this.apiKey,
       'Zotero-API-Version': '3',
+      'Zotero-Schema-Version': '3',
       ...options.headers,
     };
 
@@ -150,13 +151,80 @@ export class ZoteroAPIClient {
     }
 
     const version = Number(response.headers.get('Last-Modified-Version') ?? 0);
+    const totalResults = Number(response.headers.get('Total-Results')) || undefined;
+    const linkNext = this.parseLinkNext(response.headers.get('Link'));
 
     if (response.status === 204) {
-      return { data: undefined as T, version };
+      return { data: undefined as T, version, linkNext, totalResults };
     }
 
     const data = await response.json() as T;
-    return { data, version };
+    return { data, version, linkNext, totalResults };
+  }
+
+  /**
+   * Parse RFC 5988 Link header to extract the "next" page URL.
+   * Mirrors official Zotero (syncAPIClient.js:955-974).
+   */
+  private parseLinkNext(linkHeader: string | null): string | undefined {
+    if (!linkHeader) return undefined;
+    const match = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
+    return match ? match[1] : undefined;
+  }
+
+  /**
+   * Fetch all pages of version results, following Link rel="next" pagination.
+   * Accumulates version maps across pages. Ensures consistent libraryVersion.
+   */
+  private async getPaginatedVersions(
+    path: string,
+    params: Record<string, string | number | boolean>
+  ): Promise<{ versions: Record<string, number>; libraryVersion: number }> {
+    const allVersions: Record<string, number> = {};
+    let libraryVersion = 0;
+    let currentParams = { ...params, format: 'versions' as string | number | boolean };
+    let nextUrl: string | undefined;
+
+    // First request uses path + params
+    const first = await this.request<Record<string, number>>('GET', path, { params: currentParams });
+    Object.assign(allVersions, first.data);
+    libraryVersion = first.version;
+    nextUrl = first.linkNext;
+
+    // Follow pagination links
+    while (nextUrl) {
+      // Rate limit between pages
+      await this.rateLimiter.acquire();
+
+      console.log(`[API] GET ${nextUrl} (pagination)`);
+
+      const response = await fetch(nextUrl, {
+        method: 'GET',
+        headers: {
+          'Zotero-API-Key': this.apiKey,
+          'Zotero-API-Version': '3',
+        },
+      });
+
+      console.log(`[API] Response: ${response.status}`);
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Zotero API error ${response.status}: ${error}`);
+      }
+
+      const pageVersion = Number(response.headers.get('Last-Modified-Version') ?? 0);
+      if (pageVersion !== libraryVersion) {
+        // Library changed between pages — caller should restart
+        throw new Error('Library version changed during paginated download');
+      }
+
+      const pageData = await response.json() as Record<string, number>;
+      Object.assign(allVersions, pageData);
+      nextUrl = this.parseLinkNext(response.headers.get('Link'));
+    }
+
+    return { versions: allVersions, libraryVersion };
   }
 
   // ============ Key & Library Operations ============
@@ -211,23 +279,21 @@ export class ZoteroAPIClient {
     return libraryType === 'group' ? `/groups/${libraryId}` : `/users/${libraryId}`;
   }
 
-  /** Get item versions for incremental sync */
+  /** Get item versions for incremental sync (with pagination support) */
   async getItemVersions(
     libraryId: string | number,
     since: number,
     libraryType: 'user' | 'group' = 'user',
     options?: { top?: boolean }
   ): Promise<{ versions: Record<string, number>; libraryVersion: number }> {
-    const params: Record<string, string | number | boolean> = { since, format: 'versions', includeTrashed: true };
+    const params: Record<string, string | number | boolean> = { since, includeTrashed: true };
     if (options?.top) {
       params.top = true;
     }
-    const response = await this.request<Record<string, number>>(
-      'GET',
+    return this.getPaginatedVersions(
       `${this.getLibraryPath(libraryId, libraryType)}/items`,
-      { params }
+      params
     );
-    return { versions: response.data, libraryVersion: response.version };
   }
 
   /** Batch get items */
@@ -269,7 +335,8 @@ export class ZoteroAPIClient {
   async createItems(
     libraryId: string | number,
     items: Array<Record<string, unknown>>,
-    libraryType: 'user' | 'group' = 'user'
+    libraryType: 'user' | 'group' = 'user',
+    libraryVersion?: number
   ): Promise<WriteResponse & { libraryVersion: number }> {
     // Pre-flight validation: Ensure all items have required fields
     for (let i = 0; i < items.length; i++) {
@@ -295,10 +362,14 @@ export class ZoteroAPIClient {
       console.log(`      [${i}] key=${item.key}, type=${item.itemType}, version=${item.version}`);
     });
     
+    const headers: Record<string, string> = {};
+    if (libraryVersion !== undefined) {
+      headers['If-Unmodified-Since-Version'] = String(libraryVersion);
+    }
     const response = await this.request<WriteResponse>(
       'POST',
       `${this.getLibraryPath(libraryId, libraryType)}/items`,
-      { params: { format: 'json' }, body: items }
+      { params: { format: 'json' }, body: items, headers }
     );
     return { ...response.data, libraryVersion: response.version };
   }
@@ -361,12 +432,10 @@ export class ZoteroAPIClient {
     since: number,
     libraryType: 'user' | 'group' = 'user'
   ): Promise<{ versions: Record<string, number>; libraryVersion: number }> {
-    const response = await this.request<Record<string, number>>(
-      'GET',
+    return this.getPaginatedVersions(
       `${this.getLibraryPath(libraryId, libraryType)}/collections`,
-      { params: { since, format: 'versions' } }
+      { since }
     );
-    return { versions: response.data, libraryVersion: response.version };
   }
 
   /** Get collections */
@@ -413,8 +482,13 @@ export class ZoteroAPIClient {
     libraryId: string | number,
     name: string,
     parentKey?: string,
-    libraryType: 'user' | 'group' = 'user'
+    libraryType: 'user' | 'group' = 'user',
+    libraryVersion?: number
   ): Promise<{ key: string; version: number }> {
+    const headers: Record<string, string> = {};
+    if (libraryVersion !== undefined) {
+      headers['If-Unmodified-Since-Version'] = String(libraryVersion);
+    }
     const response = await this.request<WriteResponse>(
       'POST',
       `${this.getLibraryPath(libraryId, libraryType)}/collections`,
@@ -422,7 +496,8 @@ export class ZoteroAPIClient {
         body: [{
           name,
           parentKey: parentKey || undefined
-        }]
+        }],
+        headers
       }
     );
     const result = response.data;
@@ -475,12 +550,10 @@ export class ZoteroAPIClient {
     since: number,
     libraryType: 'user' | 'group' = 'user'
   ): Promise<{ versions: Record<string, number>; libraryVersion: number }> {
-    const response = await this.request<Record<string, number>>(
-      'GET',
+    return this.getPaginatedVersions(
       `${this.getLibraryPath(libraryId, libraryType)}/searches`,
-      { params: { since, format: 'versions' } }
+      { since }
     );
-    return { versions: response.data, libraryVersion: response.version };
   }
 
   /** Get searches by keys */

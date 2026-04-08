@@ -185,6 +185,17 @@ export const deletionLog = sqliteTable('deletion_log', {
   deletedAt: integer('deleted_at').notNull(),          // Timestamp of this delete operation
 });
 
+// ============ Sync Delete Queue 表（待上传删除队列） ============
+export const syncDeleteQueue = sqliteTable('sync_delete_queue', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  objectType: textCol('object_type').notNull(),  // 'item' | 'collection' | 'search'
+  objectKey: textCol('object_key').notNull(),
+  libraryId: integer('library_id').notNull(),
+  version: integer('version').notNull().default(0),
+  uploaded: integer('uploaded').notNull().default(0),
+  createdAt: integer('created_at').notNull(),
+});
+
 // ============ Conflict Log 表（同步冲突审计） ============
 export const conflictLog = sqliteTable('conflict_log', {
   id: integer('id').primaryKey({ autoIncrement: true }),

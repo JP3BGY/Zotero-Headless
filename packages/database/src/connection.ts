@@ -395,6 +395,25 @@ export function initializeDatabase(options?: { quiet?: boolean }): Database {
     console.warn(`${symbols.warning} Database migration warning (saved_searches):`, e);
   }
 
+  // Migration: Create sync_delete_queue table (for uploading deletions to server)
+  try {
+    sqliteInstance.exec(`
+      CREATE TABLE IF NOT EXISTS sync_delete_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        object_type TEXT NOT NULL,
+        object_key TEXT NOT NULL,
+        library_id INTEGER NOT NULL,
+        version INTEGER NOT NULL DEFAULT 0,
+        uploaded INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_sync_delete_queue_pending
+        ON sync_delete_queue(library_id, object_type, uploaded);
+    `);
+  } catch (e) {
+    console.warn(`${symbols.warning} Database migration warning (sync_delete_queue):`, e);
+  }
+
   // Migration: Create fulltext_sync_state table
   try {
     sqliteInstance.exec(`

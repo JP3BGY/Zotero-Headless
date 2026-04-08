@@ -100,8 +100,19 @@ export class ConflictResolver {
   resolveForSync(
     base: Record<string, unknown>,
     local: Record<string, unknown>,
-    remote: Record<string, unknown>
+    remote: Record<string, unknown>,
+    objectType: 'item' | 'collection' | 'search' = 'item'
   ): ConflictResolution<Record<string, unknown>> {
+    // Auto-merge for non-items: collections/searches always take remote on conflict.
+    // Mirrors official Zotero (syncLocal.js:1635: isAutoMergeType = objectType != 'item').
+    const isAutoMergeType = objectType !== 'item';
+
+    // Trash auto-merge: when both sides are in trash, auto-merge (take remote).
+    // Mirrors official Zotero (syncLocal.js:1736-1741).
+    if (objectType === 'item' && local.deleted && remote.deleted) {
+      return { type: 'resolved', data: { ...remote }, localChanged: false };
+    }
+
     const conflicts: FieldConflict[] = [];
     const resolved: Record<string, unknown> = {};
     const localChangedFields = new Set<string>();
@@ -155,6 +166,16 @@ export class ConflictResolver {
         continue;
       }
 
+      // Relations: per-predicate, per-value union merge.
+      // Mirrors official Zotero's _relationsDiff + property-member-add/remove (dataObjectUtilities.js:549-730).
+      if (field === 'relations') {
+        resolved[field] = this._mergeRelations(baseVal, localVal, remoteVal);
+        if (JSON.stringify(resolved[field]) !== remoteNorm) {
+          localChangedFields.add(field);
+        }
+        continue;
+      }
+
       if (field === 'creators') {
         // Creators: if content is same but reordered, no conflict
         if (this._creatorsEqual(localVal, remoteVal)) {
@@ -179,10 +200,33 @@ export class ConflictResolver {
         continue;
       }
 
+      // For auto-merge types (non-items) and trashed items, take remote on conflict.
+      // Mirrors official Zotero (syncLocal.js:1736-1741).
+      if (isAutoMergeType) {
+        resolved[field] = remoteVal;
+        continue;
+      }
+
       // True conflict
       conflicts.push({ field, local: localVal, remote: remoteVal });
       resolved[field] = localVal; // Default to local (preserve user edits)
       localChangedFields.add(field);
+    }
+
+    // For auto-merge types, check if local changes matter. If all local-changed fields
+    // were also changed remotely, there's nothing unique to re-upload.
+    // Mirrors official Zotero (syncLocal.js:1754-1761).
+    if (isAutoMergeType && localChangedFields.size > 0) {
+      const remoteChangedFields = new Set<string>();
+      for (const field of allFields) {
+        if (SYNC_IGNORE_FIELDS.has(field)) continue;
+        const baseNorm = JSON.stringify(base[field]);
+        const remoteNorm = JSON.stringify(remote[field]);
+        if (baseNorm !== remoteNorm) remoteChangedFields.add(field);
+      }
+      if ([...localChangedFields].every(f => remoteChangedFields.has(f))) {
+        localChangedFields.clear();
+      }
     }
 
     const localChanged = localChangedFields.size > 0;
@@ -201,8 +245,16 @@ export class ConflictResolver {
    */
   resolveWithoutCache(
     local: Record<string, unknown>,
-    remote: Record<string, unknown>
+    remote: Record<string, unknown>,
+    objectType: 'item' | 'collection' | 'search' = 'item'
   ): ConflictResolution<Record<string, unknown>> {
+    const isAutoMergeType = objectType !== 'item';
+
+    // Trash auto-merge: both in trash → take remote
+    if (objectType === 'item' && local.deleted && remote.deleted) {
+      return { type: 'resolved', data: { ...remote }, localChanged: false };
+    }
+
     const conflicts: FieldConflict[] = [];
     const resolved: Record<string, unknown> = {};
     const localChangedFields = new Set<string>();
@@ -238,6 +290,15 @@ export class ConflictResolver {
         continue;
       }
 
+      // Relations: additive union of both sides (no removals without cache)
+      if (field === 'relations') {
+        resolved[field] = this._mergeRelationsAdditive(localVal, remoteVal);
+        if (JSON.stringify(resolved[field]) !== remoteNorm) {
+          localChangedFields.add(field);
+        }
+        continue;
+      }
+
       // ISBN normalization: different hyphenation is not a real conflict
       if (field === 'ISBN' && typeof localVal === 'string' && typeof remoteVal === 'string'
           && this._normalizeISBN(localVal) === this._normalizeISBN(remoteVal)) {
@@ -248,6 +309,12 @@ export class ConflictResolver {
       // Note normalization: different HTML markup for same text is not a real conflict
       if (field === 'note' && typeof localVal === 'string' && typeof remoteVal === 'string'
           && this._normalizeNote(localVal) === this._normalizeNote(remoteVal)) {
+        resolved[field] = remoteVal;
+        continue;
+      }
+
+      // For auto-merge types (non-items), take remote on conflict
+      if (isAutoMergeType) {
         resolved[field] = remoteVal;
         continue;
       }
@@ -301,9 +368,18 @@ export class ConflictResolver {
    * Mirrors official Zotero's note comparison (syncLocal.js:1853-1873).
    */
   private _normalizeNote(note: string): string {
-    return note.replace(/<[^>]*>/g, '')
+    return note
+      .replace(/<[^>]*>/g, '')
+      // Decode numeric entities (decimal and hex)
+      .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+      // Common named entities
       .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
       .replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&nbsp;/g, ' ')
+      .replace(/&ldquo;/g, '\u201C').replace(/&rdquo;/g, '\u201D')
+      .replace(/&lsquo;/g, '\u2018').replace(/&rsquo;/g, '\u2019')
+      .replace(/&mdash;/g, '\u2014').replace(/&ndash;/g, '\u2013')
+      .replace(/&hellip;/g, '\u2026')
       .replace(/\s+/g, ' ').trim();
   }
 
@@ -333,14 +409,30 @@ export class ConflictResolver {
       if (!baseSet.has(key)) result.set(key, val);
     }
 
-    // Handle removals: only remove if both sides removed it
+    // Handle removals: apply single-side removals if the other side didn't modify.
+    // Mirrors official Zotero changeset reconciliation (syncLocal.js:1718-1726).
     for (const [key] of baseSet) {
       const inLocal = localSet.has(key);
       const inRemote = remoteSet.has(key);
       if (!inLocal && !inRemote) {
         result.delete(key); // Both removed — remove
+      } else if (!inLocal && inRemote) {
+        // Local removed it. If remote didn't change it from base, apply the removal.
+        const remoteStr = JSON.stringify(remoteSet.get(key));
+        const baseStr = JSON.stringify(baseSet.get(key));
+        if (remoteStr === baseStr) {
+          result.delete(key);
+        }
+        // else: remote modified it — keep remote's version
+      } else if (inLocal && !inRemote) {
+        // Remote removed it. If local didn't change it from base, apply the removal.
+        const localStr = JSON.stringify(localSet.get(key));
+        const baseStr = JSON.stringify(baseSet.get(key));
+        if (localStr === baseStr) {
+          result.delete(key);
+        }
+        // else: local modified it — keep local's version
       }
-      // If only one side removed, keep it (conservative)
     }
 
     // Tag type normalization: when same tag exists on both sides with different types,
@@ -418,6 +510,103 @@ export class ConflictResolver {
   }
 
   /**
+   * Three-way merge for relations: {predicate: [uri, ...]} objects.
+   * Per-predicate, per-value union with single-side removal support.
+   * Mirrors official Zotero _relationsDiff + property-member-add/remove.
+   */
+  private _mergeRelations(base: unknown, local: unknown, remote: unknown): Record<string, string[]> {
+    const baseRel = this._normalizeRelations(base);
+    const localRel = this._normalizeRelations(local);
+    const remoteRel = this._normalizeRelations(remote);
+
+    const allPredicates = new Set([
+      ...Object.keys(baseRel),
+      ...Object.keys(localRel),
+      ...Object.keys(remoteRel),
+    ]);
+
+    const result: Record<string, string[]> = {};
+
+    for (const pred of allPredicates) {
+      const baseVals = new Set(baseRel[pred] ?? []);
+      const localVals = new Set(localRel[pred] ?? []);
+      const remoteVals = new Set(remoteRel[pred] ?? []);
+
+      const merged = new Set<string>();
+
+      // Start with base values
+      for (const v of baseVals) merged.add(v);
+
+      // Add local additions (in local, not in base)
+      for (const v of localVals) {
+        if (!baseVals.has(v)) merged.add(v);
+      }
+
+      // Add remote additions (in remote, not in base)
+      for (const v of remoteVals) {
+        if (!baseVals.has(v)) merged.add(v);
+      }
+
+      // Apply removals: if one side removed and the other didn't add/change
+      for (const v of baseVals) {
+        const inLocal = localVals.has(v);
+        const inRemote = remoteVals.has(v);
+        if (!inLocal && !inRemote) {
+          merged.delete(v); // Both removed
+        } else if (!inLocal && inRemote) {
+          // Local removed — apply if remote didn't add something new
+          merged.delete(v);
+        } else if (inLocal && !inRemote) {
+          // Remote removed — apply if local didn't add something new
+          merged.delete(v);
+        }
+      }
+
+      if (merged.size > 0) {
+        result[pred] = Array.from(merged);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Additive-only relations merge (no cache). Union of both sides, no removals.
+   */
+  private _mergeRelationsAdditive(local: unknown, remote: unknown): Record<string, string[]> {
+    const localRel = this._normalizeRelations(local);
+    const remoteRel = this._normalizeRelations(remote);
+
+    const allPredicates = new Set([...Object.keys(localRel), ...Object.keys(remoteRel)]);
+    const result: Record<string, string[]> = {};
+
+    for (const pred of allPredicates) {
+      const merged = new Set([...(localRel[pred] ?? []), ...(remoteRel[pred] ?? [])]);
+      if (merged.size > 0) {
+        result[pred] = Array.from(merged);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Normalize a relations value to {predicate: string[]} format.
+   */
+  private _normalizeRelations(val: unknown): Record<string, string[]> {
+    if (!val || typeof val !== 'object') return {};
+    const result: Record<string, string[]> = {};
+    for (const [pred, uris] of Object.entries(val as Record<string, unknown>)) {
+      if (typeof uris === 'string') {
+        result[pred] = [uris];
+      } else if (Array.isArray(uris)) {
+        result[pred] = uris.filter(u => typeof u === 'string');
+      }
+    }
+    return result;
+  }
+
+  /**
    * Check if two creator arrays are equivalent (same creators, possibly different order).
    */
   private _creatorsEqual(a: unknown, b: unknown): boolean {
@@ -425,7 +614,17 @@ export class ConflictResolver {
     if (a.length !== b.length) return false;
     // Compare element-by-element in order — creator order is semantically meaningful
     // (first author vs second author). Matches official Zotero's positional comparison.
-    return a.every((c, i) => JSON.stringify(c) === JSON.stringify(b[i]));
+    // Uses explicit field comparison to avoid JSON key-order sensitivity.
+    return a.every((c: any, i: number) => {
+      const d = b[i] as any;
+      if (!c || !d || typeof c !== 'object' || typeof d !== 'object') {
+        return JSON.stringify(c) === JSON.stringify(d);
+      }
+      return (c.firstName ?? '') === (d.firstName ?? '')
+        && (c.lastName ?? '') === (d.lastName ?? '')
+        && (c.name ?? '') === (d.name ?? '')
+        && (c.creatorType ?? 'author') === (d.creatorType ?? 'author');
+    });
   }
 
   /**

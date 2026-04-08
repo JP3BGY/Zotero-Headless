@@ -4,7 +4,7 @@
 
 import { EventEmitter } from 'events';
 import { createHash } from 'crypto';
-import { getDatabase, getRawSQLite, libraries, items, collections, itemTags, syncLogs, attachments, webdavConfig, savedSearches, savedSearchConditions, logDeletion, type Database } from '@zotero-headless/database';
+import { getDatabase, getRawSQLite, libraries, items, collections, itemTags, syncLogs, attachments, webdavConfig, savedSearches, savedSearchConditions, syncDeleteQueue, logDeletion, type Database } from '@zotero-headless/database';
 import { ZoteroAPIClient } from '@zotero-headless/api';
 import { appConfig, symbols } from '@zotero-headless/core';
 import { ConflictResolver, conflictResolver } from './conflict.js';
@@ -40,6 +40,10 @@ export class SyncManager extends EventEmitter {
   private syncCache: SyncCacheManager;
   private syncQueue: SyncQueueManager;
   private config: SyncConfig;
+  private _syncInProgress = false;
+
+  /** Whether a sync is currently in progress */
+  get isSyncing(): boolean { return this._syncInProgress; }
 
   constructor(
     apiClient?: ZoteroAPIClient,
@@ -58,18 +62,27 @@ export class SyncManager extends EventEmitter {
    * Main sync method - performs two-way sync
    */
   async sync(options: SyncOptions = {}): Promise<SyncResult> {
-    // If syncAll is true, sync all libraries including groups
-    if (options.syncAll) {
-      return this.syncAllLibraries(options);
+    // Prevent concurrent syncs — mirrors official Zotero (syncRunner.js:75,116-118)
+    if (this._syncInProgress) {
+      return { success: false, updated: 0, deleted: 0, errors: ['Sync already in progress'] };
     }
+    this._syncInProgress = true;
+    try {
+      // If syncAll is true, sync all libraries including groups
+      if (options.syncAll) {
+        return await this.syncAllLibraries(options);
+      }
 
-    // If groupId is specified, sync that specific group
-    if (options.groupId) {
-      return this.syncGroupLibrary(options.groupId, options);
+      // If groupId is specified, sync that specific group
+      if (options.groupId) {
+        return await this.syncGroupLibrary(options.groupId, options);
+      }
+
+      // Otherwise sync user library (default behavior)
+      return await this.syncUserLibrary(options);
+    } finally {
+      this._syncInProgress = false;
     }
-
-    // Otherwise sync user library (default behavior)
-    return this.syncUserLibrary(options);
   }
 
   /**
@@ -239,7 +252,9 @@ export class SyncManager extends EventEmitter {
       }
 
       const result = await this.twoWaySync(libraryId, groupId, 'group', localVersion, remoteVersion, options.fullSync ?? false);
-      await this.updateLibraryVersion(libraryId, remoteVersion);
+      // Re-fetch final version — uploads may have incremented it beyond remoteVersion.
+      const finalGroupVersion = await this.apiClient.getLibraryVersion(groupId, 'group');
+      await this.updateLibraryVersion(libraryId, finalGroupVersion);
       await this.logSync(libraryId, result.success ? 'success' : 'partial', localVersion, remoteVersion, result);
 
       this.emit('sync:complete', result);
@@ -391,7 +406,8 @@ export class SyncManager extends EventEmitter {
       }
       console.log(`   Restarting sync cycle (attempt ${restartCount + 2}/4)...`);
       const freshVersion = await this.apiClient.getLibraryVersion(zoteroId, libraryType);
-      return this.twoWaySync(libraryId, zoteroId, libraryType, localVersion, freshVersion, fullSync, skipDownload, restartCount + 1);
+      // Force download on restart — official Zotero always downloads before retrying upload (syncEngine.js:189-210)
+      return this.twoWaySync(libraryId, zoteroId, libraryType, localVersion, freshVersion, fullSync, false, restartCount + 1);
     }
 
     // ===== PHASE 2: Download from remote (with restart-on-version-change) =====
@@ -744,7 +760,9 @@ export class SyncManager extends EventEmitter {
         mergedApiItem.data.dateAdded = apiItem.data.dateAdded;
         mergedApiItem.data.dateModified = apiItem.data.dateModified;
         this.upsertItemRaw(mergedApiItem, libraryId, sqlite, mergeResult.localChanged);
-        this.syncCache.save('item', libraryId, mergedApiItem);
+        // Cache the pristine remote snapshot (not merged), so future three-way merges
+        // use the correct base. Mirrors official Zotero (syncLocal.js:1037).
+        this.syncCache.save('item', libraryId, apiItem);
         return { updated: true, conflict: false, queued: false };
       } else {
         // Has conflicts — apply merge result but mark as unresolved
@@ -781,7 +799,8 @@ export class SyncManager extends EventEmitter {
         mergedApiItem.data.dateAdded = apiItem.data.dateAdded;
         mergedApiItem.data.dateModified = apiItem.data.dateModified;
         this.upsertItemRaw(mergedApiItem, libraryId, sqlite, mergeResult.localChanged);
-        this.syncCache.save('item', libraryId, mergedApiItem);
+        // Cache the pristine remote snapshot (not merged) for future three-way merges.
+        this.syncCache.save('item', libraryId, apiItem);
         return { updated: true, conflict: false, queued: false };
       } else {
         // Without cache, scalar conflicts exist
@@ -1104,6 +1123,9 @@ export class SyncManager extends EventEmitter {
     let batchSuccessCount = 0;
     const errors: string[] = [];
     const conflicts: string[] = [];
+    // Track current library version through uploads for version chaining.
+    // Mirrors official Zotero's library version threading (syncEngine.js:1340-1347).
+    let currentVersion = baseVersion;
 
     // 0. Upload new collections (version=0) before items, since items reference collection keys
     const newCollections = await this.db.select()
@@ -1323,8 +1345,9 @@ export class SyncManager extends EventEmitter {
 
         try {
           console.log(`   Uploading batch ${Math.floor(batchStart / BATCH_SIZE) + 1} (${batch.length} items)...`);
-          const result = await this.apiClient.createItems(zoteroId, batchData, libraryType);
+          const result = await this.apiClient.createItems(zoteroId, batchData, libraryType, currentVersion);
           const resultVersion = result.libraryVersion;
+          if (resultVersion > currentVersion) currentVersion = resultVersion;
 
           // Process per-item results
           for (let i = 0; i < batch.length; i++) {
@@ -1610,8 +1633,17 @@ export class SyncManager extends EventEmitter {
             conflicts.push(item.key);
           }
         } else {
-          errors.push(`Upload ${item.key} failed: ${e}`);
-          this.syncQueue.enqueue('item', libraryId, [item.key]);
+          // Distinguish 4xx (permanent) from 5xx (transient) errors.
+          // Mirrors official Zotero's per-object error handling (syncEngine.js:1450-1500).
+          const statusMatch = e.message?.match(/(\d{3})/);
+          const status = statusMatch ? parseInt(statusMatch[1]) : 0;
+          if (status >= 400 && status < 500) {
+            errors.push(`Upload ${item.key} permanently failed (${status}): ${e}`);
+            // Don't enqueue — 4xx errors are permanent client errors
+          } else {
+            errors.push(`Upload ${item.key} failed: ${e}`);
+            this.syncQueue.enqueue('item', libraryId, [item.key]);
+          }
         }
       }
     }
@@ -1645,8 +1677,9 @@ export class SyncManager extends EventEmitter {
         }
 
         try {
-          const result = await this.apiClient.createItems(zoteroId, batchData, libraryType);
+          const result = await this.apiClient.createItems(zoteroId, batchData, libraryType, currentVersion);
           const attVersion = result.libraryVersion;
+          if (attVersion > currentVersion) currentVersion = attVersion;
 
           for (let i = 0; i < batch.length; i++) {
             const item = batch[i];
@@ -1743,6 +1776,134 @@ export class SyncManager extends EventEmitter {
       } catch (e: any) {
         errors.push(`Process attachment ${item.key} failed: ${e}`);
       }
+    }
+
+    // ===== Upload deletions (permanent DELETE to server) =====
+    // Mirrors official Zotero _uploadDeletions (syncEngine.js:1528-1560).
+    // Batch size: 25 per request, matching official client's uploadDeletionBatchSize.
+    const DELETION_BATCH_SIZE = 25;
+
+    // Upload collection deletions
+    try {
+      const pendingColDeletions = await this.db.select()
+        .from(syncDeleteQueue)
+        .where(and(
+          eq(syncDeleteQueue.libraryId, libraryId),
+          eq(syncDeleteQueue.objectType, 'collection'),
+          eq(syncDeleteQueue.uploaded, 0)
+        ))
+        .all();
+
+      if (pendingColDeletions.length > 0) {
+        console.log(`   Uploading ${pendingColDeletions.length} collection deletion(s)...`);
+        const keys = pendingColDeletions.map(d => d.objectKey);
+        for (let i = 0; i < keys.length; i += DELETION_BATCH_SIZE) {
+          const batch = keys.slice(i, i + DELETION_BATCH_SIZE);
+          try {
+            const newVersion = await this.apiClient.deleteCollections(zoteroId, batch, baseVersion, libraryType);
+            baseVersion = newVersion;
+            // Mark as uploaded
+            for (const key of batch) {
+              await this.db.update(syncDeleteQueue)
+                .set({ uploaded: 1 })
+                .where(and(
+                  eq(syncDeleteQueue.libraryId, libraryId),
+                  eq(syncDeleteQueue.objectKey, key),
+                  eq(syncDeleteQueue.objectType, 'collection')
+                ))
+                .run();
+            }
+            deleted += batch.length;
+            batchSuccessCount += batch.length;
+            console.log(`${symbols.success} Deleted ${batch.length} collection(s) from server`);
+          } catch (e: any) {
+            errors.push(`Upload collection deletions failed: ${e}`);
+          }
+        }
+      }
+    } catch (e: any) {
+      errors.push(`Query collection deletions failed: ${e}`);
+    }
+
+    // Upload search deletions
+    try {
+      const pendingSearchDeletions = await this.db.select()
+        .from(syncDeleteQueue)
+        .where(and(
+          eq(syncDeleteQueue.libraryId, libraryId),
+          eq(syncDeleteQueue.objectType, 'search'),
+          eq(syncDeleteQueue.uploaded, 0)
+        ))
+        .all();
+
+      if (pendingSearchDeletions.length > 0) {
+        console.log(`   Uploading ${pendingSearchDeletions.length} search deletion(s)...`);
+        const keys = pendingSearchDeletions.map(d => d.objectKey);
+        for (let i = 0; i < keys.length; i += DELETION_BATCH_SIZE) {
+          const batch = keys.slice(i, i + DELETION_BATCH_SIZE);
+          try {
+            await this.apiClient.deleteSearches(zoteroId, batch, baseVersion, libraryType);
+            // Mark as uploaded
+            for (const key of batch) {
+              await this.db.update(syncDeleteQueue)
+                .set({ uploaded: 1 })
+                .where(and(
+                  eq(syncDeleteQueue.libraryId, libraryId),
+                  eq(syncDeleteQueue.objectKey, key),
+                  eq(syncDeleteQueue.objectType, 'search')
+                ))
+                .run();
+            }
+            deleted += batch.length;
+            batchSuccessCount += batch.length;
+            console.log(`${symbols.success} Deleted ${batch.length} search(es) from server`);
+          } catch (e: any) {
+            errors.push(`Upload search deletions failed: ${e}`);
+          }
+        }
+      }
+    } catch (e: any) {
+      errors.push(`Query search deletions failed: ${e}`);
+    }
+
+    // Upload permanent item deletions (from deletion_log with operationType='hard', not from sync)
+    try {
+      const sqlite = getRawSQLite();
+      const pendingItemDeletions = sqlite.prepare(
+        `SELECT DISTINCT item_key FROM deletion_log
+         WHERE library_id = ? AND operation_type = 'hard' AND caller != 'sync'
+         AND item_key NOT IN (
+           SELECT object_key FROM sync_delete_queue
+           WHERE library_id = ? AND object_type = 'item' AND uploaded = 1
+         )`
+      ).all(libraryId, libraryId) as Array<{ item_key: string }>;
+
+      if (pendingItemDeletions.length > 0) {
+        console.log(`   Uploading ${pendingItemDeletions.length} permanent item deletion(s)...`);
+        const keys = pendingItemDeletions.map(d => d.item_key);
+        for (let i = 0; i < keys.length; i += DELETION_BATCH_SIZE) {
+          const batch = keys.slice(i, i + DELETION_BATCH_SIZE);
+          try {
+            const newVersion = await this.apiClient.deleteItems(zoteroId, batch, baseVersion, libraryType);
+            baseVersion = newVersion;
+            // Record as uploaded in sync_delete_queue
+            const now = Math.floor(Date.now() / 1000);
+            for (const key of batch) {
+              sqlite.prepare(
+                `INSERT OR REPLACE INTO sync_delete_queue (object_type, object_key, library_id, version, uploaded, created_at)
+                 VALUES ('item', ?, ?, ?, 1, ?)`
+              ).run(key, libraryId, newVersion, now);
+            }
+            deleted += batch.length;
+            batchSuccessCount += batch.length;
+            console.log(`${symbols.success} Permanently deleted ${batch.length} item(s) from server`);
+          } catch (e: any) {
+            errors.push(`Upload item deletions failed: ${e}`);
+          }
+        }
+      }
+    } catch (e: any) {
+      errors.push(`Query item deletions failed: ${e}`);
     }
 
     // Zero-progress detection: if no items succeeded but there were errors,
@@ -2151,12 +2312,25 @@ export class SyncManager extends EventEmitter {
       'SELECT key, title, item_type, raw_json FROM items WHERE library_id = ? AND deleted = 0'
     ).all(libraryId) as Array<{ key: string; title: string | null; item_type: string | null; raw_json: string }>;
 
-    const childItems = candidateChildren.filter(child => {
-      try {
-        const data = parseItemData(child.raw_json);
-        return data.parentItem && parentKeySet.has(data.parentItem);
-      } catch { return false; }
-    });
+    // Iteratively collect all descendants (children, grandchildren like annotations)
+    // to avoid orphaned items. Mirrors official Zotero recursive erase (item.js:5232-5240).
+    const allKeysToDelete = new Set(keys);
+    let frontier = new Set(keys);
+    while (frontier.size > 0) {
+      const nextFrontier = new Set<string>();
+      for (const child of candidateChildren) {
+        if (allKeysToDelete.has(child.key)) continue;
+        try {
+          const data = parseItemData(child.raw_json);
+          if (data.parentItem && frontier.has(data.parentItem)) {
+            nextFrontier.add(child.key);
+            allKeysToDelete.add(child.key);
+          }
+        } catch { /* skip unparseable */ }
+      }
+      frontier = nextFrontier;
+    }
+    const childItems = candidateChildren.filter(c => allKeysToDelete.has(c.key) && !parentKeySet.has(c.key));
 
     // Query parent items for deletion log
     const placeholders = keys.map(() => '?').join(',');
@@ -2254,6 +2428,26 @@ export class SyncManager extends EventEmitter {
       fields: r.fields ? JSON.parse(r.fields) : [],
       createdAt: r.created_at,
     }));
+  }
+
+  /**
+   * Queue a local deletion for upload to the server on next sync.
+   * Call this when a user deletes a collection or search locally.
+   */
+  async queueDeletion(
+    objectType: 'item' | 'collection' | 'search',
+    objectKey: string,
+    libraryId: number
+  ): Promise<void> {
+    const now = Math.floor(Date.now() / 1000);
+    await this.db.insert(syncDeleteQueue).values({
+      objectType,
+      objectKey,
+      libraryId,
+      version: 0,
+      uploaded: 0,
+      createdAt: now,
+    }).run();
   }
 
   /**
@@ -2678,19 +2872,13 @@ export class SyncManager extends EventEmitter {
       if (deletedData.items.length > 0) {
         await this.processRemoteDeletions(deletedData.items, libraryId);
       }
+      // Use conflict-aware deletion — checks synced flag before deleting.
+      // Mirrors normal download path; fixes unsafe unconditional deletion.
       if (deletedData.collections?.length > 0) {
-        for (const collKey of deletedData.collections) {
-          await this.db.delete(collections)
-            .where(and(eq(collections.key, collKey), eq(collections.libraryId, libraryId)))
-            .run();
-        }
+        await this.processRemoteCollectionDeletions(deletedData.collections, libraryId);
       }
       if (deletedData.searches?.length > 0) {
-        for (const searchKey of deletedData.searches) {
-          await this.db.delete(savedSearches)
-            .where(and(eq(savedSearches.key, searchKey), eq(savedSearches.libraryId, libraryId)))
-            .run();
-        }
+        await this.processRemoteSearchDeletions(deletedData.searches, libraryId);
       }
     } catch (e) {
       console.log(`   ! Deletion fetch failed during fullSync: ${e}`);
