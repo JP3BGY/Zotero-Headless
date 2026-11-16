@@ -77,7 +77,12 @@ export class WebDAVClient {
       headers?: Record<string, string>;
     } = {}
   ): Promise<{ status: number; headers: Record<string, string>; body: string }> {
-    const urlPath = this.joinUrlPath(this.config.basePath || '/zotero', filePath);
+    let urlPath = this.joinUrlPath(this.config.basePath || '/zotero', filePath);
+    // Keep the trailing slash for collections: some servers (e.g. TeraCLOUD)
+    // answer an authenticated request to ".../zotero" with 301 to ".../zotero/".
+    if (filePath === '' || filePath.endsWith('/')) {
+      urlPath += '/';
+    }
     const url = new URL(urlPath, this.baseUrl);
 
     const auth = Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64');
@@ -255,6 +260,8 @@ export class WebDAVClient {
         </d:propfind>`,
       headers: {
         'Content-Type': 'application/xml',
+        // Without Depth the server assumes "infinity", which many servers refuse (403).
+        'Depth': '1',
       },
     });
 
@@ -267,13 +274,17 @@ export class WebDAVClient {
     const multistatus = res.body;
     
     // Simple XML parsing (use a proper parser in production)
-    const responseRegex = /<d:response>([\s\S]*?)<\/d:response>/g;
+    // Accept any namespace prefix (d:, D:, lp1:, ...) and attributes on the tags.
+    const ns = '(?:[A-Za-z_][\\w.-]*:)?';
+    const tag = (name: string, body = '[^<]*') =>
+      new RegExp(`<${ns}${name}(?:\\s[^>]*)?>(${body})</${ns}${name}>`);
+    const responseRegex = new RegExp(`<${ns}response(?:\\s[^>]*)?>([\\s\\S]*?)</${ns}response>`, 'g');
     let match;
     
     while ((match = responseRegex.exec(multistatus)) !== null) {
       const response = match[1];
       
-      const hrefMatch = response.match(/<d:href>([^<]+)<\/d:href>/);
+      const hrefMatch = response.match(tag('href', '[^<]+'));
       const href = hrefMatch ? hrefMatch[1] : '';
       
       // Skip the base directory itself
@@ -283,19 +294,19 @@ export class WebDAVClient {
         continue;
       }
       
-      const displayNameMatch = response.match(/<d:displayname>([^<]*)<\/d:displayname>/);
+      const displayNameMatch = response.match(tag('displayname'));
       const filename = displayNameMatch ? displayNameMatch[1] : path.basename(href);
       
-      const contentLengthMatch = response.match(/<d:getcontentlength>(\d+)<\/d:getcontentlength>/);
+      const contentLengthMatch = response.match(tag('getcontentlength', '\\d+'));
       const size = contentLengthMatch ? parseInt(contentLengthMatch[1], 10) : 0;
       
-      const lastModifiedMatch = response.match(/<d:getlastmodified>([^<]+)<\/d:getlastmodified>/);
+      const lastModifiedMatch = response.match(tag('getlastmodified', '[^<]+'));
       const lastModified = lastModifiedMatch ? new Date(lastModifiedMatch[1]) : new Date();
       
-      const contentTypeMatch = response.match(/<d:getcontenttype>([^<]*)<\/d:getcontenttype>/);
+      const contentTypeMatch = response.match(tag('getcontenttype'));
       const contentType = contentTypeMatch ? contentTypeMatch[1] : undefined;
       
-      const isDirectory = response.includes('<d:collection/>');
+      const isDirectory = new RegExp(`<${ns}collection\\s*/>`).test(response);
       
       // Calculate relative path
       const relativePath = href.startsWith(basePath) ? href.substring(basePath.length) : href;
