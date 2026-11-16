@@ -852,8 +852,9 @@ export class AttachmentManager {
     try {
       // Download from WebDAV
       const remotePath = attachment.webdavPath;
-      const filename = attachment.filename || `${attachmentKey}.zip`;
-      
+      // Never let a stored filename escape the storage directory.
+      const filename = path.basename(attachment.filename || `${attachmentKey}.zip`);
+
       // Use provided directory or default storage location
       const storageDir = localDir || this.getDefaultStorageDir();
       if (!fs.existsSync(storageDir)) {
@@ -862,8 +863,27 @@ export class AttachmentManager {
 
       const localPath = path.join(storageDir, filename);
 
-      // Download file
-      await this.webdavClient!.downloadFile(remotePath, localPath, onProgress);
+      if (remotePath.toLowerCase().endsWith('.zip') && !filename.toLowerCase().endsWith('.zip')) {
+        // Zotero Desktop stores every attachment as <key>.zip; extract the
+        // attachment file itself instead of saving the ZIP under its name.
+        const tempZip = path.join(storageDir, `.${attachmentKey}.download.zip`);
+        try {
+          await this.webdavClient!.downloadFile(remotePath, tempZip, onProgress);
+          const entries = new AdmZip(tempZip).getEntries().filter(e => !e.isDirectory);
+          const entry = entries.find(e => e.entryName === filename)
+            ?? entries.find(e => path.posix.basename(e.entryName) === filename)
+            ?? (entries.length === 1 ? entries[0] : undefined);
+          if (!entry) {
+            throw new Error(`${filename} not found in ${remotePath}`);
+          }
+          fs.writeFileSync(localPath, entry.getData());
+        } finally {
+          fs.rmSync(tempZip, { force: true });
+        }
+      } else {
+        // Download file
+        await this.webdavClient!.downloadFile(remotePath, localPath, onProgress);
+      }
 
       // Update database
       await this.db.update(attachments)
